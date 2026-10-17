@@ -1,5 +1,7 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.
+
 **Update 2026-10-17 (Codex, U3):** cloud canonical-map extension implemented in migration 0002 plus Swift client/controller wiring, pending SQL and Mac verification. One building UUID has one shared record; contributors add to it. Previous mock-tested contributor-row status below applies to the old endpoint. See `supabase/CANONICAL_MAPS.md`; scan extension UI remains unfinished.
 
 **Update 2026-10-17 (Codex, U3):** developer map validation tool added at `tools/validate_map.py` with `tools/test_validate_map.py` (9 Python tests passing on Windows). U3 owns it; standalone implementation complete, CI wiring pending (INF-2). No Swift module status changed. See `tools/README.md` for commands and validation limits.

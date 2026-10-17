@@ -6,6 +6,8 @@
 //           (tracking, mapping quality, triangles, box size) and a bottom panel to tag Door/Stairs/Room/...,
 //           grow/shrink the box, and Save once ARKit reports the area as mapped.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE. TODO(D): haptic confirmation on tag, nicer layout.
+// Extension: select a downloaded/local building and saved segment, relocalize, then
+//            explicitly attach near an existing corridor before tags/save unlock.
 //           TODO(A+C): OCR-suggested labels; export button (USDZ) once MeshExporter exists.
 //
 import ARKit
@@ -17,14 +19,45 @@ struct VolunteerView: View {
     @State private var controller: CaptureController?
     @State private var mapName = "Rice Hall, floor 1"
     @State private var recordLabels = CaptureController.launchFlag("scanClassification", default: true)
+    @State private var existingMapID: UUID?
+    @State private var initialSegment = ""
+
+    private var selectedMap: BuildingMap? {
+        app.maps.first { $0.id == existingMapID }
+    }
 
     var body: some View {
         Group {
             if let controller {
-                ScanningView(controller: controller, app: app)
+                ScanningView(controller: controller, app: app) {
+                    controller.stop()
+                    self.controller = nil
+                }
             } else {
                 Form {
-                    Section("Building") { TextField("Map name", text: $mapName).accessibilityIdentifier("scan.name") }
+                    Section("Building") {
+                        Picker("Scan", selection: $existingMapID) {
+                            Text("Create a new building").tag(nil as UUID?)
+                            ForEach(app.maps) { map in
+                                Text("Extend: \(map.name)").tag(Optional(map.id))
+                            }
+                        }
+                        .accessibilityIdentifier("scan.building")
+                        .onChange(of: existingMapID) { _, _ in
+                            initialSegment = selectedMap?.segmentIds.first ?? ""
+                        }
+                        if let selectedMap {
+                            Picker("Saved scan area", selection: $initialSegment) {
+                                ForEach(selectedMap.segmentIds, id: \.self) { segment in
+                                    Text(segment).tag(segment)
+                                }
+                            }
+                            Text("Start in this saved scan area. If this building came from another phone, download it and its scan files first.")
+                                .font(.footnote)
+                        } else {
+                            TextField("Map name", text: $mapName).accessibilityIdentifier("scan.name")
+                        }
+                    }
                     Section {
                         Toggle("Record surface labels (walls, floor, doors)", isOn: $recordLabels)
                             .accessibilityIdentifier("scan.labels")
@@ -34,7 +67,8 @@ struct VolunteerView: View {
                     Button("Start scanning") {
                         let c = CaptureController(store: app.store, deviceName: app.deviceName)
                         controller = c
-                        c.start(mapName: mapName, recordSurfaceLabels: recordLabels)
+                        c.start(mapName: mapName, recordSurfaceLabels: recordLabels,
+                                extending: selectedMap, initialSegment: initialSegment)
                     }
                     .accessibilityIdentifier("scan.start")
                 }
@@ -54,6 +88,7 @@ struct VolunteerView: View {
 private struct ScanningView: View {
     @ObservedObject var controller: CaptureController
     let app: AppState
+    let onFinish: () -> Void
     @State private var poiLabel = ""
 
     var body: some View {
@@ -86,6 +121,9 @@ private struct ScanningView: View {
             if let error = controller.errorMessage {
                 Text(error).foregroundStyle(.red)
             }
+            if let status = controller.extensionStatus {
+                Text(status).accessibilityIdentifier("scan.extension.status")
+            }
         }
         .font(.footnote.monospacedDigit())
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,6 +133,11 @@ private struct ScanningView: View {
 
     private var controls: some View {
         VStack(spacing: 8) {
+            if controller.needsExtensionAttachment {
+                Button("I'm in the saved corridor — begin extension") { controller.beginExtension() }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("scan.extension.begin")
+            }
             TextField("Label for next tag (e.g. Room 204)", text: $poiLabel)
                 .textFieldStyle(.roundedBorder)
 
@@ -107,6 +150,7 @@ private struct ScanningView: View {
                         }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("scan.tag.\(kind.rawValue)")
+                        .disabled(!controller.canRecord)
                     }
                 }
             }
@@ -128,7 +172,7 @@ private struct ScanningView: View {
             HStack {
                 Button("Save map") { controller.save() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(controller.mappingStatus != .mapped)
+                    .disabled(controller.mappingStatus != .mapped || !controller.canRecord)
                     .accessibilityIdentifier("scan.save")
                 if let saved = controller.savedMap {
                     Text("Saved \(saved.nodes.count) nodes")
@@ -138,6 +182,8 @@ private struct ScanningView: View {
                     Text("Save unlocks when mapping is complete").font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            Button(controller.savedMap == nil ? "Cancel scan" : "Done", action: onFinish)
+                .accessibilityIdentifier("scan.finish")
         }
     }
 

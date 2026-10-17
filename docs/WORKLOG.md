@@ -1,5 +1,16 @@
 # Work log
 
+## 2026-10-17 — Codex for U3 — Align extension rules and add existing-building scan flow
+Area: D (SQL/UI), A (capture and MapBuilder); U3 explicitly requested BOTH integration fixes, authorizing these A-owned edits.
+Files created: `supabase/migrations/0003_extension_connections.sql`, `supabase/tests/extension_connections.sql`, `Package/WaypointCore/Tests/WaypointCoreTests/MapExtensionTests.swift`.
+Files edited: `Model/MapBuilder.swift` (bounded first-breadcrumb attachment), `Waypoint/Capture/CaptureController.swift` (load selected ARWorldMap before recording, preserve building ID, unique segment ID, gate tagging/saving, merge saved snapshot), `Waypoint/UI/VolunteerView.swift` (existing building and scan segment pickers, explicit attachment, cancel/done), `supabase/CANONICAL_MAPS.md`, docs WORKLOG/MODULES/ROADMAP/TESTING.
+Behavior: new SQL wrapper rejects previously absent edges joining two pre-existing canonical nodes, preserving the local import protection; internal merge RPC loses API execution grants. Original already-applied 0002 remains unchanged. New segments attach only to corridor/junction nodes within 2 m and 0.75 m vertical offset; missing saved world maps cannot start an extension. No marker-only or new-origin fallback. New scans also get unique segment IDs. Save merges with the current local map and retains existing scan files; acquisition freezes during save and stops on success.
+Commands run: `git diff --check`; `python -B tools/validate_map.py` (sample PASS); `python -B -m unittest discover -s tools -p "test_*.py" -q` (9 PASS); `make test` and `make typecheck` (both fail to launch: make not installed on Windows).
+Verified: Python regression suite and whitespace check only. Added 3 Swift tests for attachment/identity/route reachability/local import, bounded failure/no mutation, and one-time attachment; SQL test checks shortcut rejection, legitimate new-node path, and repeat/reversed existing edges. New Swift/SQL tests NOT executed here; no Swift/Xcode/PostgreSQL available.
+NOT verified: iOS compilation, new Swift tests, new migration/tests, world-map relocalization and cross-phone scan alignment; UNVERIFIED ON DEVICE. Earlier user-reported 0002 test success does not cover 0003.
+Handoff: apply 0003 then run both SQL test files; Mac teammate runs make test/typecheck and the new extension device checklist in docs/TESTING.md. No JSON contract changes, dependencies, commit, push, or remote database writes by the agent.
+
+
 ## 2026-10-17 — Codex for U3 — Shared-map verification and branch handoff
 Area: D (cloud/backend).
 Files edited: `docs/WORKLOG.md` (this entry); committing the canonical-map files listed in the entry below at U3's request.

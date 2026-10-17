@@ -91,6 +91,8 @@ signs, Android, App Store release, user accounts with email/password (anonymous 
 
 # Revision 3 — Detailed plan from now to demo, by person (2026-10-17)
 
+**Update 2026-10-17 (Codex, explicitly requested by U3):** U1.10 extend-map flow is now implemented as a scaffold in VolunteerView/CaptureController/MapBuilder: select building+saved area, relocalize before recording, attach near an existing corridor, use a unique segment, preserve map identity. U3 also added migration 0003 to match local connection rules. Neither task is device-verified; Mac compilation, Swift tests, SQL execution and the new TESTING checklist remain required. Original assignments are retained.
+
 **Update 2026-10-17 (Codex, U3):** U3.4 standalone validator implemented: `python tools/validate_map.py` passes on the sample, and 9 Python regression tests pass on Windows. Usage: `tools/README.md`. CI integration remains pending under INF-2; Swift make checks need a Mac. Original task table retained below.
 
 Supersedes the per-letter assignments above (struck through there). Everything else in Revision 2 (the product loop, streams 0-7, milestones, cut lines) still holds.

@@ -15,8 +15,10 @@
 // Status:   SCAFFOLD - works end-to-end on paper; needs device testing. TODO(A):
 //             * hold-still hint when worldMappingStatus != .mapped
 //             * segment rollover (new segmentId every ~30 m) - Architecture.md 4.2
-//             * "extend existing map": load map + relocalize first, then keep recording
-//               (MapBuilder must then link its first breadcrumb to the nearest existing node)
+//           Extension: loads a chosen saved world map, waits for normal tracking, then asks
+//           for explicit attachment near an existing corridor. Initial world map restores
+//           the original MAP frame; never fall back to a fresh session origin for extensions.
+//           UNVERIFIED ON DEVICE: alignment, linking, and cross-phone extension.
 // Test on:  physical Pro iPhone only.
 //
 import ARKit
@@ -31,6 +33,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var mappingStatus: ARFrame.WorldMappingStatus = .notAvailable
     @Published private(set) var trackingSummary = "Not started"
     @Published private(set) var savedMap: BuildingMap?
+    @Published private(set) var extensionStatus: String?
+    @Published private(set) var canRecord = false
     @Published var errorMessage: String?
 
     // Live-scan stats and bounding box (updated ~1 Hz)
@@ -63,8 +67,13 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private let store: MapStore
     private let deviceName: String
     private var builder: MapBuilder?
-    private let segmentId = "seg1"
+    private var segmentId = "seg1"
+    private var isExtension = false
+    private var extensionAttached = false
+    private var isSaving = false
     private var latestCameraTransform: simd_float4x4?
+
+    var needsExtensionAttachment: Bool { isExtension && !extensionAttached && isRunning }
 
     init(store: MapStore, deviceName: String) {
         self.store = store
@@ -78,13 +87,40 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// - Parameter recordSurfaceLabels: record ARKit's per-face surface classification (wall, floor, ceiling, door, window, table, seat).
     ///   It cannot be added to a scan afterwards, so it is ON by default for any scan you keep; turn it off only for quick tests or lag A/B runs.
     ///   `nil` = read the launch flag `-scanClassification YES/NO` (default YES).
-    func start(mapName: String, recordSurfaceLabels: Bool? = nil) {
+    func start(mapName: String, recordSurfaceLabels: Bool? = nil,
+               extending map: BuildingMap? = nil, initialSegment: String? = nil) {
         guard ARWorldTrackingConfiguration.isSupported else {
             errorMessage = "ARKit world tracking is not supported on this device."
             return
         }
-        builder = MapBuilder(map: BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
-        nodeCount = 0
+        let config = ARWorldTrackingConfiguration()
+        // A failed/missing world map must never silently create an unaligned extension.
+        if let map {
+            do {
+                try MapBundle(map: map).validate()
+                guard let initialSegment, map.segmentIds.contains(initialSegment),
+                      let bytes = try store.loadWorldMap(mapId: map.id, segmentId: initialSegment),
+                      let worldMap = try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: bytes) else {
+                    errorMessage = "This scan segment has no saved world map. Download its scan files or choose another segment."
+                    return
+                }
+                config.initialWorldMap = worldMap
+            } catch {
+                errorMessage = "Cannot extend this map: \(error.localizedDescription)"
+                return
+            }
+        }
+        isExtension = map != nil
+        isSaving = false
+        extensionAttached = false
+        segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
+        nodeCount = map?.nodes.count ?? 0
+        canRecord = false
+        latestCameraTransform = nil
+        errorMessage = nil
+        mappingStatus = .notAvailable
+        extensionStatus = isExtension ? "Find the selected scanned area. Move slowly until tracking recovers." : nil
         savedMap = nil
         scanBox = nil
         fittedBox = nil
@@ -94,7 +130,6 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         meshAnchorCount = 0
         lastBoxUpdate = 0
 
-        let config = ARWorldTrackingConfiguration()
         // LiDAR mesh improves tracking/mapping quality; only available on Pro iPhones.
         // Surface classification (wall/floor/door...) costs extra on-device compute, but a scan recorded WITHOUT it can never get those labels
         // later (decision D-020, updated), so it is ON by default and switchable on the start screen / with `-scanClassification NO`.
@@ -115,11 +150,34 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     func stop() {
         session.pause()
         isRunning = false
+        canRecord = false
+        latestCameraTransform = nil
+    }
+
+    /// Volunteer confirms they are in the mapped corridor after ARKit has relocalized.
+    /// Starting a new segment never changes the world origin or any existing node.
+    func beginExtension() {
+        guard isExtension, !extensionAttached, isRunning, !isSaving,
+              let frame = session.currentFrame, case .normal = frame.camera.trackingState,
+              frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending,
+              let builder else {
+            extensionStatus = "Still finding the saved area. Look around slowly; recording is paused."
+            return
+        }
+        guard builder.attachExtension(at: Geometry.translation(of: frame.camera.transform)) else {
+            extensionStatus = "Move within 2 meters of a previously scanned corridor point on the same floor, then try again."
+            return
+        }
+        extensionAttached = true
+        canRecord = true
+        nodeCount = builder.map.nodes.count
+        extensionStatus = "Extending this building. Walk into the new area and tag rooms."
+        Log.capture.info("extension attached: map=\(builder.map.id) segment=\(self.segmentId)")
     }
 
     /// Drops a tagged node ~1 m in front of the camera (on the floor plane of the camera height).
     func tagPOI(kind: NodeKind, label: String?) {
-        guard let builder, let t = latestCameraTransform else { return }
+        guard canRecord, let builder, let t = latestCameraTransform else { return }
         let pos = Geometry.translation(of: t)
         var fwd = Geometry.cameraForward(of: t)
         fwd.y = 0
@@ -137,22 +195,33 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     /// Saves map JSON + ARWorldMap. Disabled in the UI until `mappingStatus == .mapped`.
     func save() {
-        guard let builder else { return }
+        guard canRecord, mappingStatus == .mapped, let builder else { return }
         let map = builder.map
+        let savedSegment = segmentId
+        // Freeze acquisition while obtaining the world map so JSON and scan bytes describe
+        // the same capture. Tracking telemetry continues until the save completes.
+        canRecord = false
+        isSaving = true
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
-            guard let worldMap else {
-                self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
-                return
-            }
-            do {
-                let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
-                try self.store.saveWorldMap(data, mapId: map.id, segmentId: self.segmentId)
-                try self.store.save(map)
-                self.savedMap = map
-                Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
-            } catch {
-                self.errorMessage = "Save failed: \(error.localizedDescription)"
+            DispatchQueue.main.async {
+                defer { self.isSaving = false }
+                guard self.isRunning else { return }
+                guard let worldMap else {
+                    self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
+                    return
+                }
+                do {
+                    let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    // Merge against the latest local copy so a download arriving during capture
+                    // cannot be erased by saving this older starting snapshot.
+                    let saved = try self.store.importBundle(MapBundle(map: map, worldMaps: [savedSegment: data]))
+                    self.savedMap = saved
+                    self.stop()
+                    Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
+                } catch {
+                    self.errorMessage = "Save failed: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -181,7 +250,14 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
 
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
-        guard case .normal = frame.camera.trackingState, let builder else { return }
+        guard isRunning, savedMap == nil, !isSaving else { return }
+        guard case .normal = frame.camera.trackingState else {
+            if canRecord { canRecord = false }
+            return
+        }
+        let ready = !isExtension || extensionAttached
+        if canRecord != ready { canRecord = ready }
+        guard canRecord, let builder else { return }
         if builder.observe(position: Geometry.translation(of: frame.camera.transform)) != nil {
             nodeCount = builder.map.nodes.count
         }
@@ -213,7 +289,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didFailWithError error: Error) {
         errorMessage = "AR session failed: \(error.localizedDescription)"
-        isRunning = false
+        stop()
     }
 
     static func describe(_ state: ARCamera.TrackingState) -> String {

@@ -1,5 +1,33 @@
 # Testing — what is proven, and the device test plan
 
+## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
+
+First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
+In Supabase, apply `0003_extension_connections.sql` after 0002, then run both
+`supabase/tests/extension_connections.sql` and `supabase/tests/canonical_maps.sql`.
+Expected: success, with PASS notices, and no persistent fixture data. These new
+checks are NOT yet verified in this Windows session.
+
+On a LiDAR phone, with an escort for navigation checks:
+
+1. Scan and save a new building; note its ID, nodes and segment. Publish it.
+2. Select that building under Scan, choose its saved scan area, and start there.
+   Before relocalization/explicit attachment, node count must stay unchanged and
+   tagging/save must be disabled. Missing world-map bytes must show an error.
+3. After normal tracking returns, stand in a known corridor and tap begin extension.
+   More than 2 m from an old corridor/junction (or on a different floor) must reject
+   attachment without changing the graph. At a known corridor, one new breadcrumb
+   connects to the closest corridor/junction; existing rooms/edges remain intact.
+4. Walk into new space, tag a room, save. Same building ID/name, new unique segment,
+   old scan files unchanged. Save stops recording. Cancel before save must leave
+   the stored map unchanged. A tracking interruption must pause tagging/recording.
+5. Publish the extension. On a second phone, refresh and download/import: one shared
+   building entry, original and new rooms present, scan files from both contributors
+   download. Route to the new room must connect through the old corridor. Re-open
+   the building and relocalize from each saved scan area.
+
+All AR alignment, tagging, save, audio and cross-phone behavior: UNVERIFIED ON DEVICE.
+
 Three levels. Always run level 1 before handing off; levels 2-3 are for people with a phone.
 
 ## Level 1 — automated, no phone (`make test`, `make typecheck`, `make check`)
