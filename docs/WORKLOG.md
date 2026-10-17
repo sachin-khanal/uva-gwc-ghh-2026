@@ -93,6 +93,38 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Delete recordings, from both interfaces   [tags: BUILD]
+Area: D (app shell) + U3 (UI). Branch `delete-recordings` off `navigation-overhaul`.
+Request: "add the ability to delete recordings."
+
+What already existed: `MapStore.delete(id:)` (core) and a Delete item in the NEW interface's scan library, hidden in a
+long-press context menu. What was missing: any delete at all in the CLASSIC screens, a visible control for sighted
+users, and cleanup of the per-map state that outlives a deleted map.
+Files edited:
+- `Waypoint/App/AppState.swift`: +`deleteMap(_:)` - the single delete path. Removes the map and its ARWorldMaps, then
+  clears `ui.recents.<mapId>` and `ui.pendingMapId` when it points at the deleted map. Without this, stale keys build up
+  and a map re-imported under the same id inherits someone else's recent destinations. Returns false on failure and
+  still reloads, so the list cannot show a map that is no longer on disk.
+- `Waypoint/UI/Scanner/ScanLibraryView.swift`: visible trash button (44x44 tap target) beside each card as well as the
+  context menu; delete routed through `AppState.deleteMap`; VoiceOver announcement on success AND failure (it only
+  announced success before, so a failed delete was silent).
+- `Waypoint/UI/NavigatorView.swift` (classic): swipe-to-delete on the Map rows, the same confirmation wording, a
+  VoiceOver rotor action (swiping is invisible to VoiceOver), and the selection falls back to another map when the
+  selected one is deleted, so the screen never points at a map that no longer exists.
+Tests added: `MapDeletionTests` (4) - deleting removes the ARWorldMap binaries too (they are the big files; leaving
+them would quietly fill the phone) and nothing with the map id survives on disk; deleting one map leaves the others
+and their world maps alone; deleting an unknown or already-deleted map is a harmless no-op (double tap, or a map
+removed on another screen); the same map id can be saved again afterwards.
+Deliberately NOT changed: delete stays LOCAL. Copies on other phones or in the cloud are untouched, which is what the
+confirmation text promises.
+Verified: `make test` -> **175 tests, 0 failures** (was 171); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE** - neither the swipe action nor the trash button has been tapped on a phone.
+Open: the sample map is re-seeded on next launch only when the store is EMPTY, so deleting every map brings the sample
+back. That is existing behaviour (`seedSampleMapIfNeeded`), not a regression, but it will look like a failed delete.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul`; decisions renumbered   [tags: DOCS, BUILD]
 Area: shared. Branch `navigation-overhaul` (all nine guidance/scan commits from this session), merged with the six
 commits that landed on `origin/main` in the meantime (docs enforcement + hook, map validator, canonical shared maps,

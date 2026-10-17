@@ -170,3 +170,68 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(again.version, map.version + 1)
     }
 }
+
+// MARK: - Deleting a recording (added 2026-10-17)
+
+final class MapDeletionTests: XCTestCase {
+
+    private func tempStore() -> (MapStore, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("wp-del-\(UUID().uuidString)")
+        return (MapStore(rootURL: root), root)
+    }
+
+    /// Deleting must take the ARWorldMap binaries with it, not just map.json. They are by far the
+    /// biggest files, so leaving them behind would quietly fill the phone.
+    func testDeleteRemovesTheWorldMapsToo() throws {
+        let (store, root) = tempStore()
+        var map = BuildingMap(name: "Rice Hall")
+        map.nodes = [MapNode(kind: .corridor, position: .zero)]
+        try store.save(map)
+        try store.saveWorldMap(Data(repeating: 7, count: 2048), mapId: map.id, segmentId: "seg1")
+        try store.saveWorldMap(Data(repeating: 9, count: 2048), mapId: map.id, segmentId: "seg2")
+        XCTAssertNotNil(try store.loadWorldMap(mapId: map.id, segmentId: "seg1"))
+
+        try store.delete(id: map.id)
+
+        XCTAssertTrue(try store.listMaps().isEmpty)
+        XCTAssertNil(try store.loadWorldMap(mapId: map.id, segmentId: "seg1"))
+        XCTAssertNil(try store.loadWorldMap(mapId: map.id, segmentId: "seg2"))
+        let leftovers = (FileManager.default.enumerator(atPath: root.path)?.allObjects as? [String]) ?? []
+        XCTAssertFalse(leftovers.contains { $0.contains(map.id.uuidString) },
+                       "nothing belonging to the map may survive: \(leftovers)")
+    }
+
+    func testDeletingOneMapLeavesTheOthersAlone() throws {
+        let (store, _) = tempStore()
+        let keep = BuildingMap(name: "Keep", nodes: [MapNode(kind: .corridor, position: .zero)])
+        let drop = BuildingMap(name: "Drop", nodes: [MapNode(kind: .corridor, position: .zero)])
+        try store.save(keep)
+        try store.save(drop)
+        try store.saveWorldMap(Data([1]), mapId: keep.id, segmentId: "seg1")
+
+        try store.delete(id: drop.id)
+
+        XCTAssertEqual(try store.listMaps().map(\.name), ["Keep"])
+        XCTAssertNotNil(try store.loadWorldMap(mapId: keep.id, segmentId: "seg1"))
+    }
+
+    /// Deleting something that is not there is not an error: two taps on Delete, or a map already
+    /// removed on another screen, must not throw at the user.
+    func testDeletingAnUnknownMapIsHarmless() throws {
+        let (store, _) = tempStore()
+        XCTAssertNoThrow(try store.delete(id: UUID()))
+        let map = BuildingMap(name: "x", nodes: [MapNode(kind: .corridor, position: .zero)])
+        try store.save(map)
+        XCTAssertNoThrow(try store.delete(id: map.id))
+        XCTAssertNoThrow(try store.delete(id: map.id), "second delete is a no-op")
+    }
+
+    func testADeletedMapCanBeSavedAgain() throws {
+        let (store, _) = tempStore()
+        let map = BuildingMap(name: "Rice Hall", nodes: [MapNode(kind: .corridor, position: .zero)])
+        try store.save(map)
+        try store.delete(id: map.id)
+        XCTAssertNoThrow(try store.save(map), "re-importing the same map id must still work")
+        XCTAssertEqual(try store.listMaps().count, 1)
+    }
+}

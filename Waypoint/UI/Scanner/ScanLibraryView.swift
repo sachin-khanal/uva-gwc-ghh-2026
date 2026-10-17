@@ -36,8 +36,19 @@ struct ScanLibraryView: View {
                         emptyState
                     } else {
                         ForEach(app.maps) { map in
-                            CardRow(title: map.name, detail: detail(for: map), systemImage: "building.2",
-                                    badges: badges(for: map), hint: "Opens the map review.") { onOpen(map) }
+                            HStack(spacing: Theme.Space.s) {
+                                CardRow(title: map.name, detail: detail(for: map), systemImage: "building.2",
+                                        badges: badges(for: map), hint: "Opens the map review.") { onOpen(map) }
+                                // Visible control as well as the context menu: a long press is not
+                                // discoverable, and this screen is used by sighted volunteers.
+                                Button(role: .destructive) { pendingDelete = map } label: {
+                                    Image(systemName: "trash")
+                                        .font(.title3)
+                                        .frame(width: 44, height: 44) // full-size tap target
+                                }
+                                .accessibilityLabel("Delete \(map.name)")
+                                .accessibilityHint("Asks for confirmation first.")
+                            }
                                 .contextMenu {
                                     Button { showSync = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
                                     Button(role: .destructive) { pendingDelete = map } label: { Label("Delete", systemImage: "trash") }
@@ -133,12 +144,11 @@ struct ScanLibraryView: View {
     private func deletePending() {
         guard let map = pendingDelete else { return }
         pendingDelete = nil
-        do {
-            try app.store.delete(id: map.id)
+        // AppState owns deletion so the per-map UI state (recents, pending hand-off) goes with it.
+        if app.deleteMap(map) {
             Announcer.voiceOverOnly("\(map.name) deleted")
-        } catch {
-            Log.app.error("delete failed: \(error.localizedDescription)")
+        } else {
+            Announcer.voiceOverOnly("Could not delete \(map.name)")
         }
-        app.reloadMaps()
     }
 }
