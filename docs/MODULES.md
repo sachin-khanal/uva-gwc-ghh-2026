@@ -55,7 +55,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Cloud UI** | D | `Waypoint/Cloud/CloudController.swift`, `UI/SyncView.swift` (Cloud section) | SCAFFOLD | – (needs a Supabase project) |
 | **Relocalization** | A | `Waypoint/Relocalization/Relocalizer.swift` | SCAFFOLD | – (device) |
 | **Routing** | B | `Routing/WaypointGraph.swift`, `Router.swift`, `RouteFollower.swift`, `GuidanceInstruction.swift` | DONE (logic) | `RoutingTests` |
-| **Route memory + live replanning** | B | `Routing/RoutePlanner.swift` (+ `avoiding:` in `Router.swift`) | logic DONE · ~~not wired into NavigationController (TODO B)~~ **Update 2026-10-17 (Claude):** wired into NavigationController (real mode: off-route + blockage re-route; signs log-only), UNVERIFIED ON DEVICE | `RoutePlannerTests` (15 incl. persistence) |
+| **Route memory + live replanning** | B | `Routing/RoutePlanner.swift` (+ `avoiding:` in `Router.swift`) | logic DONE · ~~not wired into NavigationController (TODO B)~~ **Update 2026-10-17 (Claude):** wired into NavigationController (real mode: off-route + blockage re-route; signs log-only), UNVERIFIED ON DEVICE | ~~`RoutePlannerTests` (10)~~ **Update 2026-10-17 (Claude):** `RoutePlannerTests` (15 incl. persistence) |
 | **Map format versioning** | shared contract | `Model/BuildingMap.swift` (`MapSchema`), `docs/MAP_FORMAT.md`, `docs/map-format/*` | DONE (format 2 current, 1 readable) | `MapSchemaTests` (8), `test_validate_map.py` |
 | **Feedback decisions** | B | `Guidance/FeedbackPlanner.swift` | DONE (logic) | `FeedbackAndVisionTests` |
 | **Spatial audio / haptics / speech** | B | `Waypoint/Guidance/*.swift` | SCAFFOLD | – (device, needs headphones) |
