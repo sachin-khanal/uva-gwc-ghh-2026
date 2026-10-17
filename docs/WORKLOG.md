@@ -19,6 +19,22 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 16:20 — Claude (agent, for Sachin) — U1.1 signing: certificate found, Team ID set, app built + installed on iPhone 16 Pro Max   [tags: BUILD]
+Area: U1 (setup)
+What happened: Sachin created the Apple Development certificate in Xcode (Personal Team, certificate under khanalsachin@icloud.com). Read the real team id from the certificate OU
+  (5S33HP2CPC) and wrote `DEVELOPMENT_TEAM` and `WAYPOINT_DEV_SUFFIX = sachin` into the git-ignored `Config/Local.xcconfig`.
+Doc bug found and fixed: our instructions said the team id is the "(XXXXXXXXXX)" in `security find-identity`; that value is a certificate/person id (here YN84BMTT4S) and is NOT the team id.
+  Added `scripts/team-id.sh` + `make team-id`; corrected `Config/Local.xcconfig.example` (comment) and `docs/SETUP.md` (old text struck through, labelled Update).
+Verified (real device, not simulated):
+- `make doctor` all PASS, phone `connected`, Developer Mode Enabled (queried via devicectl).
+- `DEVICE=00008140-000914590E01801C make build` -> BUILD SUCCEEDED, signed with "Apple Development: khanalsachin@icloud.com", profile "iOS Team Provisioning Profile: io.github.sachin-khanal.waypoint.sachin".
+- `make install` -> "App installed", bundleID io.github.sachin-khanal.waypoint.sachin.
+NOT yet verified: launching. `make launch` was denied by iOS (error: "profile has not been explicitly trusted by the user"). Expected for free profiles: the developer must be trusted once on the phone
+  (Settings > General > VPN & Device Management > Apple Development: khanalsachin@icloud.com > Trust). After that U1.1 is done when the app opens and camera + local network prompts are accepted.
+Note for U2-U4: use `make team-id` for your own team id; each person's Apple ID gets its own id.
+
+---
+
 ## 2026-10-17 15:40 — Claude (agent, for Sachin) — Bundle id prefix changed from edu.virginia.* to io.github.sachin-khanal.waypoint   [tags: BUILD, CONTRACT CHANGE]
 Area: shared (U1 asked while doing U1.1 signing)
 Why: I had used a UVA domain for bundle ids without asking; the team does not own or represent that domain. See D-019.

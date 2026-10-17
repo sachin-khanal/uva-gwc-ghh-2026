@@ -42,7 +42,7 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 # Lets xcodebuild create/refresh the free provisioning profile and register the phone.
 SIGN_FLAGS := -allowProvisioningUpdates -allowProvisioningDeviceRegistration
 
-.PHONY: help setup doctor gen test typecheck check build install launch run logs devices open clean clean-all
+.PHONY: help setup doctor team-id gen test typecheck check build install launch run logs devices open clean clean-all
 
 help: ## Show this help
 	@echo "Waypoint make targets:"; echo
@@ -58,6 +58,9 @@ setup: ## One-time: install XcodeGen, create Config/Local.xcconfig, run doctor
 
 doctor: ## Check the toolchain, signing config and connected devices
 	@./scripts/doctor.sh
+
+team-id: ## Print your Apple team id from your signing certificate (for Config/Local.xcconfig)
+	@./scripts/team-id.sh
 
 gen: ## Generate Waypoint.xcodeproj from project.yml (run after editing project.yml or adding files)
 	@command -v xcodegen >/dev/null || { echo "xcodegen missing: run 'make setup'"; exit 1; }

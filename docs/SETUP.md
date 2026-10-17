@@ -38,8 +38,12 @@ make typecheck    # should print "typecheck OK"
 
 1. Open **Xcode** → **Settings** → **Accounts** → **+** → add your Apple ID. A "Personal Team"
    appears.
-2. Find your **Team ID** (10 characters): run `security find-identity -v -p codesigning`
-   after step 3 below, or Xcode → Settings → Accounts → select account → Team. 
+2. ~~Find your **Team ID** (10 characters): run `security find-identity -v -p codesigning`
+   after step 3 below, or Xcode → Settings → Accounts → select account → Team.~~
+   **Update 2026-10-17 (Claude, found while setting up U1):** that command's `(XXXXXXXXXX)` is NOT the team id (it is a certificate/person id). Run **`make team-id`** after
+   Xcode has created your certificate; it prints the real team id (from the certificate's OU field) as a ready-to-paste `DEVELOPMENT_TEAM = ...` line.
+   Creating the certificate: Xcode → Settings → Accounts → your Apple ID → Manage Certificates → + → Apple Development, or open the project (`make open`), select the
+   Waypoint target → Signing & Capabilities → tick *Automatically manage signing* → choose your Personal Team. 
 3. Edit `Config/Local.xcconfig` (created by `make setup`):
    ```
    DEVELOPMENT_TEAM = ABCDE12345        # your Team ID
