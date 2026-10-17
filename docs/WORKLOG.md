@@ -1,5 +1,14 @@
 # Work log
 
+## 2026-10-17 — Codex for U3 — Main integration authorized after reported checks
+Area: shared integration; user explicitly authorized merging U3 into main.
+Files edited: `docs/WORKLOG.md` (this verification/handoff entry only).
+User-reported verification: make test, make typecheck, and make check all passed on the Mac; migration 0003 and both SQL test scripts also reported success in Supabase. These update earlier pending-check notes; agent did not directly run the Mac or dashboard checks.
+Commands: git fetch origin; ancestry and diff whitespace checks; git switch main; git merge --ff-only U3 (0fc02d5, no conflicts); documentation commit and push to origin/main.
+NOT verified: real-device scan extension and cross-phone alignment remain UNVERIFIED ON DEVICE. No claim that compile/SQL checks prove AR behavior.
+Handoff: teammates pull main; perform the extension checklist in docs/TESTING.md on LiDAR phones before relying on it for navigation.
+
+
 ## 2026-10-17 — Codex for U3 — Align extension rules and add existing-building scan flow
 Area: D (SQL/UI), A (capture and MapBuilder); U3 explicitly requested BOTH integration fixes, authorizing these A-owned edits.
 Files created: `supabase/migrations/0003_extension_connections.sql`, `supabase/tests/extension_connections.sql`, `Package/WaypointCore/Tests/WaypointCoreTests/MapExtensionTests.swift`.
