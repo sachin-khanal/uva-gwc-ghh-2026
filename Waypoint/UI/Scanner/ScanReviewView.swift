@@ -54,6 +54,7 @@ struct ScanReviewView: View {
                     .accessibilityHidden(true)
 
                 stats
+                roomSizes
 
                 if warnings.isEmpty {
                     Banner(text: "Looks good: every place is labelled and reachable.", kind: .info)
@@ -109,6 +110,39 @@ struct ScanReviewView: View {
             stat("\(map.nodes.count)", "points")
             stat("\(map.destinations.count)", "places")
             stat("\(map.edges.count)", "paths")
+            stat("\(roomsWithExtents.count)", "rooms sized")
+        }
+    }
+
+    /// Rooms whose floor area the scan worked out (RoomExtent). Drawn on the plan above as dashed
+    /// rectangles; listed here with their measurements so a bad extraction is obvious on review
+    /// rather than during a walk.
+    private var roomsWithExtents: [MapNode] {
+        map.nodes.filter { $0.kind == .room && $0.extent != nil }
+    }
+
+    @ViewBuilder
+    private var roomSizes: some View {
+        if !roomsWithExtents.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Room boundaries").font(.headline)
+                ForEach(roomsWithExtents) { room in
+                    if let extent = room.extent {
+                        HStack {
+                            Text(room.label ?? "Room").font(.subheadline)
+                            Spacer()
+                            Text(String(format: "%.1f x %.1f m · %.0f m2",
+                                        extent.halfExtents.x * 2, extent.halfExtents.y * 2,
+                                        extent.areaSquareMeters))
+                                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(room.label ?? "Room"), " + String(format: "%.0f square metres", extent.areaSquareMeters))
+                    }
+                }
+                Text("Rooms without a measured boundary fall back to a fixed arrival distance.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

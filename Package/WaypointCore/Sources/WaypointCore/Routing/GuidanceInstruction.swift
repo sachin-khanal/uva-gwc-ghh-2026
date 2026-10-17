@@ -16,12 +16,18 @@ public struct Maneuver: Equatable, Sendable {
     public var distanceMeters: Float
     public var nodeId: UUID
     public var label: String?
+    /// How sharp the turn is, signed radians (positive = right). nil for stairs/arrive.
+    /// Comes from the ROUTE's own geometry, so a corner can be announced with its real angle even
+    /// when the user is already steering smoothly into it.
+    public var angleRadians: Float?
 
-    public init(kind: Kind, distanceMeters: Float, nodeId: UUID, label: String? = nil) {
+    public init(kind: Kind, distanceMeters: Float, nodeId: UUID, label: String? = nil,
+                angleRadians: Float? = nil) {
         self.kind = kind
         self.distanceMeters = distanceMeters
         self.nodeId = nodeId
         self.label = label
+        self.angleRadians = angleRadians
     }
 }
 

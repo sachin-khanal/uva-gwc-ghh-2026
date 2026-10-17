@@ -57,6 +57,18 @@ public struct FeedbackPlanner {
     public static let warningThresholds: [Float] = [10, 5, 2]
     /// While a STOP obstacle persists, repeat the warning this often (needs `time` from the caller).
     public static let stopRepeatSeconds: TimeInterval = 3
+    /// How close to a corner we are when the turn itself is announced ("Turn right 60 degrees.").
+    /// The turn comes from the ROUTE's geometry, not the live bearing: with a 3 m steering lookahead
+    /// the user is already easing into the corner, so the bearing never swings far enough to trip the
+    /// heading cue, and a real turn would go unannounced (caught by the end-to-end walk test).
+    /// Matches the countdown's own "too close for a warning" cut-off, so the sequence is
+    /// 10 m / 5 m / 2 m warnings, then the turn itself at the corner.
+    public static let cornerDistanceMeters: Float = 1.2
+    /// While a real corner is this close, the live heading cue says nothing about turning. Easing into
+    /// a corner swings the bearing past the heading cue's threshold BEFORE we reach the corner, so the
+    /// same turn was announced twice: once early with the bearing's angle, once at the corner with the
+    /// route's. The corner is the authoritative one; this keeps the other quiet until then.
+    public static let cornerSuppressionMeters: Float = 4.0
     /// Minimum gap between two DIRECTION cues. Without it a few quick heading changes fire one after
     /// another and the user is talked at continuously instead of being given one thing to do
     /// (device report 2026-10-17). Safety messages (obstacles, lost tracking) are never delayed.
@@ -72,6 +84,11 @@ public struct FeedbackPlanner {
     private var briefed = false
     private var announcedWarnings: Set<String> = []
     private var announcedLandmarks: Set<UUID> = []
+    private var announcedCorners: Set<UUID> = []
+    /// A turn we have just announced at the corner. While the user physically turns, the live bearing
+    /// swings and the heading cue would announce the SAME turn again with a different angle, so we
+    /// stay quiet about that direction until they are going straight again.
+    private var turnInProgress: GuidanceInstruction.Kind?
 
     public init() {}
 
@@ -87,6 +104,8 @@ public struct FeedbackPlanner {
         briefed = false
         announcedWarnings = []
         announcedLandmarks = []
+        announcedCorners = []
+        turnInProgress = nil
     }
 
     public mutating func plan(
@@ -209,7 +228,14 @@ public struct FeedbackPlanner {
         // 4b. Announce when the KIND of instruction changes (straight -> turn right -> straight ...), NOT every time the target waypoint advances:
         // real scans have a node every 1.5 m, and keying on the target made "Continue straight." repeat at every one (found by the on-phone
         // end-to-end test, 2026-10-17). Hazards are announced once per hazardous target, below.
-        let key = i.kind.rawValue
+        // A corner from the route's own geometry outranks the live heading cue.
+        let corner: Maneuver? = {
+            guard let u = i.upcoming, u.kind == .turnLeft || u.kind == .turnRight,
+                  u.distanceMeters <= Self.cornerDistanceMeters,
+                  !announcedCorners.contains(u.nodeId) else { return nil }
+            return u
+        }()
+        let key = corner.map { "corner-\($0.nodeId)" } ?? i.kind.rawValue
         // One direction at a time: hold a new cue back until the cooldown has passed. `lastKey` is
         // deliberately NOT updated while holding, so the cue is announced on a later tick instead of
         // being lost.
@@ -217,9 +243,37 @@ public struct FeedbackPlanner {
             guard let now = time, let last = lastDirectionSpeech else { return true }
             return now - last >= Self.directionCooldownSeconds
         }()
-        if key != lastKey, cooledDown {
+        // A real corner is coming and has not been announced yet: let IT do the talking.
+        let waitingForCorner: Bool = {
+            guard corner == nil, i.kind == .turnLeft || i.kind == .turnRight,
+                  let u = i.upcoming, u.kind == .turnLeft || u.kind == .turnRight,
+                  !announcedCorners.contains(u.nodeId),
+                  u.distanceMeters <= Self.cornerSuppressionMeters else { return false }
+            // Only when it is the SAME way we are drifting; a genuine wrong-way cue still gets through.
+            return (u.kind == .turnRight) == (i.kind == .turnRight)
+        }()
+        // Already turning the way we just told them to: say nothing more about it.
+        let repeatsCornerJustAnnounced = (corner == nil && i.kind == turnInProgress)
+        if i.kind == .continueStraight { turnInProgress = nil }
+
+        if key != lastKey, cooledDown, !repeatsCornerJustAnnounced, !waitingForCorner {
             lastKey = key
             lastDirectionSpeech = time ?? lastDirectionSpeech
+            if let corner {
+                announcedCorners.insert(corner.nodeId)
+                // The countdown ("in 5 metres, turn right") has had its say; do not repeat it now.
+                for t in Self.warningThresholds { announcedWarnings.insert("\(corner.nodeId)-\(t)") }
+                let kind: GuidanceInstruction.Kind = corner.kind == .turnRight ? .turnRight : .turnLeft
+                // Pretend the heading cue already said this. As the user physically turns, the live
+                // bearing swings and the heading cue would otherwise announce the SAME turn a second
+                // time, a moment later and with a different angle.
+                lastKey = kind.rawValue
+                turnInProgress = kind
+                actions.append(.haptic(kind == .turnRight ? .turnRight : .turnLeft))
+                if let text = TurnSpeech.text(kind: kind, bearingRadians: corner.angleRadians ?? 0) {
+                    actions.append(.speak(text, priority: .high))
+                }
+            } else {
             switch i.kind {
             case .arrived:
                 break // unreachable: handled in step 1b, before obstacles can pre-empt it
@@ -232,6 +286,7 @@ public struct FeedbackPlanner {
             }
             if let text = TurnSpeech.text(kind: i.kind, bearingRadians: i.bearingRadians) {
                 actions.append(.speak(text, priority: i.kind == .continueStraight ? .normal : .high))
+            }
             }
         }
         if let hazard = i.hazard {

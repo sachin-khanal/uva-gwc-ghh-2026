@@ -588,3 +588,87 @@ final class RouteSimplifierTests: XCTestCase {
         XCTAssertEqual(RouteSimplifier.perpendicularDistance(SIMD3(0, 0, -14), from: a, to: b), 4, accuracy: 1e-4)
     }
 }
+
+// MARK: - Progress along the route (device report: "turn around... turn around...", 2026-10-17)
+
+final class FollowerProgressTests: XCTestCase {
+
+    /// An L-shaped route: 10 m along -z, then 6 m along +x.
+    private func lRoute() -> (RouteFollower, [MapNode]) {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let c = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10))
+        let map = BuildingMap(name: "L", nodes: [a, b, c], edges: [
+            MapEdge(from: a.id, to: b.id, distance: 10),
+            MapEdge(from: b.id, to: c.id, distance: 6),
+        ])
+        return (RouteFollower(route: [a, b, c], graph: WaypointGraph(map: map)), [a, b, c])
+    }
+
+    /// The reported bug. Walking the corridor but 1.5 m off to one side never brought the user within
+    /// the 1 m waypoint radius, so the target stayed BEHIND them and the app kept saying "turn around".
+    func testWalkingPastAWaypointOffToOneSideStillMakesProgress() {
+        let (follower, nodes) = lRoute()
+        // Walk down the corridor, consistently 1.5 m to the side of the line of waypoints.
+        for z in stride(from: Float(0), through: -9, by: -1) {
+            _ = follower.update(position: SIMD3(1.5, 0, z), forward: SIMD3(0, 0, -1))
+        }
+        XCTAssertGreaterThan(follower.targetIndex, 0, "progress was made despite never touching a waypoint")
+        let instruction = follower.update(position: SIMD3(1.5, 0, -9), forward: SIMD3(0, 0, -1))
+        XCTAssertNotEqual(instruction.kind, .turnAround, "the target must not be behind the user")
+        XCTAssertEqual(instruction.targetNodeId, nodes[2].id, "heading for the room, not back up the corridor")
+    }
+
+    func testProgressNeverGoesBackwards() {
+        let (follower, _) = lRoute()
+        for z in stride(from: Float(0), through: -10, by: -1) {
+            _ = follower.update(position: SIMD3(0, 0, z), forward: SIMD3(0, 0, -1))
+        }
+        let reached = follower.targetIndex
+        // Step backwards up the corridor: the follower must not rewind and re-announce old legs.
+        _ = follower.update(position: SIMD3(0, 0, -6), forward: SIMD3(0, 0, -1))
+        XCTAssertEqual(follower.targetIndex, reached)
+    }
+
+    /// Wandering well off the route must not skip progress ahead to a far segment.
+    func testFarOffRouteDoesNotJumpAhead() {
+        let (follower, _) = lRoute()
+        _ = follower.update(position: SIMD3(0, 0, 0), forward: SIMD3(0, 0, -1))
+        let before = follower.targetIndex
+        _ = follower.update(position: SIMD3(40, 0, 40), forward: SIMD3(0, 0, -1))
+        XCTAssertEqual(follower.targetIndex, before, "15 m off route: guide them back, do not skip on")
+    }
+
+    /// The other half of the same bug: a target index that had not caught up meant standing INSIDE
+    /// the destination room never counted as arriving.
+    func testInsideTheRoomCountsAsArrivedEvenIfTheIndexLagsBehind() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let extent = RoomExtent(center: SIMD3(6, 0, -10), halfExtents: SIMD2(2, 2), yaw: 0,
+                                areaSquareMeters: 16)
+        let room = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10), extent: extent)
+        let map = BuildingMap(name: "L", nodes: [a, b, room], edges: [
+            MapEdge(from: a.id, to: b.id, distance: 10),
+            MapEdge(from: b.id, to: room.id, distance: 6),
+        ])
+        let follower = RouteFollower(route: [a, b, room], graph: WaypointGraph(map: map))
+
+        // Never walked the route at all - teleport into the room, as a lagging index would look.
+        let instruction = follower.update(position: SIMD3(5, 0, -9.5), forward: SIMD3(1, 0, 0))
+        XCTAssertEqual(instruction.kind, .arrived)
+        XCTAssertEqual(instruction.targetLabel, "Room 442")
+    }
+
+    func testStandingOutsideTheRoomIsNotArrival() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let extent = RoomExtent(center: SIMD3(6, 0, -10), halfExtents: SIMD2(2, 2), yaw: 0,
+                                areaSquareMeters: 16)
+        let room = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10), extent: extent)
+        let map = BuildingMap(name: "L", nodes: [a, room],
+                              edges: [MapEdge(from: a.id, to: room.id, distance: 11.6)])
+        let follower = RouteFollower(route: [a, room], graph: WaypointGraph(map: map))
+        XCTAssertNotEqual(follower.update(position: SIMD3(0, 0, 0), forward: SIMD3(0, 0, -1)).kind, .arrived)
+        XCTAssertNotEqual(follower.update(position: SIMD3(2, 0, -10), forward: SIMD3(1, 0, 0)).kind, .arrived,
+                          "2 m outside the room's edge")
+    }
+}

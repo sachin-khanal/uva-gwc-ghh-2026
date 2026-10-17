@@ -19,6 +19,41 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Route progress by projection; corner cues; AR path overlay   [tags: BUILD, BUG]
+Area: B (Routing/Navigation) + U3 (UI). Branch `follower-progress-and-overlay` off `main` (6c892a1). See D-028.
+
+THE BUG (both reported symptoms, one cause): `RouteFollower.targetIndex` advanced only on coming within 1 m of a
+waypoint. After D-026 made waypoints sparse, walking past one slightly off to the side never advanced it, so the
+follower aimed behind the user ("turn around", repeatedly) AND arrival was never evaluated, so standing inside the
+room did nothing.
+Files edited (WaypointCore): `Routing/RouteFollower.swift` (progress by nearest route SEGMENT in a windowed, monotonic
+search; arrival by RoomExtent containment regardless of index; `projectedIndex`), `Routing/GuidanceInstruction.swift`
+(+`Maneuver.angleRadians`), `Guidance/FeedbackPlanner.swift` (corner cues from route geometry at 1.2 m; heading cue
+stays silent while a corner is within 4 m; `turnInProgress` guard).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (+`routeWorldPositions`, rebuilt only when the
+route or map->world transform changes), `Waypoint/UI/Navigator/NavDebugView.swift` (AR route overlay: floor markers +
+ribbon), `Waypoint/UI/Scanner/ScanReviewView.swift` (room boundary list + "rooms sized" stat).
+Tests added: `FollowerProgressTests` (5) - walking past a waypoint off to one side still progresses and does not say
+turn around, progress never rewinds, far off-route does not jump ahead, inside the room is arrival even with a lagging
+index, outside is not.
+Debugging note: I got this wrong twice before getting it right, and the tests found both. (a) My first projection
+window started at the segment AHEAD of the user, so progress jumped straight to the destination and the walk announced
+"you will arrive" nine metres early. (b) I then assumed the duplicate turn cue came from the heading cue firing after
+the corner; instrumenting it showed the opposite - the heading cue fired FIRST at 51 degrees, the corner second at the
+route's real 90. The fix is for the heading cue to defer to an upcoming corner, not the other way round.
+Verified: `make test` -> **160 tests, 0 failures** (was 155); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** The AR overlay has never been rendered. New constants to tune on a phone:
+progressWindow 4 segments, maxOffRouteMeters 8, cornerDistanceMeters 1.2, cornerSuppressionMeters 4.
+Open / handoff:
+1. NOT done: the CarPlay-style multi-card Navigator layout. The debug overlay was extended instead; the guiding screen
+   itself is unchanged.
+2. Room extents still only exist for rooms tagged after D-027, so a rescan is needed to see boundaries at all.
+3. Still open: off-route re-routing (U2.5) - we now DETECT >8 m off route but only decline to skip ahead; we do not
+   recompute the route.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Rooms have a floor area, from the mesh's wall faces   [tags: BUILD, CONTRACT CHANGE]
 Area: A (maps/scan) + B (arrival). Branch `room-extents` off `main` (4e278e2). Reasoning in D-027.
 

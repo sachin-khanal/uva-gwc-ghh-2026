@@ -252,3 +252,27 @@ in, it is not a floor-plan reconstruction of the building. Object boundaries (ta
 only walls and doors are read.
 **Status:** accepted; 155 tests pass. **UNVERIFIED ON DEVICE** - no real mesh has been through `wallPoints` yet, which
 is the part most likely to need tuning (height band, face stride, grid resolution).
+
+## D-028 — Progress is measured ALONG the route; turns are announced from the route's geometry (2026-10-17)
+From a Rice Hall walk: "it tells me to turn around, after a few steps it tells me to turn around again, on and on",
+and separately "when I go to the room myself it doesn't realise I'm inside - but on one test it did".
+**One bug caused both.** `RouteFollower.targetIndex` only advanced when the user came within 1 m of each route
+waypoint. Route simplification (D-026) spaced waypoints further apart, so walking a corridor 1.5 m to one side never
+"reached" one: the follower kept aiming at a point BEHIND the user -> "turn around" -> they comply, come within 1 m,
+it advances, the next target is behind them again. The same stuck index meant arrival was never evaluated (it is only
+checked when the current target IS the destination), so standing in the room did nothing - unless the walk happened to
+touch every waypoint, which is why it worked once.
+Fixes: (1) progress is now the nearest SEGMENT of the route polyline, searched in a small window around the current
+index so a route that passes near itself cannot teleport progress, never moving backwards, and ignored entirely when
+more than 8 m off route; (2) being inside the destination's `RoomExtent` means arrived, whatever the index thinks.
+**Turn cues then had to move too.** With a 3 m steering lookahead the user eases into a corner, so the live bearing
+never swings far enough to trip `HeadingCue` and a real turn went unannounced (the end-to-end walk test caught it).
+Turns now come from the ROUTE's geometry: `Maneuver.angleRadians` carries the corner's real angle, the planner
+announces it at `cornerDistanceMeters` (1.2 m, matching the countdown's existing "too close to warn" cut-off), and the
+heading cue stays silent about a turn while a real corner is within 4 m, so one corner produces one cue. The heading
+cue's job is now only staying on course. Resulting sequence on the sample route: "in 9 m / 5 m / 2 m, turn right",
+then "Turn right 90 degrees." at the corner, then arrival.
+Also: the debug overlay draws the route over the CAMERA in AR (markers on the floor, a ribbon between them) as well as
+on the plan, and the scan review screen lists each room's measured boundary so a bad extraction is visible on review
+rather than during a walk.
+**Status:** accepted; 160 tests pass. UNVERIFIED ON DEVICE.

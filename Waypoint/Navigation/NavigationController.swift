@@ -61,6 +61,11 @@ final class NavigationController: ObservableObject {
     @Published private(set) var mapPosition: SIMD3<Float>?
     /// Which way they face in the map frame: radians, 0 = -z, positive = toward +x.
     @Published private(set) var headingRadians: Float?
+    /// The route's waypoints in ARKit WORLD coordinates, for drawing over the camera. Empty until the
+    /// route exists and we are localized. Recomputed only when the route or the map->world transform
+    /// changes, because this feeds a RealityKit scene rebuild.
+    @Published private(set) var routeWorldPositions: [SIMD3<Float>] = []
+    private var lastRouteWorldKey: String = ""
 
     // MARK: Collaborators
     private let relocalizer = Relocalizer()
@@ -152,6 +157,8 @@ final class NavigationController: ObservableObject {
         headingRadians = nil
         self.destination = destination
         follower = nil
+        routeWorldPositions = []
+        lastRouteWorldKey = ""
         startGate.reset()
         planner.reset()
         obstacles.reset()
@@ -243,6 +250,7 @@ final class NavigationController: ObservableObject {
             }
             self.mapPosition = mapPosition
             headingRadians = atan2(mapForward.x, -mapForward.z)
+            updateRouteWorldPositions(mapToWorld: mapToWorld)
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
                 lastLoggedKind = i.kind
@@ -265,6 +273,21 @@ final class NavigationController: ObservableObject {
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
                                    posture: posture, report: report, time: time)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
+    }
+
+    /// Route waypoints in world space for the AR overlay. Cheap guard: only rebuild when the route or
+    /// the transform actually changed, since the tick runs 10x a second and this drives a scene rebuild.
+    private func updateRouteWorldPositions(mapToWorld: simd_float4x4) {
+        guard let follower else {
+            if !routeWorldPositions.isEmpty { routeWorldPositions = [] }
+            return
+        }
+        let t = mapToWorld.columns.3
+        let key = "\(follower.route.count)-\(routeNodeIds.first?.uuidString ?? "")-" +
+            String(format: "%.2f,%.2f,%.2f", t.x, t.y, t.z)
+        guard key != lastRouteWorldKey else { return }
+        lastRouteWorldKey = key
+        routeWorldPositions = follower.route.map { Geometry.transformPoint(mapToWorld, $0.position) }
     }
 
     private func makeFollower(from position: SIMD3<Float>, graph: WaypointGraph, destination: MapNode) -> RouteFollower? {
