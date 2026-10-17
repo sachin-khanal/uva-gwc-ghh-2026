@@ -22,7 +22,9 @@ final class FeedbackAndVisionTests: XCTestCase {
         var p = FeedbackPlanner()
         let first = p.plan(instruction: instruction(.turnLeft), obstacle: .clear, trackingOK: true)
         XCTAssertTrue(first.contains(.haptic(.turnLeft)))
-        XCTAssertTrue(first.contains(.speak("Turn left.", priority: .high)))
+        // The angle itself is TurnSpeech's job (TurnSpeechTests); here we only care that the turn
+        // was announced once.
+        XCTAssertTrue(first.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn left") } else { return false } })
         XCTAssertTrue(first.contains(.beacon([0, 0, -3])))
         let second = p.plan(instruction: instruction(.turnLeft), obstacle: .clear, trackingOK: true)
         XCTAssertEqual(second, [.beacon([0, 0, -3])]) // no repeated speech or haptic

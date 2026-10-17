@@ -172,3 +172,35 @@ running - more code, revisit if someone asks for it.
 Related but separate: a single tick emitting several `.speak` lines used to clip itself; that was fixed in D-023 by
 coalescing them in `NavigationController.perform`.
 **Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
+
+## D-025 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
+Six findings from walking Rice Hall. All of them came from the same root idea being wrong: the app treated the
+breadcrumb chain as the path to follow, rather than as a description of where it is possible to walk.
+1. **Steering.** The follower classified the raw bearing to the NEXT breadcrumb (~1.5 m away) every tick with a single
+25-degree threshold, so half a step sideways produced "go left, go right, turn around". It now aims at a point
+`steeringLookaheadMeters` (3 m) further along the route - the corridor, not the footsteps - and classifies with
+`HeadingCue`: a 45-degree deadband to START a turn, 22 to leave it (hysteresis), and a 3-tick debounce. The FIRST cue
+is never debounced, so someone facing the wrong way is told immediately. The audio beacon is placed at the same
+steering point, so the sound leads along the corridor instead of jumping between breadcrumbs.
+2. **Loop closure.** `MapBuilder` linked each breadcrumb only to the previous one, so the map was a CHAIN, never a
+graph. In a building with a central core the two ends of a loop are metres apart in space but dozens of nodes apart in
+the graph, and A* sent the user the long way round the whole core. A new breadcrumb is now also linked to any older one
+within `revisitRadius` (1.0 m) and at least `minChainSeparation` nodes back. **Safety:** we only join nodes the
+volunteer PHYSICALLY STOOD AT, never by proximity alone - two corridors either side of a thin wall are close in space,
+and joining them would route a blind user into the wall. There is a test for exactly that.
+3. **Doors are the way IN.** A door in front of the room you asked for was announced as "Stop. You are about to walk
+into a door.", leaving a blind user stranded outside their destination. `RouteFeature.isWayThrough` recognises when the
+thing ahead IS what the route is taking us through (door -> room, door -> door, stairs -> stairs); it then gets caution
+wording that says what to do ("The door to Room 204 is right ahead. You will need to open it to get in.") and guidance
+CONTINUES instead of stopping dead. A wall, a chair or a person is still a full stop.
+4. **Arrival depends on the kind of destination.** One fixed 1 m radius for everything. Now `ArrivalRadius`: a room
+2.5 m (you are inside it), a door 1.2 m (you stand in front of it), stairs/elevator 1.5 m, otherwise 1 m. NOTE: a
+`MapNode` is a single point, so a room has no true extent; the radius is a stand-in for its bounding box. Giving rooms
+real extents would be a change to the shared model.
+5. **Turn cues carry an angle.** "Turn right" is as easily 15 degrees as 90 to someone who cannot see. Now
+"Turn right 45 degrees.", rounded to 5 degrees - finer is false precision given the heading estimate and a person
+turning on the spot.
+6. **One direction at a time.** `directionCooldownSeconds` (1.5 s) between direction cues. A held-back cue is NOT
+dropped: `lastKey` is left alone so it is announced on a later tick. Obstacles and lost tracking are never delayed.
+**Status:** accepted; 136 tests pass. All six are **UNVERIFIED ON DEVICE** - every threshold here (3 m lookahead,
+45/22 degrees, 3 ticks, 1.0 m revisit, 1.5 s cooldown, the arrival radii) is a considered guess that wants a real walk.

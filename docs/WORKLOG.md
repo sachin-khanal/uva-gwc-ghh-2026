@@ -19,6 +19,44 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Natural path following, loop closure, doors as doors, turn angles   [tags: BUILD]
+Area: B (Navigation/Feedback) + A (MapBuilder). Branch `guidance-path-and-graph` off `main` (73b189c).
+Trigger: six findings from walking Rice Hall. Full reasoning in D-025.
+
+Files created (WaypointCore): `Routing/HeadingCue.swift` (turn classification with hysteresis + debounce; also holds
+`ArrivalRadius`).
+Files edited (WaypointCore):
+- `Model/MapBuilder.swift` - LOOP CLOSURE: a new breadcrumb also links to an older node the volunteer walked back to
+  (revisitRadius 1.0 m, minChainSeparation 4). This is the fix for "it made me walk around the whole room": the graph
+  was a chain, so A* had no short way across a central core.
+- `Routing/RouteFollower.swift` - steers at a point 3 m further along the route (`steeringPoint`) instead of the next
+  breadcrumb; cue classification delegated to `HeadingCue`; arrival radius now depends on the destination's kind; the
+  beacon is placed at the steering point. The two old threshold constants are kept but deprecated.
+- `Vision/ObstacleKind.swift` - `RouteFeature.isWayThrough`.
+- `Guidance/SpokenPhrases.swift` - `ObstacleSpeech.wayThrough` (says to OPEN the door), `TurnSpeech` (angles rounded to 5 degrees).
+- `Guidance/FeedbackPlanner.swift` - way-through handling (caution + keep guiding, instead of stop + silence);
+  turn cues use TurnSpeech; `directionCooldownSeconds` = 1.5 s with the held cue re-tried rather than dropped.
+Tests added: `NaturalGuidanceTests` (16) - wobble never produces a turn, a real turn must persist, hysteresis, first cue
+immediate, steering aims past the next breadcrumb, room vs door arrival distance, a walked loop is closed, parallel
+corridors are NOT joined through the wall, doors say "open it" while guidance continues, a person still stops you,
+angle rounding, and that directions are spaced out but not lost.
+Two tests I wrote FAILED first and found real problems: (1) the follower only evaluates arrival once it has stepped
+through to the last node, so the test had to walk the route rather than teleport; (2) my first "parallel corridors"
+assertion was wrong - the edge joining the end of one corridor to the start of the next is a legitimate CHAIN edge the
+volunteer walked. Rewritten to assert the graph stays a pure chain. Also tightened revisitRadius 1.2 -> 1.0 m.
+Three existing tests asserted the old wording ("Turn left.") and now match a prefix, since the angle is TurnSpeech's job.
+Verified: `make test` -> **136 tests, 0 failures** (was 120); `make typecheck` OK (59 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Every threshold is a guess: 3 m lookahead, 45/22 degree deadband, 3-tick
+debounce, 1.0 m revisit radius, 1.5 s direction cooldown, arrival radii 2.5/1.2/1.5/1.0 m. They want one real walk.
+Open / handoff:
+1. Loop closure only helps maps scanned AFTER this change - existing saved maps are still chains. Rescan Rice Hall.
+2. A room has no extent in the model (a MapNode is a point), so "inside the room" is approximated by a 2.5 m radius.
+   Real room bounding boxes would be a shared-model change.
+3. Still open: the mesh-detail question, and off-route re-routing (U2.5).
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — One voice: single synthesizer; merged main into the UI branch   [tags: BUILD]
 Area: B (Guidance) + U3 (UI services). Branch `app-ui-workflows`.
 Trigger: "sometimes multiple voice lines speak at the same time, especially when reaching the destination", heard while

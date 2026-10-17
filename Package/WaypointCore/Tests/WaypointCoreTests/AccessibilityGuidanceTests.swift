@@ -255,7 +255,8 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertEqual(spoken(back), ["Phone position is good."], "only the confirmation on the recovery tick")
         let next = p.plan(instruction: instruction(.turnRight), obstacle: .clear, trackingOK: true,
                           posture: PostureUpdate(reading: ok.reading, issue: nil, announcement: nil, recovered: false))
-        XCTAssertTrue(next.contains(.speak("Turn right.", priority: .high)), "guidance resumes with the current instruction on the next tick")
+        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn right") } else { return false } },
+                      "guidance resumes with the current instruction on the next tick")
     }
 
     func testObstacleWarningsStillWorkWhilePostureIsWrong() {

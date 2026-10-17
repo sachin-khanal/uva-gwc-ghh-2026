@@ -17,13 +17,25 @@ public final class RouteFollower {
     /// A waypoint counts as reached inside this horizontal radius (meters).
     public let arrivalRadius: Float
     /// Angles inside this are "straight ahead"; beyond ~135 degrees is "turn around".
+    @available(*, deprecated, message: "Cue classification moved to HeadingCue (hysteresis + debounce).")
     public static let straightThreshold: Float = 25 * .pi / 180
+    @available(*, deprecated, message: "Cue classification moved to HeadingCue.")
     public static let turnAroundThreshold: Float = 135 * .pi / 180
+
+    /// How far ahead along the route we aim. Steering at a point this far away instead of at the next
+    /// breadcrumb (~1.5 m) is what stops the cues reacting to every half-step sideways: it follows the
+    /// CORRIDOR rather than the exact line the volunteer walked.
+    public static let steeringLookaheadMeters: Float = 3.0
+
+    /// Stable cue classification (hysteresis + debounce).
+    private var cue = HeadingCue()
 
     /// Index into `route` of the node we are currently walking toward.
     public private(set) var targetIndex: Int = 0
     private let graph: WaypointGraph
 
+    /// Radius used to step THROUGH intermediate breadcrumbs. Arrival at the destination uses
+    /// `ArrivalRadius.meters(for:)` instead, so a room counts as reached from further away than a door.
     public init(route: [MapNode], graph: WaypointGraph, arrivalRadius: Float = 1.0) {
         precondition(!route.isEmpty, "RouteFollower needs a non-empty route")
         self.route = route
@@ -45,7 +57,9 @@ public final class RouteFollower {
         let distance = Geometry.horizontalDistance(position, target.position)
         let isLast = targetIndex == route.count - 1
 
-        if isLast && distance < arrivalRadius {
+        // "Arrived" depends on WHAT the destination is: you stand in front of a door, but you are
+        // inside a room (device report 2026-10-17).
+        if isLast && distance < ArrivalRadius.meters(for: target.kind) {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,
@@ -53,13 +67,11 @@ public final class RouteFollower {
         }
         let upcoming = lookahead(from: position, distanceToTarget: distance)
 
-        let bearing = Geometry.signedBearing(forward: forward, toTarget: target.position - position)
-        let kind: GuidanceInstruction.Kind
-        switch abs(bearing) {
-        case ..<Self.straightThreshold: kind = .continueStraight
-        case Self.turnAroundThreshold...: kind = .turnAround
-        default: kind = bearing > 0 ? .turnRight : .turnLeft
-        }
+        // Steer at a point further along the route, not at the next breadcrumb, then stabilise the
+        // result. Both changes exist because the old code demanded the volunteer's exact line.
+        let aim = steeringPoint(from: position, distanceToTarget: distance)
+        let bearing = Geometry.signedBearing(forward: forward, toTarget: aim - position)
+        let kind = cue.update(bearing: bearing)
 
         var hazard: Hazard? = nil
         if targetIndex > 0 {
@@ -69,9 +81,23 @@ public final class RouteFollower {
         return GuidanceInstruction(
             kind: kind, bearingRadians: bearing, distanceMeters: distance,
             targetNodeId: target.id, targetLabel: target.label,
-            targetPosition: target.position, hazard: hazard,
+            // The beacon is placed at the steering point too, so the sound leads along the corridor
+            // instead of jumping between breadcrumbs.
+            targetPosition: aim, hazard: hazard,
             upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id),
             targetKind: target.kind)
+    }
+
+    /// A point `steeringLookaheadMeters` further along the route: the "carrot" the user walks toward.
+    /// Falls back to the last node when the route runs out, so the final approach aims at the destination.
+    func steeringPoint(from position: SIMD3<Float>, distanceToTarget: Float) -> SIMD3<Float> {
+        var along = distanceToTarget
+        var k = targetIndex
+        while k < route.count - 1, along < Self.steeringLookaheadMeters {
+            along += Geometry.horizontalDistance(route[k].position, route[k + 1].position)
+            k += 1
+        }
+        return route[k].position
     }
 
     // MARK: Look-ahead and landmarks

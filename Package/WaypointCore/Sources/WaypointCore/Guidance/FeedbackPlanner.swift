@@ -57,12 +57,17 @@ public struct FeedbackPlanner {
     public static let warningThresholds: [Float] = [10, 5, 2]
     /// While a STOP obstacle persists, repeat the warning this often (needs `time` from the caller).
     public static let stopRepeatSeconds: TimeInterval = 3
+    /// Minimum gap between two DIRECTION cues. Without it a few quick heading changes fire one after
+    /// another and the user is talked at continuously instead of being given one thing to do
+    /// (device report 2026-10-17). Safety messages (obstacles, lost tracking) are never delayed.
+    public static let directionCooldownSeconds: TimeInterval = 1.5
 
     private var lastKey: String?
     private var lastHazardTarget: UUID?
     private var lastObstacle: ObstacleLevel = .clear
     private var lastObstacleKind: ObstacleKind?
     private var lastObstacleSpeech: TimeInterval?
+    private var lastDirectionSpeech: TimeInterval?
     private var lastTrackingOK = true
     private var briefed = false
     private var announcedWarnings: Set<String> = []
@@ -77,6 +82,7 @@ public struct FeedbackPlanner {
         lastObstacle = .clear
         lastObstacleKind = nil
         lastObstacleSpeech = nil
+        lastDirectionSpeech = nil
         lastTrackingOK = true
         briefed = false
         announcedWarnings = []
@@ -129,26 +135,37 @@ public struct FeedbackPlanner {
         }
 
         // 2. Obstacles: say WHAT and WHERE when the level or the kind of thing changes, and keep reminding while STOP persists.
+        // Is the thing ahead the way IN rather than something to avoid? (door of the target room,
+        // the stairs we routed to). If so it gets instructions, not an alarm, and guidance continues.
+        let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
         let levelChanged = obstacle != lastObstacle
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
         let repeatDue = obstacle == .stop && !levelChanged && !kindChanged
             && time != nil && lastObstacleSpeech != nil && (time! - lastObstacleSpeech!) >= Self.stopRepeatSeconds
         if obstacle != .clear, levelChanged || kindChanged || repeatDue {
-            switch obstacle {
-            case .stop:
-                actions.append(.speak(ObstacleSpeech.stop(report), priority: .high))
-                if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
-            case .caution:
-                actions.append(.speak(ObstacleSpeech.caution(report), priority: .high))
+            if wayThrough {
+                actions.append(.speak(ObstacleSpeech.wayThrough(report, targetLabel: instruction?.targetLabel),
+                                      priority: .high))
                 if levelChanged { actions.append(.haptic(.obstacleCaution)) }
-            case .clear:
-                break
+            } else {
+                switch obstacle {
+                case .stop:
+                    actions.append(.speak(ObstacleSpeech.stop(report), priority: .high))
+                    if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
+                case .caution:
+                    actions.append(.speak(ObstacleSpeech.caution(report), priority: .high))
+                    if levelChanged { actions.append(.haptic(.obstacleCaution)) }
+                case .clear:
+                    break
+                }
             }
             lastObstacleSpeech = time ?? lastObstacleSpeech
         }
         lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
         lastObstacle = obstacle
-        if obstacle == .stop {
+        // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
+        // the beacon and stops everything else.
+        if obstacle == .stop, !wayThrough {
             actions.append(.beacon(nil))
             return actions
         }
@@ -193,21 +210,28 @@ public struct FeedbackPlanner {
         // real scans have a node every 1.5 m, and keying on the target made "Continue straight." repeat at every one (found by the on-phone
         // end-to-end test, 2026-10-17). Hazards are announced once per hazardous target, below.
         let key = i.kind.rawValue
-        if key != lastKey {
+        // One direction at a time: hold a new cue back until the cooldown has passed. `lastKey` is
+        // deliberately NOT updated while holding, so the cue is announced on a later tick instead of
+        // being lost.
+        let cooledDown: Bool = {
+            guard let now = time, let last = lastDirectionSpeech else { return true }
+            return now - last >= Self.directionCooldownSeconds
+        }()
+        if key != lastKey, cooledDown {
             lastKey = key
+            lastDirectionSpeech = time ?? lastDirectionSpeech
             switch i.kind {
             case .arrived:
                 break // unreachable: handled in step 1b, before obstacles can pre-empt it
             case .turnLeft:
                 actions.append(.haptic(.turnLeft))
-                actions.append(.speak("Turn left.", priority: .high))
             case .turnRight:
                 actions.append(.haptic(.turnRight))
-                actions.append(.speak("Turn right.", priority: .high))
-            case .turnAround:
-                actions.append(.speak("Turn around.", priority: .high))
-            case .continueStraight:
-                actions.append(.speak("Continue straight.", priority: .normal))
+            case .turnAround, .continueStraight:
+                break
+            }
+            if let text = TurnSpeech.text(kind: i.kind, bearingRadians: i.bearingRadians) {
+                actions.append(.speak(text, priority: i.kind == .continueStraight ? .normal : .high))
             }
         }
         if let hazard = i.hazard {

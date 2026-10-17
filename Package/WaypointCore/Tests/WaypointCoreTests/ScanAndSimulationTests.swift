@@ -135,7 +135,7 @@ final class ScanAndSimulationTests: XCTestCase {
 
         XCTAssertEqual(spoken.last, "You have arrived at Room 204.")
         XCTAssertEqual(spoken.filter { $0.hasPrefix("You have arrived") }.count, 1, "arrival announced exactly once")
-        XCTAssertTrue(spoken.contains("Turn right."), "the last leg into Room 204 is a right turn")
+        XCTAssertTrue(spoken.contains { $0.hasPrefix("Turn right") }, "the last leg into Room 204 is a right turn")
         XCTAssertTrue(haptics.contains(.turnRight))
         XCTAssertEqual(haptics.last, .arrived)
         XCTAssertGreaterThan(beaconSamples, 20, "the beacon follows the walker the whole way")
