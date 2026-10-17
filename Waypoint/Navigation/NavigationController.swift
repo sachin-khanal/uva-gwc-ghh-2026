@@ -397,20 +397,25 @@ final class NavigationController: ObservableObject {
     /// Executes FeedbackPlanner output. Beacon positions arrive in the MAP frame and are converted
     /// to the camera-local frame here because that is what the audio engine expects.
     private func perform(_ actions: [FeedbackAction], camera: simd_float4x4, mapToWorld: simd_float4x4) {
-        // One tick can produce several `.speak` actions (e.g. arrival + a hazard). Saying them one by
-        // one made each `.high` line cut off the one before it mid-word, because SpeechGuide stops the
-        // synthesizer for every high-priority utterance. Join them into a single sentence instead, at
-        // the highest priority present, so nothing is clipped and nothing overlaps.
-        let spoken = actions.compactMap { action -> (String, SpeechPriority)? in
-            if case .speak(let text, let priority) = action { return (text, priority) }
-            return nil
+        // ONE MOVE AT A TIME. A tick can produce several `.speak` actions (a turn, a landmark, a
+        // hazard). Joining them into a single utterance stopped them clipping each other, but it
+        // produced run-on paragraphs - "Walk straight about 8 meters, then turn left. Turn around. I..."
+        // - instead of the one thing to do now (device report 2026-10-17).
+        // They are handed over SEPARATELY, most important first: `Speaker` says the first and holds at
+        // most one more, so the user hears a single instruction and then, if it still applies a moment
+        // later, the next one.
+        let spoken = actions
+            .compactMap { action -> (text: String, priority: SpeechPriority)? in
+                if case .speak(let text, let priority) = action { return (text, priority) }
+                return nil
+            }
+            .sorted { $0.priority > $1.priority } // stable: equal priorities keep planner order
+        if let first = spoken.first {
+            setIfChanged(\.lastSpoken, first.text)
+            recentSpeech = Array((recentSpeech + [first.text]).suffix(6))
         }
-        if !spoken.isEmpty {
-            let text = spoken.map(\.0).joined(separator: " ")
-            let priority: SpeechPriority = spoken.contains { $0.1 == .high } ? .high : .normal
-            setIfChanged(\.lastSpoken, text)
-            recentSpeech = Array((recentSpeech + [text]).suffix(6))
-            speech.say(text, priority: priority)
+        for line in spoken {
+            speech.say(line.text, priority: line.priority)
         }
 
         for action in actions {

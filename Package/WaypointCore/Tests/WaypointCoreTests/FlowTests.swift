@@ -427,3 +427,57 @@ final class RecalculationWordingTests: XCTestCase {
         XCTAssertNil(GuidanceSnapshot.directive(nil))
     }
 }
+
+// MARK: - One move at a time (device report, 2026-10-17)
+
+final class OneMoveAtATimeTests: XCTestCase {
+
+    private func spoken(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    /// A spoken line is ONE instruction. "Walk straight about 8 metres, then turn left" asked the
+    /// user to hold two moves in their head while walking.
+    func testTheBriefingDescribesOnlyTheMoveBeingMade() {
+        let turn = Maneuver(kind: .turnLeft, distanceMeters: 8, nodeId: UUID(), angleRadians: 1.4)
+        let text = ManeuverSpeech.briefing(distanceToFirstManeuver: turn)
+        XCTAssertEqual(text, "Walk straight about 8 meters.")
+        XCTAssertFalse(text?.contains(", then") ?? true, "no itinerary in one breath")
+    }
+
+    /// Arrival keeps its destination, because that IS the move: walk to this place.
+    func testArrivalBriefingKeepsTheDestination() {
+        let arrive = Maneuver(kind: .arrive, distanceMeters: 12, nodeId: UUID(), label: "Room 442")
+        XCTAssertEqual(ManeuverSpeech.briefing(distanceToFirstManeuver: arrive),
+                       "Walk straight about 12 meters to Room 442.")
+    }
+
+    /// Dropping the stairs clause from the briefing is safe because the countdown still warns, and
+    /// earlier: at 10, 5 and 2 metres.
+    func testStairsAreStillWarnedByTheCountdown() {
+        let stairs = Maneuver(kind: .stairs, distanceMeters: 4.6, nodeId: UUID())
+        XCTAssertEqual(ManeuverSpeech.warning(stairs), "In 5 meters, stairs.")
+    }
+
+    /// Every line the planner emits in one tick must stand alone, so they can be spoken separately.
+    func testNoSingleLineContainsTwoInstructions() {
+        var planner = FeedbackPlanner()
+        let turn = Maneuver(kind: .turnLeft, distanceMeters: 9, nodeId: UUID(), angleRadians: 1.4)
+        let i = GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 9,
+                                    targetNodeId: UUID(), targetLabel: nil, targetPosition: SIMD3(0, 0, -9),
+                                    hazard: nil, upcoming: turn, targetKind: .corridor)
+        for t in stride(from: 1.0, through: 12.0, by: 1.0) {
+            for line in spoken(planner.plan(instruction: i, obstacle: .clear, trackingOK: true, time: t)) {
+                XCTAssertFalse(line.contains(", then "), "two moves in one line: \(line)")
+            }
+        }
+    }
+
+    /// Priorities are ordered, which is what lets the controller hand the most important line over
+    /// first and the speaker hold the next-most-important rather than merely the latest.
+    func testPrioritiesAreOrdered() {
+        XCTAssertTrue(SpeechPriority.critical > SpeechPriority.high)
+        XCTAssertTrue(SpeechPriority.high > SpeechPriority.normal)
+        XCTAssertEqual([SpeechPriority.normal, .critical, .high].sorted(by: >), [.critical, .high, .normal])
+    }
+}

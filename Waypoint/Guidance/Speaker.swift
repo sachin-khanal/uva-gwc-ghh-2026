@@ -58,6 +58,9 @@ final class Speaker: NSObject {
         case .enqueue:
             // Hold it ourselves rather than handing it to AVSpeechSynthesizer, whose own queue cannot
             // be revised: by the time it would speak, the user has moved and the line may be wrong.
+            // Only ONE line waits, and it is the most important one offered - not simply the last,
+            // which would let an incidental landmark displace a turn.
+            if let current = pending, current.priority > priority { return }
             pending = (text, priority, now)
             return
         case .speak:

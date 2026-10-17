@@ -400,3 +400,23 @@ a long briefing truncated to "Walk straight about 8 meters, t..." next to a turn
 the spoken line only when it is a short DIRECTIVE (<= 30 characters, not a "..., then ..." sentence); longer narration
 drops to the detail line, where it fits and cannot be mistaken for the current instruction.
 **Status:** accepted; 199 tests pass. UNVERIFIED ON DEVICE. Tune: 3 m, 1 s, and the 1.5 m / 2 s drift test.
+
+## D-037 — One move at a time: a spoken line is a single instruction (2026-10-17)
+Report: "it tries to say the entire thing in one go, rather than properly breaking it down to what's the current/next
+move." Two causes, both mine.
+1. **The controller joined a tick's lines into ONE utterance.** That was the D-023 fix for lines clipping each other,
+and it worked, but it turned "Walk straight about 8 metres, then turn left." + "Turn around." + a landmark into one
+run-on paragraph. `NavigationController.perform` now hands each line to `Speaker` SEPARATELY, most important first
+(`SpeechPriority` is `Comparable`, with an explicit rank so adding a case later cannot silently reorder guidance).
+The speaker says the first and holds at most one more, so the user hears one instruction, then - if it still applies a
+moment later - the next.
+2. **`Speaker`'s single pending slot kept the NEWEST line.** An incidental landmark could therefore displace a turn.
+It now keeps the most important one offered, falling back to newest when priorities are equal (so two competing
+directions still resolve in favour of the latest).
+3. **The route briefing was an itinerary.** "Walk straight about 8 metres, then turn left." asked a walking blind user
+to hold two moves at once. The tail is gone: the briefing is "Walk straight about 8 metres." The turn is announced by
+the countdown at 10, 5 and 2 metres, and the turn cue itself fires at the corner, so nothing is lost - the stairs
+clause goes the same way and stairs are still warned by the countdown, earlier than the briefing did. Arrival keeps
+its destination ("...about 12 metres to Room 442."), because reaching that place IS the move.
+A test now asserts that no line the planner emits contains ", then " at all.
+**Status:** accepted; 204 tests pass. UNVERIFIED ON DEVICE.

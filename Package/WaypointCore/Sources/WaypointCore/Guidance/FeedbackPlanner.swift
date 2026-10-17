@@ -28,7 +28,7 @@
 import Foundation
 import simd
 
-public enum SpeechPriority: Equatable, Sendable {
+public enum SpeechPriority: Equatable, Comparable, Sendable {
     /// Safety: cuts off whatever is being said, right now. Only an obstacle at STOP range, or losing
     /// position, earns this - everything else can wait a second.
     case critical
@@ -38,6 +38,18 @@ public enum SpeechPriority: Equatable, Sendable {
     case high
     /// Ambient. Skipped entirely if something is already being said; it will come round again.
     case normal
+
+    /// Higher means more important. Declared explicitly rather than relying on declaration order, so
+    /// adding a case later cannot silently reorder guidance.
+    var rank: Int {
+        switch self {
+        case .critical: return 2
+        case .high: return 1
+        case .normal: return 0
+        }
+    }
+
+    public static func < (a: SpeechPriority, b: SpeechPriority) -> Bool { a.rank < b.rank }
 }
 
 public enum HapticCue: Equatable, Sendable {

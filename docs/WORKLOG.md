@@ -93,6 +93,29 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — One move at a time: stop speaking paragraphs   [tags: BUILD, BUG]
+Area: B (Guidance). Branch `one-move-at-a-time` off `navigation-overhaul`. See D-037.
+
+Cause was my own earlier fix: `perform` joined every `.speak` action in a tick into one utterance (D-023, to stop
+lines clipping each other), which produced run-on paragraphs.
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (lines handed over separately, sorted most
+important first), `Waypoint/Guidance/Speaker.swift` (the one pending slot now keeps the most IMPORTANT line, not the
+newest; equal priorities still prefer the newest).
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` (`SpeechPriority: Comparable` with an explicit rank),
+`Guidance/SpokenPhrases.swift` (briefing drops the ", then turn left" / ". Then there are stairs." tails).
+Tests added: `OneMoveAtATimeTests` (5) - the briefing describes only the move being made, arrival keeps its
+destination, stairs are still warned by the countdown, NO line the planner emits contains ", then ", and priorities
+are ordered.
+Three existing briefing assertions were updated to the shorter wording.
+Verified: `make test` -> **204 tests, 0 failures** (was 199); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (checked on its own, after pushing a broken build earlier today by reading a chained
+command's output).
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched; existing recordings are unaffected.
+Open / handoff: unchanged - relocalization anchoring (D-035), `TurnReason` has no caller, CarPlay-style layout,
+the stashed account-auth work.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Fix a broken build I pushed one commit earlier   [tags: BUILD, BUG]
 Area: B (Navigation). Branch `navigation-overhaul`.
 My previous commit (28c88fd) left an EXTRA CLOSING BRACE in `Waypoint/Navigation/NavigationController.swift` when I

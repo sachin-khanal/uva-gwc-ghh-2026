@@ -214,14 +214,15 @@ public enum ManeuverSpeech {
     }
 
     /// Spoken once at the start of a route: "Walk about 12 meters, then turn right."
+    /// ONE move, not an itinerary. The "..., then turn left" tail was dropped (2026-10-17): the
+    /// countdown already announces the turn at 10, 5 and 2 metres, and a blind user walking needs the
+    /// move they are making now - not a preview of the one after it, spoken in the same breath.
     public static func briefing(distanceToFirstManeuver m: Maneuver?) -> String? {
         guard let m else { return nil }
         let d = DistanceSpeech.meters(m.distanceMeters)
         switch m.kind {
         case .arrive: return "Walk straight about \(d)\(m.label.map { " to \($0)" } ?? "")."
-        case .turnLeft: return "Walk straight about \(d), then turn left."
-        case .turnRight: return "Walk straight about \(d), then turn right."
-        case .stairs: return "Walk straight about \(d). Then there are stairs."
+        case .turnLeft, .turnRight, .stairs: return "Walk straight about \(d)."
         }
     }
 
