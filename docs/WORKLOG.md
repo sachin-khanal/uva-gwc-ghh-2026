@@ -1,5 +1,12 @@
 # Work log
 
+## 2026-10-18 02:20 — Claude (agent, for Sachin) — Integrate fix/guidance-voice into main (pre-merge checks)   [tags: BUILD, DOCS]
+Area: integration (U1 is merge captain; Sachin asked for the non-breaking, aligned work to go into main).
+Pre-merge checks on `fix/guidance-voice` (contains origin/main 4f40b6b + everything): `make test` 252 pass; `make typecheck` OK (63 app files, 1 UI test file); `make check` BUILD SUCCEEDED; Python tests 11 OK; `tools/validate_map.py` PASS (non-map samples skipped); docs hook self-test 15 passed; on the phone `make uitest` 11/11, E2E 23/0/1, simulated walk PASS, live Supabase two-user round trip 33/33. U3's `web/` tests: 45/46 under Node (the 1 failure is the WebGL test needing a browser: "document is not defined"); not run in a browser by me.
+Alignment finding: web viewer "schema 3" (`meshAssets`, rooms) vs native format 3 (`extent`): both optional, no break today, but the app would drop `meshAssets` on re-save; documented in MAP_FORMAT.md, needs a U1+U3 decision.
+NOT included in main: `origin/navigation-overhaul` commits after c5ba14f (8 commits by U2/Anmol: keyframe relocalization, "one move at a time" speech, sooner re-routing); trial merge conflicts in `BuildingMap.swift` and `NavigationController.swift` and they change the speech style my opening briefing uses; U2 should merge main into his branch and resolve, or we pair on it.
+NOT verified: relocalization (Gate G2); a fresh-install first launch with the new defaults; the web viewer in a browser; viewing the three real scans' 3D models in the app.
+
 ## 2026-10-18 01:50 — Claude (agent, for Sachin) — Phone results for the new-UI default; backup tool FIXED; first real scans inspected   [tags: BUG, BUILD]
 Area: D (tooling) + A/C (scan, export). Continues the 01:15 entry (its "phone results below" are here).
 On Sachin's iPhone 16 Pro Max, build = `fix/guidance-voice` + origin/main merge + new-UI default (installed with make build/install): `make uitest` -> 11 tests, 0 failures (new `testNewInterfaceIsTheDefault`; NOTE it only proves the STORED preference on this phone, which already has ui.newInterface=true and ui.serviceMode=live; a true fresh install is untested and no simulator exists on this Mac); `make selftest-e2e` -> 23 passed, 0 failed, 1 skipped; `make selftest-sim` PASS. One `make uitest` run failed to start (no test cases ran) and passed on retry; looked transient (phone asleep), not investigated.

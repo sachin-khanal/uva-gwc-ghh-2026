@@ -75,3 +75,10 @@ Identical to format 2 **except there is no `schemaVersion` key**. All files writ
 ## Known limits
 
 The Swift, Python and SQL checks are three separate implementations of the same rules; `MapSchemaTests` and `tools/test_validate_map.py` both run the same two fixtures, which is what keeps them aligned.
+
+## Known alignment issue: two meanings of "format 3" (found 2026-10-18 when merging U3's web viewer)
+
+**Update 2026-10-18 (Claude):** U3's web viewer (`web/`, merged to main) also calls its extended map "schema 3": it accepts `schemaVersion` 1 to 3 and, from 3 on, validates OPTIONAL `meshAssets` (a list of OBJ surface files: id, segmentId, format "obj", coordinateFrame "map", byteCount, sha256, bounds) and room/mesh fields. The native app's format 3 (this document) adds only the optional `MapNode.extent`. Both are optional additions, so every file written today loads in both; but they are not the same list of fields.
+- The native `BuildingMap` does not know `meshAssets`: loading a map that has it and saving it again would DROP it (Codable ignores unknown keys). Nothing in the app writes `meshAssets` yet, so nothing is lost today.
+- Needs a decision by U1 (contract owner) and U3 before any code writes `meshAssets`: either the native model gains an optional `meshAssets` (round-trips it), or the web viewer's extra fields move to format 4. Until then do not publish maps with `meshAssets` from anything that re-saves through the app.
+- The native 3D model is `model.usdz` next to `map.json` (not listed in the map JSON); the web viewer reads OBJ. A USDZ-to-OBJ export is not built.
