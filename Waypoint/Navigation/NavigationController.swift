@@ -66,6 +66,8 @@ final class NavigationController: ObservableObject {
     private let identifier = ObstacleIdentifier()
     private let signReader = SignReader()
     private var routePlanner: RoutePlanner?
+    /// Where to save remembered routes (real mode only; simulation does not persist).
+    private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
     private var lastReroute: TimeInterval = -100
     private var lastMapPosition: SIMD3<Float> = .zero
@@ -93,6 +95,9 @@ final class NavigationController: ObservableObject {
 
     func start(map: BuildingMap, destination: MapNode, store: MapStore) {
         begin(map: map, destination: destination)
+        // Remembered routes survive app restarts (a cache: re-validated on use, see RoutePlanner).
+        memoryHome = (store, map.id)
+        routePlanner = RoutePlanner(graph: WaypointGraph(map: map), memory: store.loadRouteMemory(mapId: map.id))
         statusText = "Looking for your position..."
         relocalizer.onFrame = { [weak self] frame in self?.handle(frame) }
         relocalizer.start(map: map, store: store)
@@ -127,6 +132,7 @@ final class NavigationController: ObservableObject {
     }
 
     func stop() {
+        persistRouteMemory()
         simulationTimer?.invalidate()
         simulationTimer = nil
         simulator = nil
@@ -145,6 +151,7 @@ final class NavigationController: ObservableObject {
 
     private func begin(map: BuildingMap, destination: MapNode) {
         stop() // clean slate if a previous session is still running
+        memoryHome = nil // set again by `start` (real mode only)
         let newGraph = WaypointGraph(map: map)
         graph = newGraph
         if let routePlanner { routePlanner.update(graph: newGraph) } else { routePlanner = RoutePlanner(graph: newGraph) }
@@ -270,6 +277,12 @@ final class NavigationController: ObservableObject {
         }
         Log.nav.info("route has \(route.count) nodes")
         return RouteFollower(route: route, graph: graph)
+    }
+
+    private func persistRouteMemory() {
+        guard let home = memoryHome, let memory = routePlanner?.memory else { return }
+        do { try home.store.saveRouteMemory(memory, mapId: home.mapId) }
+        catch { Log.nav.error("could not save route memory: \(error.localizedDescription)") }
     }
 
     // MARK: Live route adaptation (REAL mode)

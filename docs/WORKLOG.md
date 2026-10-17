@@ -1,5 +1,13 @@
 # Work log
 
+## 2026-10-17 19:40 — Claude (agent, for Sachin) — Route memory persisted per map + device re-checks after merge/format change   [tags: ROUTING]
+Area: B (Routing/Navigation) + D (`MapStore`, additive).
+Files edited: `Model/MapStore.swift` (+`loadRouteMemory(mapId:)`, `saveRouteMemory(_:mapId:)`; file `route-memory.json` inside the map folder; a cache: NOT in bundles/sync, corrupt/missing file = empty memory), `Waypoint/Navigation/NavigationController.swift` (real mode loads memory on start and saves on stop; simulation never persists), `Tests/.../RoutePlannerTests.swift` (+2 tests), `docs/MODULES.md`.
+Commands run: `make test` -> 129 tests, 0 failures; `make typecheck` OK; on Sachin's iPhone 16 Pro Max (unlocked): `make selftest-sim` -> SELFTEST PASS; `make selftest-e2e` -> 20 passed, 0 failed, 1 skipped (cloud not configured); `make uitest` -> first full run 6/7 (testSimulatedWalkFinishesAndShowsArrival failed: nav.status vanished after a 60 s wait), the test alone passed (22 s), and a second full run passed 7/7.
+Verified: all of the above (the device runs of sim/e2e happened with the merge + planner + format 2; the final persist change was device-tested by the sim/e2e run listed here).
+NOT verified: cause of the one-off uitest failure (not reproduced twice; treated as flaky, unproven); memory persistence on a real navigation (real-mode path is UNVERIFIED ON DEVICE, needs a scan + relocalization); `make check`; saving only happens on stop(), so a killed app loses that session's new routes.
+Open problems / handoff: still no MeshExporter/3D viewer, relocalization test (G2), marker fallback, multi-segment relocalization.
+
 ## 2026-10-17 19:00 — Claude (agent, for Sachin) — CONTRACT CHANGE: map format versioning (schemaVersion 2) + per-version specs   [tags: CONTRACT CHANGE]
 Area: shared contract (Model/*), validator tool. Requested by Sachin ("add specs for each version, and versioning for the maps").
 What changed: `BuildingMap` now has an instance field `schemaVersion` (encoded in the JSON). ~~`static let schemaVersion = 1`~~ (never encoded, unused) replaced by `MapSchema.current = 2` / `oldestReadable = 1` / `migrate(from:)`. Format 1 = the old shape with no key; format 2 = same shape + `"schemaVersion": 2`. Decoding: missing key = 1; 1...current accepted and migrated in memory; newer than the app -> refused ("newer than this app understands. Update Waypoint."); 0/negative refused. Encoding always writes the current format. Because the shapes are identical, old apps can still read format-2 files (unknown key ignored) and the server needs no migration (rows without the key read as format 1).

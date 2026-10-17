@@ -160,3 +160,36 @@ final class LiveAdaptationHelperTests: XCTestCase {
         XCTAssertFalse(t.update(level: .stop, time: 6))          // only 3 s since re-start
     }
 }
+
+final class RouteMemoryStoreTests: XCTestCase {
+    func testRouteMemoryPersistsPerMapAndIsNotInBundles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("rm-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MapStore(rootURL: root)
+        let map = try loadSampleMap()
+        try store.save(map)
+
+        XCTAssertTrue(store.loadRouteMemory(mapId: map.id).entries.isEmpty)       // nothing yet
+        let planner = RoutePlanner(graph: WaypointGraph(map: map))
+        planner.warm()
+        try store.saveRouteMemory(planner.memory, mapId: map.id)
+
+        let reloaded = RoutePlanner(graph: WaypointGraph(map: map), memory: store.loadRouteMemory(mapId: map.id))
+        let a = try XCTUnwrap(map.destinations.first), b = try XCTUnwrap(map.destinations.last)
+        XCTAssertEqual(reloaded.plan(from: a.id, to: b.id)?.source, .memory)
+
+        let bundleJSON = String(decoding: try JSONEncoder().encode(try store.makeBundle(id: map.id)), as: UTF8.self)
+        XCTAssertFalse(bundleJSON.contains("fingerprint"))                         // cache is never shared
+    }
+
+    func testCorruptOrMissingMemoryFileGivesEmptyMemoryAndUnknownMapThrows() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("rm-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MapStore(rootURL: root)
+        let map = try loadSampleMap()
+        try store.save(map)
+        try Data("not json".utf8).write(to: store.directory(for: map.id).appendingPathComponent("route-memory.json"))
+        XCTAssertTrue(store.loadRouteMemory(mapId: map.id).entries.isEmpty)
+        XCTAssertThrowsError(try store.saveRouteMemory(RouteMemory(), mapId: UUID()))
+    }
+}

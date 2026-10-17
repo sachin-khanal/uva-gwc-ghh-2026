@@ -155,6 +155,25 @@ public final class MapStore {
         return try Data(contentsOf: url)
     }
 
+    // MARK: Route memory (derived cache, never shared)
+
+    private func routeMemoryURL(_ mapId: UUID) -> URL {
+        directory(for: mapId).appendingPathComponent("route-memory.json")
+    }
+
+    /// Remembered shortest routes for this map (see `RoutePlanner`). It is a CACHE: not part of bundles/sync, safe to delete, and a
+    /// missing or corrupt file just yields an empty memory (routes are recomputed). Entries also self-invalidate when the map changes.
+    public func loadRouteMemory(mapId: UUID) -> RouteMemory {
+        guard let data = try? Data(contentsOf: routeMemoryURL(mapId)),
+              let memory = try? JSONDecoder().decode(RouteMemory.self, from: data) else { return RouteMemory() }
+        return memory
+    }
+
+    public func saveRouteMemory(_ memory: RouteMemory, mapId: UUID) throws {
+        guard fm.fileExists(atPath: directory(for: mapId).path) else { throw MapStoreError.notFound(mapId) }
+        try JSONEncoder().encode(memory).write(to: routeMemoryURL(mapId), options: .atomic)
+    }
+
     // MARK: Bundles (sync / export / import)
 
     public func makeBundle(id: UUID) throws -> MapBundle {
