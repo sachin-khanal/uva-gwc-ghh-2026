@@ -2,7 +2,7 @@
 // File:     Waypoint/UI/Scanner/ScanLibraryView.swift
 // Owner:    U3 (UI flows)
 // Purpose:  S1 "Scans": the maps on this phone as cards (name, points, places, Demo/no-world-map badge),
-//           a big "New scan" button, "Extend a map" (placeholder until ROADMAP U1.10), Share (opens the existing
+//           a big "New scan" button, "Extend a map" (picker of saved scan areas -> real extension via CaptureController, ROADMAP U1.10), Share (opens the existing
 //           SyncView unchanged, keeping its approval alerts - UI_PLAN rule R5) and Delete (always confirmed).
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
@@ -12,10 +12,12 @@ import WaypointCore
 struct ScanLibraryView: View {
     @EnvironmentObject var app: AppState
     let onNewScan: () -> Void
+    /// The volunteer picked a saved scan area to extend (see ExtendChoices).
+    let onExtend: (ExtendOption, BuildingMap) -> Void
     let onOpen: (BuildingMap) -> Void
 
     @State private var showSync = false
-    @State private var showExtendInfo = false
+    @State private var showExtend = false
     @State private var pendingDelete: BuildingMap?
 
     var body: some View {
@@ -26,7 +28,7 @@ struct ScanLibraryView: View {
                 HeroButton(title: "New scan", subtitle: "Walk the space once and tag places",
                            systemImage: "viewfinder", hint: "Starts setting up a new scan.", action: onNewScan)
                 HeroButton(title: "Extend a map", subtitle: "Add a wing to an existing map",
-                           systemImage: "plus.square.on.square", style: .secondary) { showExtendInfo = true }
+                           systemImage: "plus.square.on.square", style: .secondary) { showExtend = true }
 
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Text("On this phone")
@@ -63,7 +65,7 @@ struct ScanLibraryView: View {
         }
         .background(Theme.screenBackground)
         .sheet(isPresented: $showSync) { SyncView() }
-        .sheet(isPresented: $showExtendInfo) { extendInfo }
+        .sheet(isPresented: $showExtend) { extendPicker }
         .confirmationDialog(
             "Delete \(pendingDelete?.name ?? "this map")?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -110,19 +112,48 @@ struct ScanLibraryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var extendInfo: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Image(systemName: "hammer")
-                .font(.largeTitle)
-                .foregroundStyle(Theme.accent)
-                .accessibilityHidden(true)
-            Text("Coming soon").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
-            Text("Extending a map means finding your position in an existing scan first, then walking new areas. It is being built in the scanning engine (roadmap task U1.10) and will appear here.")
-                .foregroundStyle(.secondary)
-            HeroButton(title: "OK", style: .secondary) { showExtendInfo = false }
+    private var canExtendHere: Bool { ServiceMode.current == .live && DeviceCapabilities.hasLiDAR }
+
+    private var extendOptions: [ExtendOption] {
+        ExtendChoices.options(maps: app.maps) { mapId, segment in
+            FileManager.default.fileExists(atPath: app.store.worldMapURL(mapId: mapId, segmentId: segment).path)
         }
-        .padding(Theme.Space.xl)
-        .presentationDetents([.medium])
+    }
+
+    /// "Extend a map": choose a saved scan area. The scanner then waits until it has found its place in that area (the phone must be
+    /// standing near a mapped corridor), and only then records the new part, attached to the old map.
+    private var extendPicker: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    Text("Stand near a place you already scanned, then pick that scan. The phone finds its position in the old scan first; after that, walk into the new area and tag its rooms.")
+                        .foregroundStyle(.secondary)
+                    if !canExtendHere {
+                        Banner(text: "Extending needs Live mode (Settings) on an iPhone with LiDAR.", kind: .warning)
+                    } else if extendOptions.isEmpty {
+                        Banner(text: "No scan on this phone has its saved position data. Make a new scan, or download a map together with its scan files.", kind: .info)
+                    }
+                    if canExtendHere {
+                        ForEach(extendOptions) { option in
+                            if let map = app.maps.first(where: { $0.id == option.mapId }) {
+                                CardRow(title: option.mapName, detail: "\(option.areaTitle) · \(detail(for: map))",
+                                        systemImage: "plus.square.on.square",
+                                        hint: "Starts extending this map. Stand near a place you already scanned.") {
+                                    showExtend = false
+                                    onExtend(option, map)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(Theme.Space.l)
+            }
+            .background(Theme.screenBackground)
+            .navigationTitle("Extend a map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { showExtend = false } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func detail(for map: BuildingMap) -> String {

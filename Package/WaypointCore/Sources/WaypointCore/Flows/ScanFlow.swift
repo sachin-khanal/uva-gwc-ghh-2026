@@ -117,7 +117,10 @@ public enum FinishGate: Equatable, Sendable {
 
     /// Rule: ARKit must report the area as mapped (a world map saved earlier relocalizes badly) AND
     /// at least one labelled place must be tagged, otherwise a blind user has nowhere to go.
-    public static func evaluate(quality: ScanQuality, labelledTagCount: Int) -> FinishGate {
+    /// `extensionPending`: this scan EXTENDS a saved map and has not yet found its place in it; nothing has been recorded, so finishing
+    /// would save nothing useful.
+    public static func evaluate(quality: ScanQuality, labelledTagCount: Int, extensionPending: Bool = false) -> FinishGate {
+        if extensionPending { return .blocked("Find your position in the saved area first, then walk the new part.") }
         if quality != .mapped { return .blocked("Keep walking slowly until mapping is complete.") }
         if labelledTagCount == 0 { return .blocked("Tag at least one room or door with a label.") }
         return .ready

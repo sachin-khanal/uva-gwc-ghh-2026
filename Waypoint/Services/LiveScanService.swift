@@ -4,7 +4,8 @@
 // Purpose:  Connects the new Scanner screens to the EXISTING `CaptureController`, observe-only
 //           (docs/UI_PLAN.md rule R3): it calls only CaptureController's existing methods
 //           (start, stop, tagPOI, adjustBoxMargin, save) and reads its existing @Published properties.
-//           CaptureController itself is not modified.
+//           CaptureController itself is not modified. (2026-10-17: also forwards `extending:` / `initialSegment:` and reads
+//           `extensionStatus` / `canRecord`, which already existed, for the "Extend a map" flow.)
 // Mapping:  trackingSummary -> ScanTracking.from(summary:) (tested in FlowTests)
 //           mappingStatus   -> ScanQuality
 //           nodeCount, triangleCount, scanBox, boxMargin, errorMessage copied as they are.
@@ -47,6 +48,13 @@ final class LiveScanService: ScanService {
         tags = []
         isPaused = false
         controller.start(mapName: mapName)
+        refresh()
+    }
+
+    func start(mapName: String, extending map: BuildingMap?, initialSegment: String?) {
+        tags = []
+        isPaused = false
+        controller.start(mapName: mapName, extending: map, initialSegment: initialSegment)
         refresh()
     }
 
@@ -122,6 +130,8 @@ final class LiveScanService: ScanService {
         s.boxMargin = controller.boxMargin
         s.tags = tags
         s.errorMessage = controller.errorMessage
+        s.extensionStatus = controller.extensionStatus
+        s.canRecord = controller.extensionStatus == nil || controller.canRecord
         snapshot = s
     }
 

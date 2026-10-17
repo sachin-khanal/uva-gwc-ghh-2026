@@ -24,6 +24,10 @@ struct ScannerFlowView: View {
             case .library:
                 ScanLibraryView(
                     onNewScan: { flow.newScan() },
+                    onExtend: { option, map in
+                        flow.newScan()
+                        startSession(name: map.name, extending: map, segment: option.segmentId)
+                    },
                     onOpen: { map in
                         reviewMap = map
                         flow.openReview()
@@ -71,9 +75,9 @@ struct ScannerFlowView: View {
         }
     }
 
-    private func startSession(name: String) {
+    private func startSession(name: String, extending map: BuildingMap? = nil, segment: String? = nil) {
         let service = ServiceFactory.makeScanService(mode: ServiceMode.current, store: app.store, deviceName: app.deviceName)
-        let model = ScanSessionModel(service: service, mapName: name)
+        let model = ScanSessionModel(service: service, mapName: name, extending: map, initialSegment: segment)
         session = model
         flow.startScanning()
         model.start()

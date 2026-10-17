@@ -33,9 +33,14 @@ struct ScanSnapshot: Equatable {
     /// A label read from a sign, offered as a one-tap tag (slot for SignReader, ROADMAP U2.7).
     var suggestion: String?
     var errorMessage: String?
+    /// Extending a saved map: what the scanner is waiting for / doing ("Look around slowly...", "Extending this building..."), nil for a new scan.
+    var extensionStatus: String?
+    /// False while an extension is still finding its place in the saved area (recording and tagging are paused).
+    var canRecord = true
 
     var labelledTagCount: Int { tags.filter(\.hasLabel).count }
-    var finishGate: FinishGate { FinishGate.evaluate(quality: quality, labelledTagCount: labelledTagCount) }
+    var finishGate: FinishGate { FinishGate.evaluate(quality: quality, labelledTagCount: labelledTagCount,
+                                                       extensionPending: extensionStatus != nil && !canRecord) }
 }
 
 protocol ScanService: AnyObject {
@@ -49,6 +54,9 @@ protocol ScanService: AnyObject {
     var scanBox: OrientedBox? { get }
 
     func start(mapName: String)
+    /// Extend a saved map: relocalize in `initialSegment`'s world map, then record new nodes attached to it. Only the live engine can; the
+    /// default (mock) just starts a demo scan.
+    func start(mapName: String, extending map: BuildingMap?, initialSegment: String?)
     /// Pause/resume recording. The live adapter can only stop accepting tags (see LiveScanService).
     func pause()
     func resume()
@@ -63,4 +71,8 @@ protocol ScanService: AnyObject {
 struct ScanServiceError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
+}
+
+extension ScanService {
+    func start(mapName: String, extending map: BuildingMap?, initialSegment: String?) { start(mapName: mapName) }
 }

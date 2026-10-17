@@ -23,11 +23,16 @@ final class ScanSessionModel: ObservableObject {
 
     let service: ScanService
     let mapName: String
+    /// Set when this session extends a saved map (new Scanner "Extend a map").
+    let extending: BuildingMap?
+    let initialSegment: String?
     private var toastWork: DispatchWorkItem?
 
-    init(service: ScanService, mapName: String) {
+    init(service: ScanService, mapName: String, extending: BuildingMap? = nil, initialSegment: String? = nil) {
         self.service = service
         self.mapName = mapName
+        self.extending = extending
+        self.initialSegment = initialSegment
         service.onUpdate = { [weak self] snapshot in self?.snapshot = snapshot }
     }
 
@@ -35,7 +40,7 @@ final class ScanSessionModel: ObservableObject {
     var gate: FinishGate { snapshot.finishGate }
 
     func start() {
-        service.start(mapName: mapName)
+        service.start(mapName: mapName, extending: extending, initialSegment: initialSegment)
         snapshot = service.snapshot
     }
 
@@ -46,7 +51,7 @@ final class ScanSessionModel: ObservableObject {
     }
 
     func tag(_ kind: NodeKind) {
-        guard !isPaused else { return }
+        guard !isPaused, snapshot.canRecord else { return }
         let label = labelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let before = snapshot.tags.count
         service.tag(kind: kind, label: label.isEmpty ? nil : label)

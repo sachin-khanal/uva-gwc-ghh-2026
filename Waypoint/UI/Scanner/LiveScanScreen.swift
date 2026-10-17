@@ -126,6 +126,10 @@ struct LiveScanScreen: View {
                 .accessibilityElement(children: .combine)
             }
 
+            if let status = s.extensionStatus {
+                // Extending a saved map: tell the volunteer what the scanner is waiting for. Recording and tagging are paused until it has found its place.
+                Banner(text: status, kind: s.canRecord ? .info : .warning)
+            }
             if case .limited(let reason) = s.tracking {
                 Banner(text: "\(reason). Slow down and point at walls with detail.")
             }

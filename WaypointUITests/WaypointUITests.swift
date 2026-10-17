@@ -152,6 +152,31 @@ final class WaypointUITests: XCTestCase {
         shot("61-posture-good")
     }
 
+    /// New Scanner > "Extend a map" must really start an extension (not the old "Coming soon" sheet): pick a saved scan, and the scanner
+    /// says it is looking for its place in that scan, with Finish disabled. Needs a real scan with saved position data on the phone.
+    func testNewScannerExtendMapStartsFindingPlaceInSavedScan() throws {
+        app.terminate()
+        app.launchArguments = ["-ui.newInterface", "YES", "-ui.serviceMode", "live"]
+        app.launch()
+        if app.state != .runningForeground { app.activate() }
+        need(app.buttons["mode.scan"], "Scan button missing").tap()
+        let extend = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Extend a map'")).firstMatch
+        need(extend, "Extend a map button missing").tap()
+        shot("70-extend-picker")
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Scanned area' OR label CONTAINS 'Scan area '")).firstMatch
+        guard saved.waitForExistence(timeout: 5) else { throw XCTSkip("no scan with saved position data on this phone") }
+        saved.tap()
+        let status = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'saved area' OR label CONTAINS 'scanned area' OR label CONTAINS 'Extending this building' OR label CONTAINS 'previously scanned'")).firstMatch
+        need(status, "scanner never said it is looking for its place in the saved scan", timeout: 20)
+        note("extension-status", status.label)
+        shot("71-extend-looking")
+        let finish = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Finish'")).firstMatch
+        need(finish, "Finish button missing")
+        if status.label.contains("saved area") || status.label.contains("scanned area") || status.label.contains("previously scanned") {
+            XCTAssertFalse(finish.isEnabled, "Finish must stay disabled until the scan has found its place in the old map")
+        }
+    }
+
     func testScanScreenShowsLiveHUD() {
         need(app.buttons["mode.scan"], "Scan button missing").tap()
         need(app.buttons["scan.start"], "Start scanning button missing").tap()
