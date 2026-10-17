@@ -91,6 +91,8 @@ signs, Android, App Store release, user accounts with email/password (anonymous 
 
 # Revision 3 — Detailed plan from now to demo, by person (2026-10-17)
 
+**Update 2026-10-17 (Codex, U3):** U3.4 standalone validator implemented: `python tools/validate_map.py` passes on the sample, and 9 Python regression tests pass on Windows. Usage: `tools/README.md`. CI integration remains pending under INF-2; Swift make checks need a Mac. Original task table retained below.
+
 Supersedes the per-letter assignments above (struck through there). Everything else in Revision 2 (the product loop, streams 0-7, milestones, cut lines) still holds.
 **Assumption:** about 24 hours of working time remain from "H+0", the moment everyone has read this. Shift the clock if that is wrong; the ORDER and the gates matter more than the hours.
 

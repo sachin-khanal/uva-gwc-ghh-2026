@@ -1,5 +1,7 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-17 (Codex, U3):** developer map validation tool added at `tools/validate_map.py` with `tools/test_validate_map.py` (9 Python tests passing on Windows). U3 owns it; standalone implementation complete, CI wiring pending (INF-2). No Swift module status changed. See `tools/README.md` for commands and validation limits.
+
 Status legend: **DONE** (works and tested as far as possible) · **SCAFFOLD** (compiles, wired, logic
 sketched; needs real work/device testing) · **TODO** (not started).
 "Tested" means automated tests in `make test`. Nothing involving ARKit/audio/haptics/Multipeer has

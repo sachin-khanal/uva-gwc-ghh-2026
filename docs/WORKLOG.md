@@ -1,5 +1,16 @@
 # Work log
 
+## 2026-10-17 — Codex for U3 — Windows map validator (U3.4)
+Area: D (U3 tooling)
+Files created: `tools/validate_map.py`, `tools/test_validate_map.py`, `tools/README.md`.
+Files edited: `docs/WORKLOG.md` (this entry), `docs/MODULES.md` and `docs/ROADMAP.md` (additive status notes).
+Files deleted: none. No Swift, schema, sample, dependencies, or CI workflow changed.
+Commands run: `py --version` (launcher reports no installed Python); `python --version` (3.14.0); `make help`, `make test`, `make typecheck` (all unavailable: make not installed on Windows); `python -B tools/validate_map.py`; `python -B -m unittest discover -s tools -p "test_*.py" -v`; `git diff --check`.
+Verified: sample PASS; 9 Python tests PASS, including hostile segment ids, nonfinite/overflow coordinates, duplicate UUIDs with different case, bad references, self-loops, distance tolerance, size limits, malformed bundles, required fields, and CLI failure exit codes. Whitespace check passed.
+NOT verified: Swift unit tests and iOS typecheck require a Mac; UNVERIFIED ON DEVICE. Python float math approximates SIMD and may differ at rounding boundaries; marker finite-number checking is intentionally stricter. Real-world map truth and existing-map merge checks are outside this tool's scope.
+Open problems / handoff: INF-2 CI wiring is still separate, as requested by U3. Mac teammate should run required make checks before merging. No commit or push performed.
+
+
 **Newest entry at the TOP.** Every human and agent adds an entry when they finish a block of work.
 This is how four people plus LLM agents stay in sync, so be explicit and complete.
 
