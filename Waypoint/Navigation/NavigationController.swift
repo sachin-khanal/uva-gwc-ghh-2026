@@ -313,10 +313,22 @@ final class NavigationController: ObservableObject {
             } ?? false
             lastTickPosition = mapPosition
             if jumped {
-                Log.nav.info("pose jumped; ignoring it for off-route and movement")
+                // The pose correcting itself is not the user walking - but the route WAS computed in
+                // the old frame, so it is now stale. Rebuild it quietly from the corrected position.
+                // Suppressing the rebuild (the first version of this) left the user following a route
+                // that started somewhere they had never been (device report 2026-10-17).
+                Log.nav.info("pose jumped; rebuilding the route from the corrected position")
                 offRouteTicks = 0
                 routeDistanceHistory.removeAll()
                 lastMovementSample = nil
+                if follower != nil, let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
+                    follower = rebuilt
+                    routeNodeIds = rebuilt.route.map(\.id)
+                    lastRouteWorldKey = ""
+                    // Deliberately NOT `planner.reset()` and NOT "Recalculating": nothing changed for
+                    // the user, only our idea of where they are. Re-briefing here is what produced
+                    // bursts of contradictory speech.
+                }
             }
 
             self.mapPosition = mapPosition

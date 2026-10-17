@@ -93,6 +93,29 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Clear the coarse alignment; rebuild the route after a correction   [tags: BUILD, BUG]
+Area: A (relocalization) + B (navigation). Branch `route-rebuild-on-fix` off `navigation-overhaul`. See D-040.
+
+Report with screenshots: the user stands at Start while the route begins across the building.
+Both faults were mine, from the last two commits.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` - when the fix becomes `.worldMap`, `mapToWorld` is reset to
+the identity, because ARKit's world frame IS the map frame once it has relocalized into the saved map; a leftover
+keyframe transform offset every coordinate.
+`Waypoint/Navigation/NavigationController.swift` - a pose jump now REBUILDS the route from the corrected position
+instead of merely being ignored. Quietly: no planner reset and no "Recalculating", since nothing changed for the user,
+only our estimate of where they are.
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched; existing recordings are unaffected.
+Open / handoff:
+1. **Keyframes may not be doing anything on a map that has a saved world map** - the matcher needs `.normal` tracking
+   and is skipped when a world map was supplied, and ARKit only reports `.normal` once it has already relocalized.
+   The console says which case applies: "using world map for segment X" or "no world map on disk". Worth checking
+   before investing further in keyframes.
+2. Still uncalibrated: `KeyframeIndex.defaultMaxDistance` (18).
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Latch the keyframe fix; ignore pose jumps   [tags: BUILD, BUG]
 Area: A (relocalization) + B (navigation). Branch `keyframe-latch` off `navigation-overhaul`. See D-039.
 

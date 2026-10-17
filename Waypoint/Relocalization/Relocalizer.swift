@@ -220,7 +220,19 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
             if usingWorldMap || markerSeen {
                 if state != .localized { Log.reloc.info("localized") }
                 // An exact fix supersedes a coarse keyframe one.
-                fix = markerSeen ? .marker : .worldMap
+                let exact: Fix = markerSeen ? .marker : .worldMap
+                if fix != exact {
+                    if exact == .worldMap {
+                        // ARKit relocalized into the SAVED world map, so its world frame IS the map
+                        // frame and the alignment is the identity. A keyframe may have set a coarse
+                        // transform earlier; leaving it in place silently offset every map coordinate,
+                        // which is why the route appeared to start somewhere the user was not
+                        // (device report 2026-10-17).
+                        mapToWorld = matrix_identity_float4x4
+                        Log.reloc.info("world map relocalized; dropped the coarse keyframe alignment")
+                    }
+                    fix = exact
+                }
                 state = .localized
             } else if fix == .keyframe {
                 state = .localized // coarse, but good enough to start guiding

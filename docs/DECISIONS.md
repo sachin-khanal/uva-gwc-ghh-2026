@@ -464,3 +464,25 @@ cannot machine-gun again, because the reset-the-planner path is what bypassed th
 The principle worth keeping: the embedding answers "where am I, roughly, right now" ONCE; the LiDAR-backed world model
 is what maintains the position afterwards. Anything that re-aligns the map continuously will fight the tracker.
 **Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-040 — A pose correction invalidates the ROUTE, and an exact fix must clear the coarse one (2026-10-17)
+Report: "the pathfinding doesn't actually start from where you are" - screenshots show the user standing at Start
+while the route's first waypoint is across the building.
+Two faults, both introduced by me in D-038/D-039.
+1. **The coarse alignment was never cleared.** When ARKit relocalizes into the SAVED world map, its world frame IS the
+map frame, so the alignment is the identity. A keyframe may have set a coarse transform minutes earlier; leaving it in
+place silently offset every map coordinate, so the user and the route were drawn in different frames. `updateState`
+now resets `mapToWorld` to the identity the moment the fix becomes `.worldMap`.
+2. **I suppressed the re-route that would have repaired the route.** D-039 correctly stopped treating a pose jump as
+the user walking off course - but a jump still means the route was computed in a frame we no longer believe. It is now
+rebuilt QUIETLY from the corrected position: no `planner.reset()`, no "Recalculating", because nothing changed for the
+user, only our idea of where they are. Re-briefing here is what caused the earlier bursts of contradictory speech.
+**Known limitation, written down rather than hidden:** the keyframe matcher requires `.normal` tracking and is skipped
+when a world map was supplied. With `initialWorldMap` set, ARKit reports `.limited(.relocalizing)` until it matches and
+only then `.normal` - so on a map that HAS a saved world map, keyframes never run, and the fast relocalization observed
+on a phone was either ARKit itself or a map whose world map failed to load. Letting keyframes run during `.relocalizing`
+would not help guidance either, because `NavigationController` requires `.normal` tracking before it guides at all.
+Making keyframes actually accelerate a world-mapped session means allowing guidance from a coarse fix - a real design
+decision, not a tweak, and not taken here. The log line "using world map for segment X" versus "no world map on disk"
+says which case a given map is in.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
