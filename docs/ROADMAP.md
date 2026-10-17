@@ -296,9 +296,36 @@ Cut line: A11Y-1/2/3 are part of the never-cut "guided walk with obstacles" path
 | U2.2/U2.3/U2.6 guidance + obstacle tuning on a phone | simulated-walk E2E 20/0/1 and UI tests 7/7 on the Pro Max; real corridor calibration not done | PARTIAL (software side done, calibration open) |
 | A11Y-1..A11Y-6 | code + tests done; posture axes, beacon ear, real obstacle hits unverified | OPEN |
 | U1.10 extend an existing map | built (MapBuilder + CaptureController + VolunteerView + migration 0003), tests pass | DONE in code; UNVERIFIED ON DEVICE |
-| U1.8 multi-segment relocalization, U2.5 re-routing, U2.7 OCR wiring, U2.9 `.waypointmap` handler | not found in code/WORKLOG | NOT STARTED |
+| U1.8 multi-segment relocalization, U2.5 re-routing, U2.7 OCR wiring, U2.9 `.waypointmap` handler | ~~not found in code/WORKLOG~~ ~~NOT STARTED~~ **Update 2026-10-17 (Claude, 21:45):** U2.5 re-routing DONE in code (Anmol's off-route re-route on `navigation-overhaul` + blocked-path detour + route memory); U2.7 OCR PARTLY (SignReader fed from NavigationController, confirmed signs are spoken, sign-vs-position check is log-only); U1.8 and U2.9 still NOT STARTED | see the 21:45 snapshot below |
 | U3.7 web viewer, U3.8 mesh export, U3.5 ops scripts | no `web/`, no `MeshExporter` | NOT STARTED |
 | U4.2-U4.6, U4.9-U4.13 field/QA/demo | no `docs/field/` | NOT STARTED (or not in the repo) |
-| New Scanner/Navigator UI | branch `app-ui-workflows` (neehamikki), 1 commit, one conflict in `RootView.swift`, not merged | PENDING merge decision |
+| New Scanner/Navigator UI | ~~branch `app-ui-workflows` (neehamikki), 1 commit, one conflict in `RootView.swift`, not merged~~ **Update 2026-10-17 (Claude):** merged into `main` (dd38866); behind a default-off "New interface" switch | ~~PENDING merge decision~~ MERGED; New-UI Level-4 checks in TESTING.md still unrun |
 
 Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next step: the real-phone U1.4-U1.6 walk.
+**Update 2026-10-17 (Claude, 21:45):** still true for G2 (no trial table exists), but see the new snapshot below: a real scan now exists on U1's phone.
+
+
+## Update 2026-10-17 21:45 — status snapshot 2 and what is next for U1 (Claude; evidence = branches fetched at 21:40, WORKLOG, files read off U1's connected iPhone, on-phone test runs)
+
+**Branches (cross-referenced).**
+
+| Branch | State | Action |
+|---|---|---|
+| `main` (dd38866) | has `U3`, `app-ui-workflows`, route memory, map format 2 | – |
+| `U3`, `app-ui-workflows` | fully inside `main`; no new commits | can be deleted after the team agrees |
+| `fix/guidance-voice` (e1c7a1a, pushed) | `main` + `navigation-overhaul` up to 556c0f0 + the 4 guidance fixes + map format 3; `make test` 217 pass, typecheck, `make check`, E2E 20/0/1, UI tests 7/7, simulated walk PASS on U1's phone | review + merge (U1 is merge captain, U1.11) |
+| `navigation-overhaul` (Anmol Thapa) | 12 commits ahead of main; its last 2 (4158bc0 speech queue "only safety interrupts"; c5ba14f off-main-thread scan loading) are NOT in `fix/guidance-voice` and conflict in `NavigationController.swift` | merge them into `fix/guidance-voice` first, re-run the phone tests |
+
+**On U1's phone right now (read via `devicectl`, installed build = `fix/guidance-voice` + classic-UI fix).** Two maps: the SAMPLE and a REAL scan "Rice Hall · Floor 4" (17 nodes, rooms 409/410/411, about 8 m long, ONE segment, 17.8 MB world map, saved in format 2). It passes `tools/validate_map.py`. A `route-memory.json` with one cached 12.3 m route sits next to it, so a navigation on the real map ran and persisted memory. This is the first real data: U1.4/U1.5 are effectively done. Nothing records U1.6 yet.
+
+**Done since the earlier snapshot:** voice = Siri voice (13 installed on the phone; "Nicky" compact chosen), opening briefing, arrival-only at the destination, sensor-based warnings, off-route + blocked-path re-routing, route memory, map format versioning with a spec per version. All verified on the phone only in SIMULATION; real LiDAR / real hallway / real door still unverified.
+
+**Next for U1, in order**
+1. **U1.6 / Gate G2 (critical path, needs you and the hallway):** with the Floor 4 scan, kill the app, relaunch, Navigate to Room 410 from the scan's start; repeat 5 times, once with different lighting, once starting 3 m away. Record seconds-to-localize per trial in a WORKLOG table. If fewer than 4 of 5 localize, U1.7 (marker fallback) becomes top priority.
+2. **Merge captain (U1.11):** merge the 2 newer `navigation-overhaul` commits into `fix/guidance-voice`, rerun `make test`, `typecheck`, `check`, `uitest`, then merge to `main`.
+3. **Rescan with the current build** (it has loop closure and room floor areas; the existing scan is an 8 m chain from before). Walk a longer route (30 m+) so U1.8 multi-segment has something to prove, tag rooms.
+4. **Listen test (needs ears):** `DEVICE=<id> make selftest-sim` with headphones: is the Siri voice acceptable, is the opening briefing clear and short enough? An enhanced/premium Siri voice may sound better than the compact one (Settings > Accessibility > Spoken Content > Voices).
+5. **U1.8** multi-segment relocalization (not started), then **U1.9** joint walk with U2 on the real map.
+6. Cheap housekeeping: U1.2 branch rule, INF-1 `make ipa`, INF-2 CI (the GitHub docs-check Action has run on the main push; check its result in the Actions tab).
+
+**Not on U1's list but open for the team:** mesh export + 3D viewer (U3.8, nothing built), web viewer (U3.7), `.waypointmap` open handler (U2.9), field survey and demo script (U4), real-LiDAR calibration of obstacles and the new side-clearance hints (U2.6).

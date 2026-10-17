@@ -1,5 +1,13 @@
 # Work log
 
+## 2026-10-17 21:50 — Claude (agent, for Sachin) — Roadmap cleanup + status snapshot 2 (docs only)   [tags: DOCS]
+Area: shared docs. Requested by Sachin: check the connected phone and the roadmap, clean up what is stale, say what is next for U1, cross-referencing branches first.
+Files edited: `docs/ROADMAP.md` only (strike-through + labelled Update on 2 stale snapshot rows and the gate line; new section "Update 2026-10-17 21:45" with the branch table, phone contents, what is done and the ordered U1 next steps).
+Evidence used: `git fetch` + ahead/behind of every remote branch; `xcrun devicectl device info files` and `copy from` on the phone's app container (Maps/…/map.json, route-memory.json); the on-phone test runs in the 21:30 entry.
+Verified: facts above were read from the repo and the phone (Rice Hall · Floor 4: 17 nodes, rooms 409/410/411, schemaVersion 2, passes tools/validate_map.py; one route-memory entry of 12.3 m).
+NOT verified: who ran the navigation that wrote that route memory, and whether it really localized in a hallway (no trial table exists); G2 is still untested.
+Open problems / handoff: see the new ROADMAP section.
+
 ## 2026-10-17 21:30 — Claude (agent, for Sachin) — First real on-phone run of the guidance fixes; tester/launch fixes; briefing de-duplication   [tags: BUG, BUILD]
 Area: B (Guidance) + D (tests). Phone: Sachin's iPhone 16 Pro Max, unlocked, build installed with `make build install` (so these results ARE for this code).
 Found on the phone: (a) `make selftest-sim` did nothing useful because the phone had the "New interface" preference ON (leftover UserDefaults) and scripted launches landed on the new building picker -> `RootView` now forces the classic screens whenever a launch command is active; UI tests pin `-ui.newInterface NO`. (b) The opening briefing was followed in the same breath by "In 9 meters, turn right. Door to lobby on your left." -> after the queued opening briefing the planner marks the covered countdown thresholds and landmark as announced (plain route briefing unchanged). (c) UI tests slowed to 145-200 s and one failed: `mapPosition`/`headingRadians` (added by navigation-overhaul) were published every tick -> `setIfChanged`. (d) E2E check `nav.simulatedWalk` expected the old "Turn right." -> now accepts "Turn right 90 degrees." (navigation-overhaul wording).
