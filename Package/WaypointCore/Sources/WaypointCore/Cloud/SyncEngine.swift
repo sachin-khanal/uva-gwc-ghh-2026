@@ -26,8 +26,12 @@ public final class SyncEngine {
         self.store = store
     }
 
-    public static func worldMapPath(owner: String, mapId: UUID, segment: String) -> String {
-        "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
+    /// Builds the storage path. `segment` comes from (untrusted) map data, so it is checked here too, and
+    /// `owner` must look like a UUID: no character that could change the URL's structure gets through.
+    public static func worldMapPath(owner: String, mapId: UUID, segment: String) throws -> String {
+        guard SegmentID.isValid(segment) else { throw CloudError.rejected("Unsafe segment id.") }
+        guard UUID(uuidString: owner) != nil else { throw CloudError.rejected("Unsafe owner id.") }
+        return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
     }
 
     /// Uploads the local map `mapId`. `share == true` makes the row readable by every signed-in user.
@@ -37,7 +41,7 @@ public final class SyncEngine {
         let owner = try await client.currentUserId()
 
         for (segment, data) in bundle.worldMaps.sorted(by: { $0.key < $1.key }) {
-            let path = Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
+            let path = try Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
             try await client.upload(bucket: Self.worldMapBucket, path: path, data: data)
         }
         let row = BuildingRow(mapId: mapId, name: bundle.map.name, version: bundle.map.version,
@@ -58,9 +62,13 @@ public final class SyncEngine {
         guard let owner = remote.row.owner?.uuidString else {
             throw CloudError.rejected("Remote map has no owner.")
         }
+        // Validate the map FIRST (including segment ids) so a hostile map cannot steer any download URL.
+        do { try MapBundle(map: remote.row.map).validate() }
+        catch MapStoreError.rejected(let reason) { throw CloudError.rejected(reason) }
+
         var worldMaps: [String: Data] = [:]
         for segment in remote.row.map.segmentIds {
-            let path = Self.worldMapPath(owner: owner, mapId: remote.row.mapId, segment: segment)
+            let path = try Self.worldMapPath(owner: owner, mapId: remote.row.mapId, segment: segment)
             do {
                 worldMaps[segment] = try await client.download(bucket: Self.worldMapBucket, path: path)
             } catch CloudError.http(let status, _) where status == 400 || status == 404 {

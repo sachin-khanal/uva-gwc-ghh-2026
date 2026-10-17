@@ -7,6 +7,7 @@
 //           docs/WORKLOG.md.
 //
 import Foundation
+import Security
 
 /// Project URL + PUBLIC anon key. The anon key ships inside the app, so it is not a secret and ALL
 /// authorization is enforced by Row Level Security in the database. NEVER put the service-role key
@@ -48,7 +49,7 @@ public struct AuthSession: Codable, Equatable, Sendable {
     }
 }
 
-/// Where the session is remembered between launches. The app uses UserDefaults; tests use memory.
+/// Where the session is remembered between launches. The app uses the Keychain (`KeychainSessionStore`); tests use memory.
 public protocol SessionStore: Sendable {
     func load() -> AuthSession?
     func save(_ session: AuthSession?)
@@ -62,22 +63,41 @@ public final class InMemorySessionStore: SessionStore, @unchecked Sendable {
     public func save(_ session: AuthSession?) { lock.lock(); value = session; lock.unlock() }
 }
 
-public final class UserDefaultsSessionStore: SessionStore, @unchecked Sendable {
-    private let key: String
-    private let defaults: UserDefaults
-    public init(key: String = "waypoint.supabase.session", defaults: UserDefaults = .standard) {
-        self.key = key
-        self.defaults = defaults
+/// Remembers the session in the iOS/macOS KEYCHAIN (not UserDefaults): the access/refresh tokens are credentials,
+/// so they must not sit in a plain, backup-readable preferences file. Item class: generic password, accessible
+/// after first unlock, THIS DEVICE ONLY (never migrates to another device via backup/iCloud Keychain).
+public final class KeychainSessionStore: SessionStore, @unchecked Sendable {
+    private let service: String
+    private let account: String
+
+    public init(service: String = "edu.virginia.waypoint.supabase", account: String = "session") {
+        self.service = service
+        self.account = account
     }
+
+    private var baseQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
+    }
+
     public func load() -> AuthSession? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(AuthSession.self, from: $0) }
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return try? JSONDecoder().decode(AuthSession.self, from: data)
     }
+
     public func save(_ session: AuthSession?) {
-        if let session, let data = try? JSONEncoder().encode(session) {
-            defaults.set(data, forKey: key)
-        } else {
-            defaults.removeObject(forKey: key)
-        }
+        SecItemDelete(baseQuery as CFDictionary) // replace-or-clear in one path
+        guard let session, let data = try? JSONEncoder().encode(session) else { return }
+        var add = baseQuery
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
     }
 }
 

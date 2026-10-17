@@ -220,6 +220,36 @@ final class CloudTests: XCTestCase {
         } catch CloudError.rejected {}
     }
 
+    func testHostileSegmentIdNeverReachesAURL() async throws {
+        var map = try loadSampleMap()
+        map.nodes[0].segmentId = "../../other-user/secret"
+        let row = BuildingRow(rowId: UUID(), mapId: map.id, owner: UUID(), name: "evil", version: 1, map: map, isShared: true)
+        let t = MockTransport { req in
+            req.url.path.hasPrefix("/auth/") ? HTTPResponse(status: 200, body: authJSON()) : HTTPResponse(status: 200, body: Data([1]))
+        }
+        do {
+            _ = try await SyncEngine(client: makeClient(t), store: tempStore()).fetchBundle(RemoteMap(row: row, isMine: false))
+            XCTFail("expected rejection")
+        } catch CloudError.rejected {}
+        XCTAssertTrue(t.requests.filter { $0.url.path.hasPrefix("/storage/") }.isEmpty, "no storage request may be sent")
+
+        XCTAssertThrowsError(try SyncEngine.worldMapPath(owner: UUID().uuidString, mapId: UUID(), segment: "a/../b"))
+        XCTAssertThrowsError(try SyncEngine.worldMapPath(owner: "../x", mapId: UUID(), segment: "seg1"))
+        XCTAssertNoThrow(try SyncEngine.worldMapPath(owner: UUID().uuidString, mapId: UUID(), segment: "seg1"))
+    }
+
+    func testKeychainSessionStoreRoundTrip() throws {
+        let store = KeychainSessionStore(service: "edu.virginia.waypoint.test.\(UUID().uuidString)", account: "t")
+        let session = AuthSession(accessToken: "a", refreshToken: "r", userId: userId, expiresAt: Date(timeIntervalSince1970: 2_000_000_000))
+        store.save(session)
+        guard store.load() != nil else {
+            throw XCTSkip("Keychain not available in this test environment (e.g. no unlocked login keychain)")
+        }
+        XCTAssertEqual(store.load(), session)
+        store.save(nil)
+        XCTAssertNil(store.load(), "saving nil clears the credential")
+    }
+
     func testMissingWorldMapFileIsSkipped() async throws {
         let map = try loadSampleMap()
         let row = BuildingRow(rowId: UUID(), mapId: map.id, owner: UUID(), name: map.name, version: 1, map: map, isShared: true)

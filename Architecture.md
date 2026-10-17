@@ -274,12 +274,14 @@ Roadmap and parallel workstreams: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### 10.3 Cloud design (Supabase)
 - **Auth:** anonymous sign-in (no signup UI). Each phone gets a user id; Row Level Security uses it.
+  **Update 2026-10-17:** the session tokens are stored in the Keychain (~~UserDefaults~~), see D-018.
 - **Tables:** `buildings` (id, owner, name, version, map_json jsonb, is_shared, updated_at) and
   `scans` (id, building_id, owner, storage_path, bytes, bbox jsonb, triangle_count, created_at).
 - **Storage buckets:** `worldmaps` (ARWorldMap binaries), `meshes` (USDZ). Private; access via RLS on
   `storage.objects` keyed on owner id; shared buildings readable by all authenticated users.
 - **Client:** plain REST via `URLSession` (PostgREST + Storage + GoTrue anonymous), implemented in
   `WaypointCore` with an injectable transport so it is unit-tested with a mock. No Supabase SDK (D-014).
+- **Update 2026-10-17 (D-018):** map data from others is also untrusted for FILE and URL building — segment ids must match `[A-Za-z0-9_-]{1,64}`; owner must be a UUID.
 - **Trust:** the app ships with the public anon key, so ALL authorization is RLS. Downloaded maps are
   untrusted data: they go through the same `MapBundle.validate()` and user approval as peer-to-peer
   imports (D-012).

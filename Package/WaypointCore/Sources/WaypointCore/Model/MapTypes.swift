@@ -13,6 +13,19 @@
 import Foundation
 import simd
 
+/// Segment ids end up inside FILE NAMES (`worldmap-<id>.arworldmap`) and cloud STORAGE PATHS
+/// (`<owner>/<map>/<id>.arworldmap`), and they arrive inside maps from other people. So they are
+/// restricted to a safe alphabet: no `/`, `..`, `%`, spaces or empty strings. Enforced in
+/// `MapBundle.validate()`, `MapStore` and `SyncEngine` (defense in depth).
+public enum SegmentID {
+    public static func isValid(_ id: String) -> Bool {
+        guard (1...64).contains(id.utf8.count) else { return false }
+        return id.utf8.allSatisfy { c in
+            (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x2D || c == 0x5F
+        } // 0-9 A-Z a-z - _
+    }
+}
+
 /// What a node represents in the real world.
 public enum NodeKind: String, Codable, CaseIterable, Sendable {
     /// A breadcrumb dropped automatically while the volunteer walks (no label).

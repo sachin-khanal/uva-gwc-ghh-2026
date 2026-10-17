@@ -116,6 +116,40 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(try store.load(id: map.id).nodes.count, map.nodes.count + 1)
     }
 
+    func testSegmentIdAlphabet() {
+        for ok in ["seg1", "A-b_9", String(repeating: "x", count: 64)] { XCTAssertTrue(SegmentID.isValid(ok), ok) }
+        for bad in ["", "../x", "a/b", "..", "a%2e", "a b", "seg1.", "é", String(repeating: "x", count: 65), "a\\b", "seg\n"] {
+            XCTAssertFalse(SegmentID.isValid(bad), bad.debugDescription)
+        }
+    }
+
+    func testValidationRejectsPathTraversalSegments() throws {
+        var map = try loadSampleMap()
+        map.nodes[0].segmentId = "../../escape"
+        XCTAssertThrowsError(try MapBundle(map: map).validate())
+
+        let good = try loadSampleMap()
+        XCTAssertThrowsError(try MapBundle(map: good, worldMaps: ["../evil": Data([1])]).validate())
+        XCTAssertThrowsError(try MapBundle(map: good, worldMaps: ["a/b": Data([1])]).validate())
+    }
+
+    func testStoreNeverWritesOutsideItsFolderForHostileSegments() throws {
+        let sandbox = FileManager.default.temporaryDirectory.appendingPathComponent("wp-trav-\(UUID().uuidString)")
+        let store = MapStore(rootURL: sandbox.appendingPathComponent("Maps"))
+        let map = try loadSampleMap()
+        try store.save(map)
+
+        XCTAssertThrowsError(try store.saveWorldMap(Data([1]), mapId: map.id, segmentId: "../../../pwned"))
+        XCTAssertThrowsError(try store.loadWorldMap(mapId: map.id, segmentId: "../map"))
+        // An import carrying a hostile world-map key is refused wholesale and writes nothing.
+        let hostile = MapBundle(map: map, worldMaps: ["../../pwned": Data([6, 6, 6])])
+        XCTAssertThrowsError(try store.importBundle(hostile))
+
+        let files = (FileManager.default.enumerator(atPath: sandbox.path)?.allObjects as? [String]) ?? []
+        XCTAssertFalse(files.contains { $0.contains("pwned") }, "nothing may be created from a hostile segment id: \(files)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.deletingLastPathComponent().appendingPathComponent("pwned.arworldmap").path))
+    }
+
     func testBundleImportCreatesAndMerges() throws {
         let sender = MapStore(rootURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("wp-send-\(UUID().uuidString)"))

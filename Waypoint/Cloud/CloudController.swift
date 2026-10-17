@@ -45,7 +45,7 @@ final class CloudController: ObservableObject {
             urlString: bundle.object(forInfoDictionaryKey: "SupabaseURL") as? String,
             anonKey: bundle.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String)
         if let config {
-            let client = SupabaseClient(config: config, sessionStore: UserDefaultsSessionStore())
+            let client = SupabaseClient(config: config, sessionStore: KeychainSessionStore())
             engine = SyncEngine(client: client, store: store)
             isConfigured = true
             status = "Cloud ready"

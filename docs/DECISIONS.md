@@ -80,6 +80,7 @@ Trade-off: more code than `supabase-swift`. Revisit if the client takes more tha
 No signup flow in a 24h demo. The anon key is public, so RLS is the only authorization. Downloaded
 maps are validated and user-approved exactly like peer-to-peer imports (D-012). ~~**Status:** proposed.~~
 **Update 2026-10-17:** implemented in `supabase/migrations/0001_init.sql` and `SyncEngine`/`CloudController` (other people's maps need a tap; everything is validated). The SQL has never been run on a real project.
+**Update 2026-10-17:** hardened by D-018 — segment ids are restricted to a safe alphabet, and the session token is stored in the Keychain (~~UserDefaults~~).
 
 ## D-016 — Multipeer/AirDrop stay as the offline fallback (~~PROPOSED~~ IMPLEMENTED 2026-10-17)
 Venue Wi-Fi may be bad or the free-tier project may be paused. Navigation never depends on the network.
@@ -92,3 +93,12 @@ Rule from the team: when a `.md` file goes stale, keep the old text ~~struck thr
 Codified as AGENTS.md rule 11 and docs/WORKFLOW.md principle 6. This pass applied it to Architecture.md, DECISIONS.md, ROADMAP.md,
 MODULES.md, README.md and SETUP.md (see WORKLOG). Earlier edits that overwrote text were restored as struck-out text from git
 where the original was recoverable (Architecture.md §3, §5). **Status:** accepted.
+
+## D-018 — Untrusted ids never become paths; credentials live in the Keychain (2026-10-17)
+Raised by a commit-time automated security review. (1) `segmentId` comes from map data written by other people yet became a local
+file name (`worldmap-<id>.arworldmap`) and a Storage path. A value like `../../x` could have written outside the map folder or
+steered a download URL. Now ids must match `[A-Za-z0-9_-]{1,64}` (`SegmentID.isValid`), enforced in `MapBundle.validate()`,
+`MapStore.saveWorldMap/loadWorldMap`, and `SyncEngine.worldMapPath` (which also requires a UUID owner); `fetchBundle` validates the
+whole map BEFORE building any URL. (2) The Supabase access/refresh tokens were stored in UserDefaults; they now live in the Keychain
+(`KeychainSessionStore`: generic password, accessible after first unlock, this device only). The anon key is public by design and
+stays in Info.plist. **Status:** accepted; covered by tests (traversal attempts, Keychain round trip).

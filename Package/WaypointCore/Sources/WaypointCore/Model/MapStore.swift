@@ -50,6 +50,13 @@ extension MapBundle {
         if worldMaps.values.contains(where: { $0.count > Self.maxWorldMapBytes }) {
             throw MapStoreError.rejected("A world map in this bundle is too large.")
         }
+        // Segment ids become file names and storage paths: reject anything outside the safe alphabet.
+        for n in map.nodes where !SegmentID.isValid(n.segmentId) {
+            throw MapStoreError.rejected("A node has an unsafe segment id.")
+        }
+        for key in worldMaps.keys where !SegmentID.isValid(key) {
+            throw MapStoreError.rejected("A world map has an unsafe segment id.")
+        }
         var positions: [UUID: SIMD3<Float>] = [:]
         for n in map.nodes {
             guard n.position.x.isFinite, n.position.y.isFinite, n.position.z.isFinite else {
@@ -135,12 +142,14 @@ public final class MapStore {
     // MARK: ARWorldMap bytes
 
     public func saveWorldMap(_ data: Data, mapId: UUID, segmentId: String) throws {
+        guard SegmentID.isValid(segmentId) else { throw MapStoreError.rejected("Unsafe segment id.") }
         try fm.createDirectory(at: directory(for: mapId), withIntermediateDirectories: true)
         try data.write(to: worldMapURL(mapId: mapId, segmentId: segmentId), options: .atomic)
     }
 
     /// Returns nil (not an error) if this segment has no saved world map, e.g. the sample map.
     public func loadWorldMap(mapId: UUID, segmentId: String) throws -> Data? {
+        guard SegmentID.isValid(segmentId) else { throw MapStoreError.rejected("Unsafe segment id.") }
         let url = worldMapURL(mapId: mapId, segmentId: segmentId)
         guard fm.fileExists(atPath: url.path) else { return nil }
         return try Data(contentsOf: url)
