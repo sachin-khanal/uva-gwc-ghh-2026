@@ -1,0 +1,96 @@
+//
+// File:     Model/BuildingMap.swift
+// Module:   WaypointCore
+// Owner:    SHARED CONTRACT (see MapTypes.swift). Merge logic: D (sync) + A (maps).
+// Purpose:  The top-level map document: nodes + edges + optional marker, plus JSON helpers and
+//           the merge rule used when several people extend the same building.
+// On disk:  <Documents>/Maps/<map-uuid>/map.json   (this struct)
+//           <Documents>/Maps/<map-uuid>/worldmap-<segmentId>.arworldmap  (binary ARWorldMap)
+//           See MapStore.swift.
+//
+import Foundation
+
+public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
+
+    /// Bump when the JSON shape changes incompatibly, and note it in docs/WORKLOG.md.
+    public static let schemaVersion = 1
+
+    public var id: UUID
+    /// Display name, e.g. "Rice Hall, floor 1".
+    public var name: String
+    /// Increments every time the map is saved after being extended. Sync uses it to decide who is newer.
+    public var version: Int
+    public var nodes: [MapNode]
+    public var edges: [MapEdge]
+    /// Optional fallback relocalization marker (see MarkerRef).
+    public var marker: MarkerRef?
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        version: Int = 1,
+        nodes: [MapNode] = [],
+        edges: [MapEdge] = [],
+        marker: MarkerRef? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.version = version
+        self.nodes = nodes
+        self.edges = edges
+        self.marker = marker
+    }
+
+    // MARK: Queries
+
+    public func node(id: UUID) -> MapNode? {
+        nodes.first { $0.id == id }
+    }
+
+    /// Distinct segment ids present in the map, sorted (each needs its own ARWorldMap file).
+    public var segmentIds: [String] {
+        Array(Set(nodes.map(\.segmentId))).sorted()
+    }
+
+    /// Nodes a blind user can pick as a destination: anything with a label.
+    public var destinations: [MapNode] {
+        nodes.filter { ($0.label?.isEmpty == false) && $0.kind != .corridor }
+    }
+
+    // MARK: Merging ("anyone can extend a building's map")
+
+    /// Union of two copies of the same building map.
+    /// Rules (kept deliberately simple for the hackathon):
+    ///  * Nodes are matched by `id`. If both have the same id, `self`'s copy wins.
+    ///  * Edges are matched as an unordered pair of node ids. `self`'s copy wins.
+    ///  * `marker` prefers `self`'s.
+    ///  * `version` becomes max(self, other) + 1 so peers can tell the merged map is newer.
+    ///  * No position reconciliation and no duplicate-label detection (documented limitation).
+    public func merged(with other: BuildingMap) -> BuildingMap {
+        var result = self
+
+        let knownNodeIds = Set(nodes.map(\.id))
+        for n in other.nodes where !knownNodeIds.contains(n.id) {
+            result.nodes.append(n)
+        }
+        for e in other.edges where !result.edges.contains(where: { $0.connects(e.from, e.to) }) {
+            result.edges.append(e)
+        }
+        if result.marker == nil { result.marker = other.marker }
+        result.version = max(version, other.version) + 1
+        return result
+    }
+
+    // MARK: JSON
+
+    /// Pretty, stable-ordered JSON so diffs are readable in git and Live Share.
+    public func jsonData() throws -> Data {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try enc.encode(self)
+    }
+
+    public static func from(jsonData: Data) throws -> BuildingMap {
+        try JSONDecoder().decode(BuildingMap.self, from: jsonData)
+    }
+}

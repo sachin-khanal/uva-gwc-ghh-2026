@@ -1,0 +1,13 @@
+// File:    Config/Base.xcconfig
+// Purpose: Shared build defaults + the hook for per-developer overrides.
+// Rule:    Do NOT put your own team id here. Copy Config/Local.xcconfig.example to
+//          Config/Local.xcconfig (git-ignored) and edit THAT. `make setup` does the copy.
+
+// Defaults so the project still generates/compiles on a machine with no Local.xcconfig.
+WAYPOINT_DEV_SUFFIX = shared
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+// Optional include (note the "?"): silently skipped if the file does not exist.
+// Values in Local.xcconfig override the defaults above because they are read later.
+#include? "Local.xcconfig"

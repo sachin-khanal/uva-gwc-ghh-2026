@@ -1,0 +1,7 @@
+Waypoint: indoor navigation for blind users
+• A sighted volunteer walks a building once, and the ARKit scan becomes a shared map with doors, stairs, and room labels pinned on it.
+• A blind user navigates it later using spatial audio (the next turn is literally heard from that direction) and haptics.
+• On-device CV reads room numbers and signs and detects obstacles using LiDAR depth on
+Pro iPhones.
+• Maps sync over the local network, and anyone can extend a building's map.
+• Demo: blindfold a judge and have them walk to a room in Rice Hall.

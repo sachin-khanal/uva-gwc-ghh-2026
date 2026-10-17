@@ -1,0 +1,73 @@
+# File:    project.yml
+# Purpose: XcodeGen spec. `make gen` turns this into Waypoint.xcodeproj (which is git-ignored,
+#          so the 4 of us never fight over .pbxproj merge conflicts).
+# Edit this file (not the .xcodeproj) to: add a target, add a framework, change a build setting.
+# After editing, run `make gen`. New .swift files under /Waypoint are picked up automatically
+# the next time you run `make gen` (or `make build`, which regenerates first).
+# Per-developer values (Apple team id, bundle id suffix) live in Config/Local.xcconfig, NOT here.
+name: Waypoint
+
+options:
+  bundleIdPrefix: edu.virginia.waypoint
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+
+# xcconfig chain: Config/Base.xcconfig includes the optional, git-ignored Config/Local.xcconfig.
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+settings:
+  base:
+    # Swift 5 language mode on purpose: Swift 6 strict concurrency would slow a 24h hackathon.
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # Real device only: LiDAR/ARKit do not work in the Simulator.
+    SUPPORTED_PLATFORMS: iphoneos
+    TARGETED_DEVICE_FAMILY: "1"   # iPhone only
+
+packages:
+  WaypointCore:
+    path: Package/WaypointCore
+
+targets:
+  Waypoint:
+    type: application
+    platform: iOS
+    sources:
+      - path: Waypoint
+        excludes:
+          - "Info.plist"      # referenced via INFOPLIST_FILE below, not as a source
+      - path: Samples          # rice-hall-sample.json is bundled so AppState can seed it on first launch
+        buildPhase: resources
+    dependencies:
+      - package: WaypointCore
+    info:
+      path: Waypoint/Info.plist
+      properties:
+        CFBundleDisplayName: Waypoint
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIRequiresFullScreen: true   # portrait-only on purpose (depth region + OCR assume portrait)
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiredDeviceCapabilities:
+          - arkit
+        NSCameraUsageDescription: "Waypoint uses the camera and LiDAR to build and follow indoor maps."
+        NSLocalNetworkUsageDescription: "Waypoint shares building maps with nearby phones."
+        NSBonjourServices:
+          - _waypoint-map._tcp
+          - _waypoint-map._udp
+        # Lets us see Documents/Maps in the iOS Files app while debugging.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        # WAYPOINT_DEV_SUFFIX comes from Config/Local.xcconfig (unique per developer so free
+        # Apple IDs do not collide on bundle ids).
+        PRODUCT_BUNDLE_IDENTIFIER: edu.virginia.waypoint.$(WAYPOINT_DEV_SUFFIX)
+        INFOPLIST_FILE: Waypoint/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""

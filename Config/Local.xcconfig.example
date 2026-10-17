@@ -1,0 +1,12 @@
+// File:    Config/Local.xcconfig.example  (copy to Config/Local.xcconfig, which is git-ignored)
+//
+// DEVELOPMENT_TEAM       Your *Personal Team* id (10 characters, e.g. ABCDE12345).
+//                        Find it: Xcode > Settings > Accounts > select your Apple ID > Manage
+//                        Certificates... OR run:  security find-identity -v -p codesigning
+//                        (the id is in parentheses at the end of "Apple Development: you (XXXXXXXXXX)").
+// WAYPOINT_DEV_SUFFIX    Short unique lowercase name, letters/digits only. Becomes the bundle id
+//                        edu.virginia.waypoint.<suffix>. Free Apple IDs cannot share a bundle id,
+//                        and each person's phone gets their own build.
+//
+DEVELOPMENT_TEAM = REPLACE_WITH_YOUR_TEAM_ID
+WAYPOINT_DEV_SUFFIX = replacewithyourname
