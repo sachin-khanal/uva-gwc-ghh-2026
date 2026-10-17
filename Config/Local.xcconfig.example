@@ -10,3 +10,9 @@
 //
 DEVELOPMENT_TEAM = REPLACE_WITH_YOUR_TEAM_ID
 WAYPOINT_DEV_SUFFIX = replacewithyourname
+
+// --- Supabase (optional until the backend exists; cloud features stay disabled while these are unset) ---
+// Dashboard -> Project Settings -> API: copy "Project URL" and the "anon public" key.
+// NEVER paste the service_role key here. Keep the odd "https:/$()/" - plain "https://" would be read as a comment.
+// SUPABASE_URL = https:/$()/YOUR-PROJECT-REF.supabase.co
+// SUPABASE_ANON_KEY = YOUR-ANON-PUBLIC-KEY

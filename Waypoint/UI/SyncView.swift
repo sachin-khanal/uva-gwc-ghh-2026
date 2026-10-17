@@ -1,8 +1,9 @@
 //
 // File:     Waypoint/UI/SyncView.swift
 // Owner:    D (App/Sync/Integration)
-// Purpose:  Sheet for sharing maps: shows nearby connected phones and a per-map "Send" button
-//           (Multipeer), plus a share-sheet export per map (AirDrop / Files) as the fallback.
+// Purpose:  Sheet for sharing maps: (1) nearby phones via Multipeer, (2) the Supabase cloud library (upload
+//           private/shared, refresh, download), (3) share-sheet export per map (AirDrop / Files) as the
+//           offline fallback. Anything that arrives from another person needs a tap to import.
 // Status:   SCAFFOLD. Syncing runs only while this sheet is open (start on appear, stop on disappear).
 //
 import SwiftUI
@@ -34,6 +35,7 @@ struct SyncView: View {
                         }
                     }
                 }
+                CloudSection(cloud: app.cloud, maps: app.maps)
                 Section("Export (AirDrop / Files)") {
                     ForEach(app.maps) { map in
                         if let url = try? app.store.writeBundleFile(id: map.id) {
@@ -67,6 +69,41 @@ struct SyncView: View {
             sync.start()
         }
         .onDisappear { holder.sync?.stop() }
+    }
+}
+
+/// Supabase library controls. A separate view so it OBSERVES CloudController (SyncView only observes
+/// AppState, which would not redraw when the cloud status or pending download changes).
+/// All actions show a message in `cloud.status` when cloud is not configured or offline.
+private struct CloudSection: View {
+    @ObservedObject var cloud: CloudController
+    let maps: [BuildingMap]
+
+    var body: some View {
+        Section("Cloud library (Supabase)") {
+            Text(cloud.status).font(.footnote)
+            if cloud.isConfigured {
+                ForEach(maps) { map in
+                    Button("Upload \"\(map.name)\" (private)") { cloud.push(mapId: map.id, name: map.name, share: false) }
+                    Button("Upload \"\(map.name)\" and share with everyone") { cloud.push(mapId: map.id, name: map.name, share: true) }
+                }
+                Button("Refresh library") { cloud.refresh() }
+                ForEach(cloud.remote) { item in
+                    Button("Download \"\(item.row.name)\" v\(item.row.version)\(item.isMine ? " (mine)" : "")") {
+                        cloud.download(item)
+                    }
+                }
+            }
+        }
+        .disabled(cloud.isBusy)
+        // Security (D-012 / D-015): someone else's map is never imported without this explicit tap.
+        .alert("Import this cloud map?",
+               isPresented: Binding(get: { cloud.pendingDownload != nil }, set: { _ in })) {
+            Button("Import") { cloud.respondToPendingDownload(accept: true) }
+            Button("Reject", role: .cancel) { cloud.respondToPendingDownload(accept: false) }
+        } message: {
+            Text(cloud.pendingDownload?.summary ?? "")
+        }
     }
 }
 

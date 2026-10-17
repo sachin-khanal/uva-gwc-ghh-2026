@@ -29,7 +29,7 @@ components were not installed yet. `sudo xcodebuild -runFirstLaunch` fixes it. U
 ```bash
 git clone <repo-url> && cd uva-gwc-ghh-2026     # or use the shared Live Share folder
 make setup        # installs xcodegen (Homebrew), creates Config/Local.xcconfig, runs the doctor
-make test         # should print "Executed 27 tests, with 0 failures"
+make test         # should print "Executed 45 tests, with 0 failures"
 make typecheck    # should print "typecheck OK"
 ```
 
@@ -63,6 +63,29 @@ make run                          # build + sign + install + launch; streams the
 First launch asks for Camera and Local Network permissions — tap **Allow** on both (Local Network
 is required for map sharing; if you deny it, sync silently fails; re-enable in iOS Settings → Waypoint).
 
+## 5. Supabase backend (optional until you want the cloud library)
+
+The app works fully offline without this; cloud features just show "Cloud not configured".
+A teammate does this ONCE for the whole team (one shared project), then shares the two public values.
+
+1. https://supabase.com -> New project (free tier). Pick any region, save the DB password somewhere safe.
+2. **Authentication -> Providers -> Anonymous Sign-Ins -> enable.** (The app signs in anonymously; there is no signup screen.)
+3. **SQL Editor** -> paste all of `supabase/migrations/0001_init.sql` -> Run. It is safe to re-run.
+4. **Project Settings -> API:** copy the *Project URL* and the **anon public** key.
+   **Never** copy the `service_role` key into the app, the repo, a chat or a screenshot.
+5. Each developer adds to their own `Config/Local.xcconfig` (git-ignored):
+   ```
+   SUPABASE_URL = https:/$()/YOUR-PROJECT-REF.supabase.co
+   SUPABASE_ANON_KEY = YOUR-ANON-PUBLIC-KEY
+   ```
+   The odd `https:/$()/` is deliberate: in an xcconfig file `//` starts a comment.
+6. `make run` again. Share maps -> "Cloud library" should say **Cloud ready**.
+
+Reality check (verify numbers in your dashboard): the free tier allows about 500 MB database, 1 GB file storage,
+50 MB per file, and **pauses the project after about a week without use** -> open the dashboard and click
+Restore before the demo. If Cloud shows "denied access (401/403)": Anonymous Sign-Ins is off or the SQL
+was not run. The anon key is public by design; the SQL's Row Level Security rules are what protect data.
+
 ## Free-account limits to remember
 
 - The app **expires after 7 days** (re-run `make run` to renew). Fine for a 24h hackathon.
@@ -83,4 +106,5 @@ is required for map sharing; if you deny it, sync silently fails; re-enable in i
 | Developer Mode option missing | Plug phone into the Mac with Xcode once; the option appears after |
 | `devicectl` shows the phone as unavailable | Unlock it, re-plug, accept the trust prompt |
 | AR/LiDAR features do nothing | You are on a non-Pro phone or the Simulator |
+| Cloud says "not configured" | `SUPABASE_URL` / `SUPABASE_ANON_KEY` missing in `Config/Local.xcconfig`, or you did not rebuild (`make run`) |
 | Sync never finds peers | Both phones need Local Network permission and Wi-Fi/Bluetooth on; use the AirDrop export fallback |

@@ -14,7 +14,7 @@ Rice Hall. (Original brief: [objective.txt](objective.txt).)
 
 ```bash
 make setup        # installs xcodegen, creates Config/Local.xcconfig (then edit it)
-make test         # 27 unit tests of the pure logic, no phone needed
+make test         # 45 unit tests of the pure logic, no phone needed
 make typecheck    # type-check the iOS app against the iOS SDK, no phone needed
 DEVICE=<id> make run   # build + install + launch on your iPhone  (see docs/SETUP.md first)
 ```
@@ -30,6 +30,8 @@ DEVICE=<id> make run   # build + install + launch on your iPhone  (see docs/SETU
 | [docs/MODULES.md](docs/MODULES.md) | Who owns what, status of each module, interfaces, backlog |
 | [docs/WORKLOG.md](docs/WORKLOG.md) | Running log of every change (newest first). Add an entry when you finish a block of work |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | Working together: Live Share and/or git |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | What to work on now: parallel workstreams, milestones, cut lines (Supabase + live scanner) |
+| [docs/TESTING.md](docs/TESTING.md) | What is automatically proven, and the on-device test plan |
 | [docs/SETUP.md](docs/SETUP.md) | Fresh Mac to running app, free Apple ID signing, troubleshooting |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Why things are the way they are |
 | [Architecture.md](Architecture.md) | The full design and 24-hour plan |
@@ -47,6 +49,6 @@ docs/  AGENTS.md        documentation
 
 ## Status
 
-First scaffold is in place and the pure logic is tested (27 tests passing). Everything that touches
+First scaffold is in place and the pure logic is tested (45 tests passing). Everything that touches
 ARKit, LiDAR, audio, haptics or Multipeer compiles but has **not yet run on a device**. See
 [docs/WORKLOG.md](docs/WORKLOG.md) for the exact state.

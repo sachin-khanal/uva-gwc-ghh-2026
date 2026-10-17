@@ -55,6 +55,24 @@ public enum Geometry {
         return atan2(cross, dot)
     }
 
+    /// Builds an ARKit-style camera transform at `position` looking along `forward` (horizontal part
+    /// only, so the camera stays level). The camera looks down its local -z, local +y is up and
+    /// local +x is to the right. Used by the simulated walker so the audio code can be exercised
+    /// without an AR session. Falls back to facing -z if `forward` has no horizontal component.
+    public static func cameraTransform(position: SIMD3<Float>, forward: SIMD3<Float>) -> simd_float4x4 {
+        var f = SIMD3<Float>(forward.x, 0, forward.z)
+        f = simd_length(f) > 1e-5 ? simd_normalize(f) : SIMD3<Float>(0, 0, -1)
+        let up = SIMD3<Float>(0, 1, 0)
+        let zAxis = -f                       // camera local +z points backwards
+        let xAxis = simd_normalize(simd_cross(up, zAxis)) // right
+        var m = matrix_identity_float4x4
+        m.columns.0 = SIMD4<Float>(xAxis.x, xAxis.y, xAxis.z, 0)
+        m.columns.1 = SIMD4<Float>(up.x, up.y, up.z, 0)
+        m.columns.2 = SIMD4<Float>(zAxis.x, zAxis.y, zAxis.z, 0)
+        m.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
+        return m
+    }
+
     /// Rotation about the +y (up) axis as a 4x4 matrix.
     public static func rotationY(_ radians: Float) -> simd_float4x4 {
         simd_float4x4(simd_quatf(angle: radians, axis: SIMD3<Float>(0, 1, 0)))

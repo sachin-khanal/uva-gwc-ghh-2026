@@ -1,0 +1,156 @@
+//
+// File:     Cloud/SupabaseClient.swift
+// Module:   WaypointCore
+// Owner:    D (App/Sync/Integration)
+// Purpose:  Minimal Supabase REST client (decision D-014: no Supabase SDK, plain HTTP):
+//             * GoTrue   anonymous sign-in + refresh        POST /auth/v1/signup, /auth/v1/token
+//             * PostgREST upsert/list `buildings`             /rest/v1/buildings
+//             * Storage  upload/download private files       /storage/v1/object/...
+//           Every call carries the public `apikey` header and the user's JWT as Bearer token, so Row
+//           Level Security sees `auth.uid()`.
+// Setup:    In the Supabase dashboard enable Authentication > Providers > Anonymous Sign-Ins, then run
+//           supabase/migrations/0001_init.sql in the SQL editor.
+// Actor:    all mutable state (the session) is isolated; safe to call from any task.
+//
+import Foundation
+
+public actor SupabaseClient {
+
+    public let config: SupabaseConfig
+    private let transport: HTTPTransport
+    private let sessionStore: SessionStore
+    private let now: @Sendable () -> Date
+    private var session: AuthSession?
+
+    public init(
+        config: SupabaseConfig,
+        transport: HTTPTransport = URLSessionTransport(),
+        sessionStore: SessionStore = InMemorySessionStore(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.config = config
+        self.transport = transport
+        self.sessionStore = sessionStore
+        self.now = now
+        self.session = sessionStore.load()
+    }
+
+    // MARK: Auth
+
+    /// Returns a valid session: reuses/refreshes the stored one, or signs in anonymously.
+    public func ensureSession() async throws -> AuthSession {
+        if let s = session {
+            if s.expiresAt.timeIntervalSince(now()) > 60 { return s }
+            if let refreshed = try? await refresh(s) { return refreshed }
+        }
+        return try await signInAnonymously()
+    }
+
+    public func currentUserId() async throws -> String {
+        try await ensureSession().userId
+    }
+
+    public func signInAnonymously() async throws -> AuthSession {
+        let req = HTTPRequest(
+            url: config.url.appendingPathComponent("auth/v1/signup"),
+            method: "POST",
+            headers: ["apikey": config.anonKey, "Content-Type": "application/json"],
+            body: Data("{}".utf8))
+        return try await storeSession(from: try await sendChecked(req))
+    }
+
+    private func refresh(_ old: AuthSession) async throws -> AuthSession {
+        var comps = URLComponents(url: config.url.appendingPathComponent("auth/v1/token"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "grant_type", value: "refresh_token")]
+        let body = try JSONSerialization.data(withJSONObject: ["refresh_token": old.refreshToken])
+        let req = HTTPRequest(
+            url: comps.url!, method: "POST",
+            headers: ["apikey": config.anonKey, "Content-Type": "application/json"], body: body)
+        return try await storeSession(from: try await sendChecked(req))
+    }
+
+    private struct AuthResponse: Decodable {
+        let access_token: String
+        let refresh_token: String
+        let expires_in: Double
+        struct User: Decodable { let id: String }
+        let user: User
+    }
+
+    private func storeSession(from data: Data) throws -> AuthSession {
+        guard let r = try? JSONDecoder().decode(AuthResponse.self, from: data) else {
+            throw CloudError.decoding("unexpected auth response")
+        }
+        let s = AuthSession(accessToken: r.access_token, refreshToken: r.refresh_token,
+                            userId: r.user.id, expiresAt: now().addingTimeInterval(r.expires_in))
+        session = s
+        sessionStore.save(s)
+        return s
+    }
+
+    // MARK: Buildings (PostgREST)
+
+    /// Insert or update this user's row for `row.mapId` (unique on owner + map_id).
+    public func upsertBuilding(_ row: BuildingRow) async throws {
+        let body = try JSONEncoder().encode(row)
+        _ = try await authed(
+            "POST", "rest/v1/buildings",
+            query: [URLQueryItem(name: "on_conflict", value: "owner,map_id")],
+            headers: ["Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal"],
+            body: body)
+    }
+
+    /// Every building row this user may see (their own + shared ones), newest first.
+    public func listBuildings() async throws -> [BuildingRow] {
+        let data = try await authed(
+            "GET", "rest/v1/buildings",
+            query: [URLQueryItem(name: "select", value: "*"), URLQueryItem(name: "order", value: "updated_at.desc")])
+        do { return try JSONDecoder().decode([BuildingRow].self, from: data) }
+        catch { throw CloudError.decoding("buildings: \(error.localizedDescription)") }
+    }
+
+    // MARK: Storage
+
+    /// Uploads (or overwrites) a private file. `path` must start with "<your user id>/" (RLS).
+    public func upload(bucket: String, path: String, data: Data, contentType: String = "application/octet-stream") async throws {
+        _ = try await authed(
+            "POST", "storage/v1/object/\(bucket)/\(path)",
+            headers: ["Content-Type": contentType, "x-upsert": "true"], body: data)
+    }
+
+    public func download(bucket: String, path: String) async throws -> Data {
+        try await authed("GET", "storage/v1/object/authenticated/\(bucket)/\(path)")
+    }
+
+    // MARK: Plumbing
+
+    private func authed(
+        _ method: String, _ path: String,
+        query: [URLQueryItem] = [], headers: [String: String] = [:], body: Data? = nil,
+        isRetry: Bool = false
+    ) async throws -> Data {
+        let s = try await ensureSession()
+        var comps = URLComponents(url: config.url.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { comps.queryItems = query }
+        var h = headers
+        h["apikey"] = config.anonKey
+        h["Authorization"] = "Bearer \(s.accessToken)"
+        let req = HTTPRequest(url: comps.url!, method: method, headers: h, body: body)
+        do {
+            return try await sendChecked(req)
+        } catch CloudError.http(let status, _) where status == 401 && !isRetry {
+            // Token rejected (revoked/expired early): drop it, sign in again once, retry.
+            session = nil
+            sessionStore.save(nil)
+            return try await authed(method, path, query: query, headers: headers, body: body, isRetry: true)
+        }
+    }
+
+    private func sendChecked(_ req: HTTPRequest) async throws -> Data {
+        let res = try await transport.send(req)
+        guard (200..<300).contains(res.status) else {
+            throw CloudError.http(status: res.status, message: String(decoding: res.body.prefix(300), as: UTF8.self))
+        }
+        return res.body
+    }
+}

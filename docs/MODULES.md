@@ -17,11 +17,15 @@ Package/WaypointCore/            pure logic, tested by `make test` (no Apple UI/
     Routing/      WaypointGraph, Router, GuidanceInstruction, RouteFollower
     Guidance/     FeedbackPlanner
     Vision/       ObstacleClassifier, RoomNumberParser (+ConsensusFilter)
-  Tests/WaypointCoreTests/   ModelTests, RoutingTests, FeedbackAndVisionTests
+    Scan/         OrientedBox (scan bounding box), ExportBudget (40 MB export cap)
+    Simulation/   PoseSimulator (virtual walker)
+    Cloud/        HTTPTransport, CloudModels, SupabaseClient, SyncEngine
+  Tests/WaypointCoreTests/   ModelTests, RoutingTests, FeedbackAndVisionTests, ScanAndSimulationTests, CloudTests
 Waypoint/                        the iOS app (ARKit/AVFoundation/SwiftUI glue; needs a phone)
-  App/ UI/ Capture/ Relocalization/ Navigation/ Guidance/ Vision/ Sync/
+  App/ UI/ Capture/ Scan/ Relocalization/ Navigation/ Guidance/ Vision/ Sync/ Cloud/
 Samples/rice-hall-sample.json    hand-written fake map; also bundled in the app and seeded on first launch
 Config/  project.yml  Makefile  scripts/    build system
+supabase/migrations/0001_init.sql  database + storage schema with RLS (run in the Supabase SQL editor)
 docs/  AGENTS.md  Architecture.md           documentation
 ```
 
@@ -33,6 +37,11 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Graph building from scan** | A | `Model/MapBuilder.swift` | DONE (logic) | `RoutingTests.testMapBuilder…` |
 | **Geometry / frames** | A (shared with B) | `Geometry/Geometry.swift` | DONE | `RoutingTests.testSignedBearing…`, `testMarkerAlignment…` |
 | **AR capture (volunteer)** | A | `Waypoint/Capture/CaptureController.swift` | SCAFFOLD | – (device) |
+| **Live LiDAR scan view + bounding box** | A | `Waypoint/Scan/LiveScanView.swift`, `MeshSampler.swift`, `Capture/CaptureController.swift` (stats, box) · core `Scan/OrientedBox.swift` | box math DONE · view SCAFFOLD | `ScanAndSimulationTests` (box) |
+| **Mesh export (USDZ) + 3D viewer** | C | core `Scan/ExportBudget.swift` (budget math) | budget DONE · exporter/viewer TODO | budget tested |
+| **Simulated walker / Simulate mode** | B | core `Simulation/PoseSimulator.swift`, `Navigation/NavigationController.swift` (`startSimulation`), `UI/NavigatorView.swift` | logic DONE (end-to-end test) · UI SCAFFOLD | `testEndToEndWalkProducesExpectedCues` |
+| **Supabase client + sync engine** | D | core `Cloud/*`, `supabase/migrations/0001_init.sql` | client DONE vs mock · SQL + live server UNVERIFIED | `CloudTests` |
+| **Cloud UI** | D | `Waypoint/Cloud/CloudController.swift`, `UI/SyncView.swift` (Cloud section) | SCAFFOLD | – (needs a Supabase project) |
 | **Relocalization** | A | `Waypoint/Relocalization/Relocalizer.swift` | SCAFFOLD | – (device) |
 | **Routing** | B | `Routing/WaypointGraph.swift`, `Router.swift`, `RouteFollower.swift`, `GuidanceInstruction.swift` | DONE (logic) | `RoutingTests` |
 | **Feedback decisions** | B | `Guidance/FeedbackPlanner.swift` | DONE (logic) | `FeedbackAndVisionTests` |

@@ -9,6 +9,9 @@
 // Threading: ARSession delivers delegate callbacks on the MAIN queue by default, and the
 //           @Published properties are only touched there. Do not move the delegate queue
 //           without adding hops.
+// Live scan: besides breadcrumbs, about once a second it samples the LiDAR mesh (MeshSampler), fits a
+//           gravity-aligned `OrientedBox` (the scan bounding box shown by LiveScanView) and publishes mesh
+//           stats. The user can grow/shrink the box with `adjustBoxMargin`.
 // Status:   SCAFFOLD - works end-to-end on paper; needs device testing. TODO(A):
 //             * hold-still hint when worldMappingStatus != .mapped
 //             * segment rollover (new segmentId every ~30 m) - Architecture.md 4.2
@@ -29,6 +32,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var trackingSummary = "Not started"
     @Published private(set) var savedMap: BuildingMap?
     @Published var errorMessage: String?
+
+    // Live-scan stats and bounding box (updated ~1 Hz)
+    @Published private(set) var scanBox: OrientedBox?
+    @Published private(set) var triangleCount = 0
+    @Published private(set) var meshAnchorCount = 0
+    /// Extra meters added to every side of the fitted box (user adjustable).
+    @Published private(set) var boxMargin: Float = 0.1
+    private var fittedBox: OrientedBox?
+    private var lastBoxUpdate: TimeInterval = 0
 
     // MARK: Collaborators
     let session = ARSession()
@@ -55,10 +67,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         builder = MapBuilder(map: BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
         nodeCount = 0
         savedMap = nil
+        scanBox = nil
+        fittedBox = nil
+        triangleCount = 0
+        meshAnchorCount = 0
+        lastBoxUpdate = 0
 
         let config = ARWorldTrackingConfiguration()
         // LiDAR mesh improves tracking/mapping quality; only available on Pro iPhones.
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+        // Classification lets us colour/filter by wall, floor, door... later; falls back to a plain mesh.
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+            config.sceneReconstruction = .meshWithClassification
+        } else if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             config.sceneReconstruction = .mesh
         }
         config.planeDetection = [.horizontal, .vertical]
@@ -83,6 +103,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let node = builder.addPOI(kind: kind, label: label, position: pos + ahead)
         nodeCount = builder.map.nodes.count
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")")
+    }
+
+    /// Grows (+) or shrinks (-) the scan box on every side, clamped to 0...2 m. Applies immediately.
+    func adjustBoxMargin(by delta: Float) {
+        boxMargin = min(2, max(0, boxMargin + delta))
+        scanBox = fittedBox?.expanded(by: boxMargin)
     }
 
     /// Saves map JSON + ARWorldMap. Disabled in the UI until `mappingStatus == .mapped`.
@@ -114,11 +140,26 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         mappingStatus = frame.worldMappingStatus
         trackingSummary = Self.describe(frame.camera.trackingState)
 
+        if frame.timestamp - lastBoxUpdate >= 1.0 {
+            lastBoxUpdate = frame.timestamp
+            updateScanBox(from: frame)
+        }
+
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
         guard case .normal = frame.camera.trackingState, let builder else { return }
         if builder.observe(position: Geometry.translation(of: frame.camera.transform)) != nil {
             nodeCount = builder.map.nodes.count
         }
+    }
+
+    private func updateScanBox(from frame: ARFrame) {
+        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+        guard !anchors.isEmpty else { return }
+        let sample = MeshSampler.sample(anchors: anchors)
+        triangleCount = sample.triangleCount
+        meshAnchorCount = sample.anchorCount
+        fittedBox = OrientedBox.fitBest(points: sample.points)
+        scanBox = fittedBox?.expanded(by: boxMargin)
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {

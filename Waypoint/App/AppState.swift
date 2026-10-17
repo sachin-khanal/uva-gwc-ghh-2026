@@ -23,6 +23,9 @@ final class AppState: ObservableObject {
     /// to tell phones apart in `MapNode.createdBy` and in Multipeer peer names.
     let deviceName: String
 
+    /// Supabase library (D). Disabled automatically when no URL/key is configured.
+    let cloud: CloudController
+
     init() {
         if let store = try? MapStore.defaultStore() {
             self.store = store
@@ -34,6 +37,8 @@ final class AppState: ObservableObject {
         }
         let short = UIDevice.current.identifierForVendor?.uuidString.prefix(4).lowercased() ?? "0000"
         self.deviceName = "\(UIDevice.current.model)-\(short)"
+        self.cloud = CloudController(store: self.store)
+        cloud.onImported = { [weak self] _ in self?.reloadMaps() }
 
         seedSampleMapIfNeeded()
         reloadMaps()

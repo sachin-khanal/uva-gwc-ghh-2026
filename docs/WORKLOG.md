@@ -19,6 +19,50 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 13:30 — Claude (agent, for Sachin) — Build block 1: live scanner, simulate mode, Supabase client + schema   [tags: BUILD, CONTRACT CHANGE]
+Area: A (scan view), B (simulation), D (cloud), C (budget) - scaffolded together; owners should take over each part.
+Why: user said "continue building" and to integrate Supabase while building (ROADMAP.md revision 2).
+
+Files created - WaypointCore (all unit-tested):
+- `Scan/OrientedBox.swift` (gravity-aligned box, yaw search, contains/corners/expanded), `Scan/ExportBudget.swift`
+  (40 MB cap vs Supabase 50 MB/file limit).
+- `Simulation/PoseSimulator.swift` (virtual walker that turns before walking).
+- `Cloud/HTTPTransport.swift`, `Cloud/CloudModels.swift` (SupabaseConfig, AuthSession, SessionStore, BuildingRow,
+  RemoteMap, CloudError), `Cloud/SupabaseClient.swift` (actor: anonymous auth + refresh + one 401 retry, PostgREST
+  upsert/list, Storage upload/download; plain REST, no SDK), `Cloud/SyncEngine.swift` (push uploads world maps
+  BEFORE the row; fetch validates).
+- Tests: `ScanAndSimulationTests` (6), `CloudTests` (11, mock transport) -> **45 tests total**.
+Files created - app (type-checked only): `Waypoint/Scan/MeshSampler.swift`, `Waypoint/Scan/LiveScanView.swift` (RealityKit
+  ARView + `.showSceneUnderstanding` mesh overlay + green wireframe box), `Waypoint/Cloud/CloudController.swift`.
+Files created - other: `supabase/migrations/0001_init.sql` (tables buildings/scans, RLS, private buckets
+  worldmaps/meshes, storage policies, updated_at trigger), `docs/TESTING.md`.
+Files edited:
+- `Geometry/Geometry.swift` (+`cameraTransform(position:forward:)`).
+- `Waypoint/Capture/CaptureController.swift` (meshWithClassification, ~1 Hz box fit, stats, `adjustBoxMargin`).
+- `Waypoint/Navigation/NavigationController.swift` (REWRITTEN: shared `tick` loop driven by AR frames OR the simulator;
+  `startSimulation`, `simulatedObstacle`).
+- `Waypoint/UI/VolunteerView.swift` (full-screen live scan + HUD + box controls), `NavigatorView.swift` (Simulate section +
+  obstacle toggle), `SyncView.swift` (Cloud section as its own observing view `CloudSection`).
+- `Waypoint/App/AppState.swift` (+`cloud`), `project.yml` + `Config/Base.xcconfig` + `Config/Local.xcconfig.example`
+  (SUPABASE_URL / SUPABASE_ANON_KEY -> Info.plist keys `SupabaseURL`/`SupabaseAnonKey`; empty = cloud disabled).
+- Docs: `docs/SETUP.md` (+Supabase section §5), `docs/MODULES.md`, `README.md`.
+Data contract: `BuildingRow`/table `buildings` is new (one row per owner+map_id; clients merge). `BuildingMap` unchanged.
+Bugs found by tests while building: mock matched "/authenticated/" as "auth" (test bug); 401-retry test logic (test bug).
+  One real review catch: SyncView did not observe CloudController (would not redraw) -> fixed with `CloudSection`.
+Verified: `make test` -> **45 tests, 0 failures**; `make typecheck` OK (19 app files); `make check` (xcodebuild, unsigned) ->
+  BUILD SUCCEEDED, no warnings.
+NOT verified (UNVERIFIED ON DEVICE / vs real server): live mesh overlay and box on a phone; ARView sharing our ARSession
+  (we rely on ARView NOT replacing the session delegate); mesh vertex reading layout; simulate-mode audio; every Supabase
+  call against a real project (SQL never executed; Anonymous Sign-Ins must be enabled by a human); cloud UI.
+Open / handoff:
+1. Someone creates the Supabase project and follows SETUP.md §5, then runs TESTING.md level 2.9.
+2. A: validate 3.1-3.5 in docs/TESTING.md; replace debug mesh overlay with per-anchor coloured entities; MeshExporter (USDZ) +
+   viewer are NOT built yet (C).
+3. B: TESTING.md 2.2-2.6 with headphones; tune cues.
+4. Security note: nothing in the repo contains a Supabase key; never commit the service_role key.
+
+---
+
 ## 2026-10-17 12:30 — Claude (agent, for Sachin) — Direction change: Supabase + Polycam-style scanner (docs only)   [tags: DOCS]
 Area: shared
 Trigger: user said the app is native-iPhone-only (not published), uses Supabase free tier, and needs a

@@ -1,0 +1,74 @@
+//
+// File:     Cloud/SyncEngine.swift
+// Module:   WaypointCore
+// Owner:    D (App/Sync/Integration)
+// Purpose:  Moves maps between the local `MapStore` and Supabase.
+//             push(mapId:)   uploads each ARWorldMap segment to the private `worldmaps` bucket, then
+//                            upserts this user's `buildings` row (map JSON + metadata).
+//             listRemote()   rows visible to this user (own + shared), flagged `isMine`.
+//             fetchBundle()  downloads the world maps for a row and returns a VALIDATED `MapBundle`.
+//           It never writes to the local store by itself on fetch: the app decides (own maps import
+//           directly; other people's maps need a user tap) - see decisions D-012 and D-015.
+// Order:    world maps are uploaded BEFORE the row so a visible row never points at missing files.
+// Paths:    worldmaps/<ownerId>/<mapId>/<segmentId>.arworldmap
+//
+import Foundation
+
+public final class SyncEngine {
+
+    public static let worldMapBucket = "worldmaps"
+
+    private let client: SupabaseClient
+    private let store: MapStore
+
+    public init(client: SupabaseClient, store: MapStore) {
+        self.client = client
+        self.store = store
+    }
+
+    public static func worldMapPath(owner: String, mapId: UUID, segment: String) -> String {
+        "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
+    }
+
+    /// Uploads the local map `mapId`. `share == true` makes the row readable by every signed-in user.
+    public func push(mapId: UUID, share: Bool) async throws {
+        let bundle = try store.makeBundle(id: mapId)
+        try bundle.validate() // never upload something we would refuse to import
+        let owner = try await client.currentUserId()
+
+        for (segment, data) in bundle.worldMaps.sorted(by: { $0.key < $1.key }) {
+            let path = Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
+            try await client.upload(bucket: Self.worldMapBucket, path: path, data: data)
+        }
+        let row = BuildingRow(mapId: mapId, name: bundle.map.name, version: bundle.map.version,
+                              map: bundle.map, isShared: share)
+        try await client.upsertBuilding(row)
+    }
+
+    public func listRemote() async throws -> [RemoteMap] {
+        let me = try await client.currentUserId().lowercased()
+        return try await client.listBuildings().map { row in
+            RemoteMap(row: row, isMine: row.owner?.uuidString.lowercased() == me)
+        }
+    }
+
+    /// Downloads the world maps and returns a validated bundle. World maps that are missing in
+    /// storage are skipped (the map is still usable via the marker fallback), other errors propagate.
+    public func fetchBundle(_ remote: RemoteMap) async throws -> MapBundle {
+        guard let owner = remote.row.owner?.uuidString else {
+            throw CloudError.rejected("Remote map has no owner.")
+        }
+        var worldMaps: [String: Data] = [:]
+        for segment in remote.row.map.segmentIds {
+            let path = Self.worldMapPath(owner: owner, mapId: remote.row.mapId, segment: segment)
+            do {
+                worldMaps[segment] = try await client.download(bucket: Self.worldMapBucket, path: path)
+            } catch CloudError.http(let status, _) where status == 400 || status == 404 {
+                continue
+            }
+        }
+        let bundle = MapBundle(map: remote.row.map, worldMaps: worldMaps)
+        do { try bundle.validate() } catch MapStoreError.rejected(let reason) { throw CloudError.rejected(reason) }
+        return bundle
+    }
+}

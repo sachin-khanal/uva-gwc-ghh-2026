@@ -31,6 +31,10 @@
 	<string>Waypoint uses the camera and LiDAR to build and follow indoor maps.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Waypoint shares building maps with nearby phones.</string>
+	<key>SupabaseAnonKey</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<key>SupabaseURL</key>
+	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

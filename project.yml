@@ -56,6 +56,9 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiredDeviceCapabilities:
           - arkit
+        # Filled from Config/Local.xcconfig (git-ignored). Empty/unset => cloud features are disabled, app still works.
+        SupabaseURL: $(SUPABASE_URL)
+        SupabaseAnonKey: $(SUPABASE_ANON_KEY)
         NSCameraUsageDescription: "Waypoint uses the camera and LiDAR to build and follow indoor maps."
         NSLocalNetworkUsageDescription: "Waypoint shares building maps with nearby phones."
         NSBonjourServices:
