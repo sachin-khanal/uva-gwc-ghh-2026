@@ -34,6 +34,7 @@ can be proven without a phone is put in `Package/WaypointCore` and covered by `m
 ## D-007 — Sync via MultipeerConnectivity, AirDrop/share-sheet export as fallback
 Campus Wi-Fi often isolates clients; Multipeer can use Bluetooth/peer-to-peer Wi-Fi and needs no
 server or signing entitlements. **Status:** accepted; unverified on devices.
+**Update 2026-10-17:** amended by D-016 — Multipeer is no longer the primary sync path; Supabase is. Multipeer/AirDrop remain as the offline fallback, and incoming peers/maps now need a user tap (D-012).
 
 ## D-008 — Map = JSON graph + ARWorldMap per segment; QR/image marker as relocalization fallback
 ARWorldMap relocalization is the highest risk. We keep short segments and a marker fallback.
@@ -62,21 +63,32 @@ spliced shortcuts; also blocks legit loop-closing - scan a node in between). Not
 authenticating WHO sent the map (Multipeer has no strong identity; the human check is the
 control) and detecting a fully-formed but false map from an approved peer. **Status:** accepted.
 
-## D-013 — Polycam-style live LiDAR scanner is part of volunteer mode (PROPOSED)
+## D-013 — Polycam-style live LiDAR scanner is part of volunteer mode (~~PROPOSED~~ ACCEPTED 2026-10-17)
 Live mesh overlay + resizable bounding box + exported 3D model, using ARKit mesh reconstruction with
 classification. Navigation remains the demo's climax; the scanner produces the map and the visuals.
-Not in scope: photogrammetry, measuring, floor plans, public explore feed. **Status:** proposed, awaiting team OK.
+Not in scope: photogrammetry, measuring, floor plans, public explore feed. ~~**Status:** proposed, awaiting team OK.~~
+**Update 2026-10-17:** accepted — the user asked for a live bounding-box -> 3D LiDAR scanner and to keep building. Live view + box scaffolded (UNVERIFIED ON DEVICE); export/viewer not built.
 
-## D-014 — Supabase over plain REST, no Supabase SDK (PROPOSED)
+## D-014 — Supabase over plain REST, no Supabase SDK (~~PROPOSED~~ IN USE, not explicitly confirmed)
 Supersedes the "no backend" assumption for sync. We call PostgREST/Storage/GoTrue with `URLSession`
 to keep D-003 (zero third-party dependencies) and to unit-test the client with a mock transport.
 Trade-off: more code than `supabase-swift`. Revisit if the client takes more than ~3 hours.
-**Status:** proposed.
+~~**Status:** proposed.~~
+**Update 2026-10-17:** Supabase itself was confirmed by the user; the REST-vs-SDK choice was my default and is implemented (`Cloud/`, 11 mock-server tests). Say so if you prefer the SDK.
 
-## D-015 — Anonymous auth + Row Level Security; cloud data is untrusted (PROPOSED)
+## D-015 — Anonymous auth + Row Level Security; cloud data is untrusted (~~PROPOSED~~ IMPLEMENTED 2026-10-17, unverified on a live project)
 No signup flow in a 24h demo. The anon key is public, so RLS is the only authorization. Downloaded
-maps are validated and user-approved exactly like peer-to-peer imports (D-012). **Status:** proposed.
+maps are validated and user-approved exactly like peer-to-peer imports (D-012). ~~**Status:** proposed.~~
+**Update 2026-10-17:** implemented in `supabase/migrations/0001_init.sql` and `SyncEngine`/`CloudController` (other people's maps need a tap; everything is validated). The SQL has never been run on a real project.
 
-## D-016 — Multipeer/AirDrop stay as the offline fallback (PROPOSED)
+## D-016 — Multipeer/AirDrop stay as the offline fallback (~~PROPOSED~~ IMPLEMENTED 2026-10-17)
 Venue Wi-Fi may be bad or the free-tier project may be paused. Navigation never depends on the network.
-Amends D-007: Multipeer is no longer the primary sync path. **Status:** proposed.
+Amends D-007: Multipeer is no longer the primary sync path. ~~**Status:** proposed.~~
+**Update 2026-10-17:** implemented — Multipeer + AirDrop export are unchanged and still work; the Cloud library is added beside them in Share maps.
+
+## D-017 — Markdown changes are strike-through + labelled updates, never overwrites (2026-10-17)
+Rule from the team: when a `.md` file goes stale, keep the old text ~~struck through~~ and add the new text labelled
+`**Update YYYY-MM-DD (who):**`; do not delete or overwrite. Applies to markdown only; code is exempt (git is its history).
+Codified as AGENTS.md rule 11 and docs/WORKFLOW.md principle 6. This pass applied it to Architecture.md, DECISIONS.md, ROADMAP.md,
+MODULES.md, README.md and SETUP.md (see WORKLOG). Earlier edits that overwrote text were restored as struck-out text from git
+where the original was recoverable (Architecture.md §3, §5). **Status:** accepted.

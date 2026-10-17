@@ -12,8 +12,8 @@ Indoor navigation for blind users. A sighted volunteer scans a building once; a 
 |---|---|
 | LiDAR only on Pro iPhones (12 Pro+) | No simulator for AR/depth. Every AR feature is tested on a physical phone. |
 | Free provisioning profile | Apps expire after 7 days (fine for 24h). Max 3 sideloaded apps per device. No TestFlight, iCloud/CloudKit, push, or Associated Domains. Each dev builds with their own Apple ID and a unique bundle ID suffix. |
-| No backend, no accounts | Sync is peer-to-peer or local-network only. Maps are files. |
-| Campus Wi-Fi often isolates clients | Do not depend on Wi-Fi LAN reachability. Use MultipeerConnectivity (works over Bluetooth/peer-to-peer Wi-Fi) with a file-export fallback. |
+| ~~No backend, no accounts~~ **Update 2026-10-17 (rev 2, §10):** Supabase free-tier backend with anonymous auth (no accounts or passwords); app stays offline-first | ~~Sync is peer-to-peer or local-network only. Maps are files.~~ **Update 2026-10-17:** cloud library via Supabase is the primary sync; peer-to-peer (Multipeer/AirDrop) is the offline fallback. Maps are still files on disk. |
+| Campus Wi-Fi often isolates clients | Do not depend on Wi-Fi LAN reachability. Use MultipeerConnectivity (works over Bluetooth/peer-to-peer Wi-Fi) with a file-export fallback. **Update 2026-10-17 (rev 2):** Multipeer/export are now the OFFLINE fallback; Supabase is the primary sync (§10, D-016). |
 | Blind user, safety-adjacent | Audio/haptic feedback must degrade gracefully: if tracking is lost, say so and stop issuing directions. |
 
 **Setup checklist (everyone, before hour 1):** Xcode 16+, iPhone Developer Mode on, device trusted, unique bundle ID (`edu.virginia.waypoint.<name>`), Local Network + Camera permissions accepted once. Either MacBook can build; use the Pro for long builds if the Air struggles.
@@ -40,6 +40,8 @@ Minimum target: **iOS 17**, Swift 5.10+, SwiftUI, no third-party dependencies.
 ```
 
 One app, two modes chosen at launch. Both modes share `MapStore`, `MapSync`, and the `ARSession` wrapper.
+
+**Update 2026-10-17 (rev 2):** the diagram above predates the cloud and the live scanner. Read it with these changes: `MapStore` also talks to **Supabase** through `SyncEngine` (anonymous auth, private buckets, Row Level Security); ~~Multipeer / file export~~ is now the offline path; the volunteer capture box also renders a live LiDAR mesh with a bounding box (§10.2), and Navigator mode can run a **simulated walker** instead of AR frames (`NavigationController.startSimulation`).
 
 ---
 
@@ -74,6 +76,8 @@ struct MapEdge: Codable {
 ```
 
 On disk: `map.json` (above) + `worldmap.arworldmap` (archived `ARWorldMap`) per **segment**. A building = one or more segments (see §4.2). A `segmentId` on each node ties it to the right world map. Keep the JSON human-readable; it is the debugging tool.
+
+**Update 2026-10-17:** in the code block above, ~~`struct Node`~~ is `MapNode`, ~~`struct Edge`~~ is `MapEdge`, and ~~`kind: Kind`~~ is `kind: NodeKind` (decision D-010); `MapNode` gained `segmentId`. Source of truth: `Package/WaypointCore/Sources/WaypointCore/Model/MapTypes.swift`. New in rev 2: a Supabase `buildings` row wraps one `BuildingMap` per (owner, mapId) — see §10.3 and `supabase/migrations/0001_init.sql`.
 
 ---
 
@@ -121,6 +125,8 @@ Goal: a returning phone knows where it is inside the saved map.
 - **Extend:** a volunteer loads an existing map, relocalizes into it, then walks new territory; new nodes carry `createdBy` and merge by UUID union. Conflicts (same label twice) are kept and flagged, last-writer-wins on position is *not* attempted.
 - **Fallback:** export bundle via the iOS share sheet (AirDrop works without any signing). This is the demo insurance if Multipeer misbehaves.
 
+**Update 2026-10-17 (rev 2 + security review):** the primary sync path is now Supabase (`SyncEngine`, §10.3); everything above is the OFFLINE fallback. ~~Protocol: peers exchange `{mapId, version}` headers~~ — not built; Multipeer currently sends a whole `MapBundle` via `sendResource`. All incoming maps (Multipeer, cloud, AirDrop later) are validated (`MapBundle.validate()`) and need a user tap before import (D-012, D-015). ~~new nodes ... merge by UUID union~~ still true, with one addition: a merge that adds a NEW edge between two already-known nodes is refused.
+
 ---
 
 ## 5. Module / repo layout
@@ -162,28 +168,38 @@ protocol ObstacleSource { var nearestObstacle: Float? { get } }
 (These three protocols are the original sketch and are **not yet implemented**; the scaffold passes
 `ARFrame`s through `Relocalizer.onFrame` instead. Introduce them only if mocking becomes necessary.)
 
+**Update 2026-10-17 — what changed in this section since it was first written** (original text restored from git commit 370d66f, struck out):
+
+- ~~`Waypoint/Model/` — BuildingMap, Node, Edge, MapStore (shared; frozen in hour 2)~~ moved to the pure-logic package: `Package/WaypointCore/Sources/WaypointCore/Model/` (D-006).
+- ~~`Routing/` — graph, A*, instruction stream (B)~~ now `Package/WaypointCore/.../Routing/` (logic, tested).
+- ~~Merge-conflict hygiene: use Xcode 16 folder-synchronized groups (no `.pbxproj` file lists to collide on)~~ replaced by XcodeGen + git-ignored `.xcodeproj` (D-004).
+- Added by rev 2 (see §10.4 and docs/MODULES.md for the current map): core `Scan/` (OrientedBox, ExportBudget), `Simulation/` (PoseSimulator), `Cloud/` (Supabase client, SyncEngine); app `Scan/` (LiveScanView, MeshSampler), `Cloud/` (CloudController); `supabase/migrations/`. ~~`Sync/ // MultipeerConnectivity (D)`~~ still exists but is now the offline fallback.
+- `docs/MODULES.md` is the authoritative, always-current layout; this section is the design intent.
+
 ---
 
 ## 6. Team split and timeline (24h)
 
 | Person | Owns | First deliverable |
 |---|---|---|
-| **A — AR/Maps** | Capture, world map save/load, relocalization + QR fallback | Save a world map, relocalize a fresh launch against it (hour ~6) |
+| **A — AR/Maps** | Capture, world map save/load, relocalization + QR fallback **Update 2026-10-17 (rev 2):** + live LiDAR scan view and bounding box | Save a world map, relocalize a fresh launch against it (hour ~6) |
 | **B — Navigation/Feedback** | Graph, A*, spatial audio, haptics, TTS | Beacon audibly pans toward a hard-coded waypoint (hour ~5) |
 | **C — Vision** | OCR pipeline, obstacle detection | Console log of recognized room numbers and nearest-depth values (hour ~5) |
-| **D — App/Sync/Integration** | Shell, UI, Multipeer + export, project file, demo script | Two phones exchange a map JSON (hour ~6) |
+| **D — App/Sync/Integration** | ~~Shell, UI, Multipeer + export, project file, demo script~~ **Update 2026-10-17 (rev 2):** Shell, UI, Supabase cloud library (Multipeer/export as offline fallback), project file, demo script | Two phones exchange a map JSON (hour ~6) |
 
 | Hours | Milestone |
 |---|---|
 | 0–2 | Setup checklist, freeze `Model/` contract, skeleton app builds on all 4 phones/Macs |
 | 2–8 | Each module works standalone against mocks / hard-coded data |
 | 8–14 | **Integration #1:** scan a real hallway → save → relocalize → follow audio to a tagged door |
-| 14–18 | Integrate OCR labels + obstacle warnings; Multipeer sync; extend flow |
+| 14–18 | Integrate OCR labels + obstacle warnings; ~~Multipeer sync~~ **Update 2026-10-17:** cloud sync (Multipeer as fallback); extend flow |
 | 18–21 | Scan Rice Hall for real; tune thresholds; rehearse with a blindfolded teammate |
 | 21–23 | Bug-fix only; record backup demo video; print QR marker |
 | 23–24 | Freeze. Charge phones. Pre-load the final map onto every demo device. |
 
 Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a desk; desk testing hides the relocalization and depth problems.
+
+**Update 2026-10-17:** the hour-by-hour plan and ownership above predate revision 2. The current workstreams (0-7), milestones M0-M5 and cut lines are in [docs/ROADMAP.md](docs/ROADMAP.md); the device test plan is [docs/TESTING.md](docs/TESTING.md). New work streams: live scan view, simulated walker, Supabase backend, mesh export + 3D viewer.
 
 ---
 
@@ -193,6 +209,10 @@ Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a de
 |---|---|---|
 | Relocalization flaky in Rice Hall | QR/image-anchor fallback; short segments; scan in consistent lighting | Demo starts at the QR marker every time |
 | Multipeer unreliable | AirDrop/share-sheet export; pre-load map before demo | Drop live sync; sync becomes file transfer |
+| *(added 2026-10-17)* Supabase project paused or unreachable at the venue | Wake the project from the dashboard before the demo; navigation never needs the network; maps pre-loaded on every phone | Use AirDrop/Multipeer export |
+| *(added 2026-10-17)* Row Level Security misconfigured (data visible/writable by the wrong user) | SQL reviewed in `supabase/migrations/0001_init.sql`; anon key is public by design; test with two phones before demo; never ship the service_role key | Make all rows private (no sharing) |
+| *(added 2026-10-17)* Mesh export over the 50 MB free-tier file limit | `ExportBudget` caps at 40 MB and decimates; check real file size | Upload world map only, skip the 3D model |
+| *(added 2026-10-17)* Live scan view slows tracking (mesh rendering + box fit) | Box fit is 1 Hz on sampled vertices; drop debug overlay if frame rate suffers | Hide the overlay, keep the HUD numbers |
 | OCR misreads signs | Human-confirmed labels in capture; consistency voting | Labels typed manually by the volunteer |
 | Obstacle detection false positives | Confidence mask, hysteresis, tunable thresholds | Ship a single "something close ahead" haptic |
 | Spatial audio weak on phone speaker | Headphones/AirPods for demo | Add left/right-biased tone + speech cues |
@@ -201,7 +221,7 @@ Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a de
 
 **Must-have for demo:** scan → tagged map → relocalize → spatial-audio route to one room, with a trusted escort.
 **Should-have:** obstacle warnings, OCR-assisted labels.
-**Nice-to-have:** live Multipeer sync and extend, voice destination input, multi-segment stitching.
+**Nice-to-have:** ~~live Multipeer sync and extend~~ **Update 2026-10-17:** live Multipeer sync is now the offline fallback and cloud sync is planned core work (cuttable to AirDrop export, see ROADMAP cut lines); contributor "extend" merging, voice destination input and multi-segment stitching remain nice-to-have.
 
 ---
 
@@ -216,13 +236,18 @@ Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a de
 2. Headphones for the demo (AirPods vs wired) — it affects the spatial audio design.
 3. Whether the QR marker is mandatory in the demo or only a fallback.
 4. One shared Apple ID for signing vs each dev signing their own phone.
+5. **Update 2026-10-17:** who creates the Supabase project (needs their own account) and shares the URL + anon key with the team.
+6. **Update 2026-10-17:** Supabase REST client (built, D-014) vs the official SDK — confirm the team is happy with plain REST.
+7. **Update 2026-10-17:** is "share with everyone" public to every signed-in phone, or only the team (needs a team code if the latter)?
 
 ---
 
-## 10. Revision 2 (PROPOSED, 2026-10-17): Supabase backend and Polycam-style live scanner
+## 10. Revision 2 (~~PROPOSED~~ **IN PROGRESS**, 2026-10-17): Supabase backend and Polycam-style live scanner
 
 Sections 1-9 describe the original local-only design and remain valid unless listed here.
 Roadmap and parallel workstreams: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+**Update 2026-10-17:** ~~PROPOSED~~ — the team asked to continue building and to integrate Supabase while building the app, so this revision is now being implemented (see docs/WORKLOG.md, entry 13:30). D-014 (REST instead of the SDK) was my default and has not been explicitly confirmed. Status per part is in §10.5.
 
 ### 10.1 What changed
 - Native iPhone app, sideloaded (free Apple ID), never published. Unchanged from section 1.
@@ -273,3 +298,16 @@ Waypoint/
   Cloud/       LibraryView, AuthSession                                 (D)
 supabase/migrations/   SQL schema + RLS                                 (D)
 ```
+
+### 10.5 Implementation status (Update 2026-10-17, build block 1)
+
+| Part | Status |
+|---|---|
+| Bounding-box math (`OrientedBox`), export size budget (`ExportBudget`) | DONE, unit-tested |
+| Live scan view (mesh overlay + wireframe box + HUD + margin buttons) | SCAFFOLD, type-checks only, UNVERIFIED ON DEVICE |
+| Mesh export to USDZ, in-app 3D viewer, per-surface colouring | NOT BUILT |
+| Simulated walker (`PoseSimulator`, Simulate mode in Navigator) | DONE in logic (end-to-end test); UI UNVERIFIED ON DEVICE |
+| Supabase REST client + `SyncEngine` | DONE against a mock server (`CloudTests`) |
+| `supabase/migrations/0001_init.sql` (tables, RLS, buckets) | WRITTEN, never run on a real project |
+| Cloud UI (`CloudController`, Share maps -> Cloud library) | SCAFFOLD, UNVERIFIED |
+| ~~Anonymous accounts~~ -> anonymous auth only, no accounts | as designed |

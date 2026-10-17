@@ -10,6 +10,8 @@ and for mixing them (e.g. Live Share while pairing, git to move work between mac
 3. **Freeze the contract early.** `Model/*` changes are announced as `CONTRACT CHANGE`.
 4. **Re-read before you edit.** Files change under you, especially in Live Share.
 5. **Green before you hand off:** `make test` and `make typecheck` pass.
+6. **Markdown edits keep the old text** (rule added 2026-10-17): ~~strike through~~ the stale text and add the new text labelled
+   `**Update YYYY-MM-DD (who):**`. Never delete or overwrite. See AGENTS.md rule 11. Code files are exempt.
 
 ## Mode 1 — VS Code Live Share (everyone in one working tree on the host's Mac)
 

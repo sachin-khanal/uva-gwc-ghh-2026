@@ -23,6 +23,7 @@ xcodebuild -version                  # must print a version and NOT an error abo
 `IDESimulatorFoundation ... CoreSimulator.framework ... no such file`. That means the first-launch
 components were not installed yet. `sudo xcodebuild -runFirstLaunch` fixes it. Until it is fixed,
 `make typecheck` and `make test` still work, but `make check/build/run` do not.
+**Update 2026-10-17:** ~~Until it is fixed, `make check/build/run` do not work.~~ Fixed on Sachin's Mac after running `sudo xcodebuild -runFirstLaunch`; `make check` now reports BUILD SUCCEEDED. Other Macs may still need it (`make doctor` tells you).
 
 ## 2. Repo tools
 

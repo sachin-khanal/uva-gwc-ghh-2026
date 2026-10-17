@@ -4,6 +4,7 @@ Status legend: **DONE** (works and tested as far as possible) · **SCAFFOLD** (c
 sketched; needs real work/device testing) · **TODO** (not started).
 "Tested" means automated tests in `make test`. Nothing involving ARKit/audio/haptics/Multipeer has
 been run on a device yet: **all device-facing code is UNVERIFIED ON DEVICE** as of the first scaffold.
+**Update 2026-10-17 (build block 1):** still true — the live scan view, simulate mode, cloud UI and everything else under `Waypoint/` have only been type-checked. The new pure-logic parts (box math, simulator, Supabase client against a mock) are covered by 45 tests.
 
 Team (fill in real names): **A** = ______ · **B** = ______ · **C** = ______ · **D** = ______
 
@@ -78,3 +79,9 @@ downward drop-off check; wire `SignReader` into volunteer (suggest labels) and n
 (announce rooms); add Rice Hall sign formats to the parser with tests.
 **D** — 2-phone sync test; version handshake; polish UI + VoiceOver; demo script; QR marker print;
 large single Start target and voice destination input (stretch).
+
+**Update 2026-10-17 — backlog additions after build block 1** (the paragraphs above are kept; these add to them):
+**A** — ~~(nothing about the live scanner)~~ replace the debug mesh overlay with per-anchor entities coloured by `ARMeshClassification`; confirm ARView does not take over our session delegate (counters stay at 0 if it does); resizable box handles (currently +/- margin buttons only).
+**B** — try Simulate mode with headphones (TESTING.md 2.2-2.6) and tune ping rate, haptic patterns and speech wording; Simulate mode currently starts at the first corridor node.
+**C** — build `MeshExporter` (ARMeshAnchors cropped to the box -> `MDLAsset` -> USDZ, check real file size against `ExportBudget`) and an in-app 3D viewer; calibrate obstacle thresholds.
+**D** — create the Supabase project (SETUP.md §5), run the SQL, test Upload/Refresh/Download on two phones; add an "open .waypointmap" handler (must show the same approval as peer imports); decide REST vs SDK and public vs team-only sharing (Architecture.md §9).

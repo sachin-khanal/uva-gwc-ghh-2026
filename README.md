@@ -7,7 +7,7 @@ Girls Hoo Hack 2026
 A sighted volunteer walks a building once with an iPhone Pro (ARKit + LiDAR); the scan becomes a
 shared map with doors, stairs and room labels. A blind user later navigates it by **spatial audio**
 (the next turn is heard from that direction) and **haptics**, with on-device obstacle detection and
-sign reading. Maps sync phone-to-phone with no server. Demo: blindfolded judge walks to a room in
+sign reading. ~~Maps sync phone-to-phone with no server.~~ **Update 2026-10-17:** maps sync through a Supabase cloud library (anonymous sign-in), with phone-to-phone sharing and AirDrop as the offline fallback. Demo: blindfolded judge walks to a room in
 Rice Hall. (Original brief: [objective.txt](objective.txt).)
 
 ## Quick start
@@ -42,6 +42,7 @@ DEVICE=<id> make run   # build + install + launch on your iPhone  (see docs/SETU
 Package/WaypointCore/   pure logic (model, storage, routing, feedback rules, vision math) + tests
 Waypoint/               iOS app: App, UI, Capture, Relocalization, Navigation, Guidance, Vision, Sync
 Samples/                hand-written sample map (also bundled in the app)
+supabase/migrations/    **Update 2026-10-17:** database + storage schema with Row Level Security (run in the Supabase SQL editor)
 project.yml  Config/    XcodeGen spec + per-developer signing config (Local.xcconfig is git-ignored)
 Makefile  scripts/      every build/test/run command
 docs/  AGENTS.md        documentation
@@ -52,3 +53,5 @@ docs/  AGENTS.md        documentation
 First scaffold is in place and the pure logic is tested (45 tests passing). Everything that touches
 ARKit, LiDAR, audio, haptics or Multipeer compiles but has **not yet run on a device**. See
 [docs/WORKLOG.md](docs/WORKLOG.md) for the exact state.
+
+**Update 2026-10-17 (build block 1):** added a live LiDAR scan view with a bounding box, a Simulate mode for testing guidance without a scan, and a Supabase client + SQL schema. Tests: 45 passing. Still untested on a phone and against a real Supabase project. Next steps per person: [docs/ROADMAP.md](docs/ROADMAP.md); device test plan: [docs/TESTING.md](docs/TESTING.md).

@@ -15,6 +15,7 @@ Full design: `Architecture.md`. Original goal: `objective.txt`.
 1. `docs/MODULES.md` — who owns which files and what is DONE / SCAFFOLD / TODO.
 2. `docs/WORKLOG.md` — newest entries at the TOP. What changed recently, what is broken.
 3. `docs/DECISIONS.md` — why things are the way they are (do not re-litigate without a reason).
+   **Update 2026-10-17 (Claude):** also read `docs/ROADMAP.md` (what to work on now, per owner) and `docs/TESTING.md` (what is verified vs. not).
 4. `make help` — every build/test command.
 
 ## 3. Hard rules
@@ -48,6 +49,20 @@ Full design: `Architecture.md`. Original goal: `objective.txt`.
 9. **Do not add dependencies.** Apple frameworks only (decision D-003). Ask first.
 10. **Build output goes outside the repo** (`~/Library/Caches/Waypoint`), see D-005. Never run
     `xcodebuild`/`swift build` with output inside the repo directory.
+11. **Markdown files are never silently rewritten (rule added 2026-10-17 by the team).** When a `.md` file
+    becomes stale or wrong, do NOT delete or overwrite the old text. Instead:
+    - ~~strike through the old text~~ with `~~...~~` (keep it readable), and
+    - add the new text right after it, labelled: `**Update YYYY-MM-DD (who):** new text` (add a short reason if it
+      is not obvious).
+    - Table cell? Strike and label inside the same cell. Heading? `## ~~Old title~~ New title`.
+    - Inside a fenced code block you cannot strike text, so leave the block as is and put an `Update` note
+      directly under it that names the old and new parts (using ~~strikethrough~~ in the prose).
+    - Fresh content is fine to just add: new files, new WORKLOG entries (append at the top), new sections,
+      new rows. Appending is never an overwrite.
+    - Typos, broken links and pure formatting may be fixed in place if the meaning does not change.
+    - To correct an old WORKLOG entry, strike the wrong line and add an `Update` line under it; never rewrite history.
+    - **This rule is for markdown only.** Code files (`.swift`, `.sql`, `Makefile`, `project.yml`, ...) are edited normally;
+      git history is their record. Their explanations go in the WORKLOG as before.
 
 ## 4. File conventions (so every file explains itself)
 

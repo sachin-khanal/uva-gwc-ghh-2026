@@ -19,6 +19,28 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 14:10 — Claude (agent, for Sachin) — New markdown rule + stale-docs pass (strike-through + labelled updates)   [tags: DOCS]
+Area: shared (docs only; NO code changed, so tests/typecheck were not re-run)
+Trigger: team rule: "for changes in markdown files, don't overwrite/delete — strike through the old text and add the new text (label updates)". Does not apply to code.
+Files edited (all additive or strike-through; nothing deleted):
+- `AGENTS.md` — new hard rule 11 (the convention, exceptions, how to handle tables/headings/code blocks/WORKLOG) + pointer to ROADMAP/TESTING in "Orient yourself".
+- `docs/WORKFLOW.md` — principle 6 (same rule).
+- `Architecture.md` — struck + updated: §1 constraint rows (no backend / Multipeer), §2 note (cloud, simulator), §3 note (Node/Edge -> MapNode/MapEdge),
+  §4.7 note (cloud primary, Multipeer fallback, approvals), §5 note (original layout lines restored from git commit 370d66f as struck text), §6 owners/timeline notes,
+  §7 four new risk rows + nice-to-have line, §9 three new open decisions, §10 heading/status ("PROPOSED" struck -> IN PROGRESS), new §10.5 implementation-status table.
+- `docs/DECISIONS.md` — D-007 amended note; D-013..D-016 "PROPOSED" struck with labelled status updates (D-014 flagged as "REST was my default, not explicitly confirmed");
+  new D-017 recording the markdown rule.
+- `docs/ROADMAP.md` — header status struck/updated; new "status after build block 1" table; "start right now" items marked done.
+- `docs/MODULES.md` — update note under the legend; "backlog additions after build block 1" per owner appended.
+- `README.md` — "no server" sentence struck + updated; repo map gains `supabase/`; status paragraph gets a block-1 update.
+- `docs/SETUP.md` — CoreSimulator known issue marked resolved on Sachin's Mac.
+Not changed on purpose: older WORKLOG entries (history; they remain accurate for their time), `docs/TESTING.md` (new today).
+Known imperfection: earlier today I overwrote a few numeric strings in place before this rule existed (test counts 25/27 -> 45 in README.md and docs/SETUP.md). They are plain count corrections; git history holds the old values.
+Verified: grep shows each struck phrase still present next to its labelled update; `git diff --stat` touches only `.md` files in this pass.
+Open: none new. If you want the old counts restored as struck text too, say so.
+
+---
+
 ## 2026-10-17 13:30 — Claude (agent, for Sachin) — Build block 1: live scanner, simulate mode, Supabase client + schema   [tags: BUILD, CONTRACT CHANGE]
 Area: A (scan view), B (simulation), D (cloud), C (budget) - scaffolded together; owners should take over each part.
 Why: user said "continue building" and to integrate Supabase while building (ROADMAP.md revision 2).

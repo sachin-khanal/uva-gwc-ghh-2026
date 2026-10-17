@@ -1,6 +1,6 @@
-# Roadmap — what to work on now (revision 2, PROPOSED)
+# Roadmap — what to work on now (revision 2, ~~PROPOSED~~ IN PROGRESS)
 
-Status: **proposed, needs team OK.** Written 2026-10-17 after the direction change: native iPhone app
+~~Status: **proposed, needs team OK.**~~ **Update 2026-10-17:** the team asked to keep building, so this plan is in progress (build block 1 done, see below). Written 2026-10-17 after the direction change: native iPhone app
 (sideloaded, not published), **Supabase free tier** as backend, and a **Polycam-style LiDAR
 scanner** (live mesh overlay + bounding box → saved 3D model) that also feeds indoor navigation.
 Design details: `Architecture.md` section 10. Decisions: `docs/DECISIONS.md` D-013..D-016.
@@ -45,6 +45,22 @@ Navigation stays the demo's climax; the scanner is how the map gets made and wha
 | Bounding-box math: oriented box from points, crop test, volume/area | `Package/WaypointCore/.../Scan/BoundingBox.swift` (new) | `make test` |
 | Mesh → export plan (decimation target from byte budget), pose simulator path generator | `.../Scan`, `.../Routing` | `make test` |
 | Live scan view, mesh export, 3D viewer, simulate-mode UI | `Waypoint/` | `make typecheck` only; **UNVERIFIED ON DEVICE** |
+
+## Update 2026-10-17 — status after build block 1 (see WORKLOG 13:30)
+
+| # | Stream | Status now | Next step |
+|---|---|---|---|
+| 0 | Device bring-up | NOT DONE (nobody has run the app on a phone yet) | `docs/SETUP.md` §3 |
+| 1 | Live scan view | SCAFFOLD (`Waypoint/Scan/*`, `CaptureController`), box math tested, UNVERIFIED ON DEVICE | TESTING.md 3.1-3.4; colour mesh by class |
+| 2 | Relocalization proof | NOT STARTED on device (code is scaffolded) | TESTING.md 3.5 |
+| 3 | Simulated walker | DONE in logic + end-to-end test; Simulate UI SCAFFOLD | TESTING.md 2.2-2.6 with headphones |
+| 4 | Mesh export + 3D preview | ONLY the size budget (`ExportBudget`) | build `MeshExporter` (ModelIO -> USDZ) + viewer (C) |
+| 5 | Depth/obstacle calibration | NOT STARTED (detector scaffolded) | TESTING.md 3.7 |
+| 6 | Supabase backend + sync | Client + `SyncEngine` DONE vs mock (11 tests); SQL written; Cloud UI SCAFFOLD; never run on a real project | create project, SETUP.md §5, TESTING.md 2.9 |
+| 7 | Demo hardening | NOT STARTED | after 2, 3, 6 |
+
+The table "What an agent can start RIGHT NOW" above is mostly done: ~~Supabase SQL~~ written; ~~REST client~~ done (mock-tested); ~~cloud DTO mapping, size caps, validation~~ done;
+~~bounding-box math~~ done; ~~export plan~~ budget math done; ~~pose simulator~~ done. Still open there: the exporter itself and anything needing a phone.
 
 ## Milestones (checkpoints, not clock times)
 
