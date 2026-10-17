@@ -1,5 +1,15 @@
 # Work log
 
+## 2026-10-17 19:00 — Claude (agent, for Sachin) — CONTRACT CHANGE: map format versioning (schemaVersion 2) + per-version specs   [tags: CONTRACT CHANGE]
+Area: shared contract (Model/*), validator tool. Requested by Sachin ("add specs for each version, and versioning for the maps").
+What changed: `BuildingMap` now has an instance field `schemaVersion` (encoded in the JSON). ~~`static let schemaVersion = 1`~~ (never encoded, unused) replaced by `MapSchema.current = 2` / `oldestReadable = 1` / `migrate(from:)`. Format 1 = the old shape with no key; format 2 = same shape + `"schemaVersion": 2`. Decoding: missing key = 1; 1...current accepted and migrated in memory; newer than the app -> refused ("newer than this app understands. Update Waypoint."); 0/negative refused. Encoding always writes the current format. Because the shapes are identical, old apps can still read format-2 files (unknown key ignored) and the server needs no migration (rows without the key read as format 1).
+Files created: `docs/MAP_FORMAT.md` (spec per version + how to add N+1), `docs/map-format/map-v1.json`, `docs/map-format/map-v2.json`, `Package/.../Tests/.../MapSchemaTests.swift` (8 tests).
+Files edited: `Model/BuildingMap.swift` (MapSchema, custom init(from:)), `Samples/rice-hall-sample.json` (+schemaVersion 2), `tools/validate_map.py` (+CURRENT_SCHEMA/OLDEST_SCHEMA checks, U3's file, edited with the contract), `tools/test_validate_map.py` (+1 test), `AGENTS.md` (pointer under rule 3), `docs/MODULES.md`.
+Commands run: `make test` -> 127 tests, 0 failures; `make typecheck` OK (58 app files); `python3 -m unittest discover -s tools` -> 10 OK; `python3 tools/validate_map.py` PASS; both fixtures validated by Swift and Python tests.
+Verified: the commands above (Swift 127 pass, Python 10 pass, sample + both fixtures valid, typecheck OK).
+NOT verified: loading a format-1 map already saved on a phone (needs a device; Swift tests cover the decode path only); `make selftest-*` / `make check` after this change (phone locked earlier); SQL (no SQL changed, not re-run); the Supabase server holding old rows (reasoned, not exercised).
+Open problems / handoff: teammates must pull before saving maps, otherwise an old app drops nothing but also will not write the key (still readable as format 1). The three validators (Swift, Python, SQL) are still separate implementations.
+
 ## 2026-10-17 18:00 — Claude (agent, for Sachin) — Merge app-ui-workflows + wire RoutePlanner into NavigationController (branch feature/route-memory)   [tags: ROUTING, BUILD]
 Area: B (Navigation) + shared merge. Touches U3's `app-ui-workflows` files only through the merge; `NavigationController` is B/A.
 Merge: `origin/app-ui-workflows` merged into `feature/route-memory` (commit 03d9007). Conflicts resolved by keeping BOTH sides: `Waypoint/UI/RootView.swift` (Home button keeps `toolbar.home` id AND the Settings gear/sheet; E2E `.task` kept AND the new-interface `.onAppear`), `docs/MODULES.md`, `docs/TESTING.md` (both sets of rows).

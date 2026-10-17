@@ -65,6 +65,11 @@ def segment(value, path):
             f"{path}: unsafe segment id (use 1-64 ASCII letters, digits, _ or -)")
 
 
+# Map format versions this tool understands (mirror of Swift `MapSchema`; specs in docs/MAP_FORMAT.md).
+CURRENT_SCHEMA = 2
+OLDEST_SCHEMA = 1
+
+
 def validate(document):
     """Raise ValueError for invalid data; accept a bare map or exported bundle."""
     object_value(document, "document")
@@ -83,6 +88,11 @@ def validate(document):
             require(len(decoded) <= MAX_WORLD_MAP_BYTES, "world map exceeds 50 MB")
     else:
         data = document
+    if "schemaVersion" in data:  # absent == format 1
+        schema = data["schemaVersion"]
+        require(type(schema) is int and schema >= OLDEST_SCHEMA, "schemaVersion: expected an integer >= 1")
+        require(schema <= CURRENT_SCHEMA,
+                f"schemaVersion: format {schema} is newer than this tool understands ({CURRENT_SCHEMA})")
     uuid_value(data.get("id"), "id")
     string(data.get("name"), "name")
     version = data.get("version")

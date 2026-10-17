@@ -10,10 +10,34 @@
 //
 import Foundation
 
+/// Versions of the map JSON FORMAT. One spec per version lives in docs/MAP_FORMAT.md.
+///  * 1 - original shape; has no `schemaVersion` key (so "missing" means 1).
+///  * 2 - identical shape, plus `schemaVersion` written explicitly (CONTRACT CHANGE 2026-10-17).
+/// To add version N+1: bump `current`, add a spec + fixture (docs/map-format/), extend `migrate`, add a test in MapSchemaTests,
+/// update tools/validate_map.py (`CURRENT_SCHEMA`), and announce CONTRACT CHANGE in the WORKLOG.
+public enum MapSchema {
+    public static let current = 2
+    public static let oldestReadable = 1
+
+    /// Upgrades a decoded map's format number step by step. Shapes 1 and 2 are identical, so this only advances the number;
+    /// later versions put real field conversions in the matching `case`.
+    public static func migrate(from version: Int) -> Int {
+        var v = version
+        while v < current {
+            switch v {
+            case 1: v = 2 // 1 -> 2: nothing to convert; `schemaVersion` is now written explicitly
+            default: v = current
+            }
+        }
+        return v
+    }
+}
+
 public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
 
-    /// Bump when the JSON shape changes incompatibly, and note it in docs/WORKLOG.md.
-    public static let schemaVersion = 1
+    /// FORMAT version of the JSON (not the content revision, that is `version`). Always `MapSchema.current` after decoding:
+    /// older files are migrated in memory on load. See `MapSchema` and docs/MAP_FORMAT.md.
+    public var schemaVersion: Int
 
     public var id: UUID
     /// Display name, e.g. "Rice Hall, floor 1".
@@ -31,14 +55,42 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         version: Int = 1,
         nodes: [MapNode] = [],
         edges: [MapEdge] = [],
-        marker: MarkerRef? = nil
+        marker: MarkerRef? = nil,
+        schemaVersion: Int = MapSchema.current
     ) {
+        self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
         self.version = version
         self.nodes = nodes
         self.edges = edges
         self.marker = marker
+    }
+
+    // MARK: Decoding (format versioning)
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker }
+
+    /// Accepts every format from `MapSchema.oldestReadable` to `MapSchema.current` (a missing `schemaVersion` means format 1) and
+    /// migrates it to the current one. A file written by a NEWER app is refused with a clear message instead of being half-understood.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let found = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        guard found >= MapSchema.oldestReadable else {
+            throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: c,
+                debugDescription: "Map format \(found) is not valid.")
+        }
+        guard found <= MapSchema.current else {
+            throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: c,
+                debugDescription: "This map uses format \(found), which is newer than this app understands (format \(MapSchema.current)). Update Waypoint.")
+        }
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        version = try c.decode(Int.self, forKey: .version)
+        nodes = try c.decode([MapNode].self, forKey: .nodes)
+        edges = try c.decode([MapEdge].self, forKey: .edges)
+        marker = try c.decodeIfPresent(MarkerRef.self, forKey: .marker)
+        schemaVersion = MapSchema.migrate(from: found)
     }
 
     // MARK: Queries

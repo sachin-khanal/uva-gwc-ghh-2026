@@ -30,6 +30,7 @@ Full design: `Architecture.md`. Original goal: `objective.txt`.
    used by everyone. Do not rename/remove fields casually. If you must change it: update tests and
    `Samples/rice-hall-sample.json`, bump `BuildingMap.schemaVersion` if the JSON shape changed, and
    announce it at the top of the WORKLOG with the tag `CONTRACT CHANGE`.
+   **Update 2026-10-17 (Claude):** the map format is now versioned; follow the checklist in `docs/MAP_FORMAT.md` (bump `MapSchema.current`, spec, fixture, migration, tests, validator).
 4. **Where does code go?**
    - Pure logic (no Apple UI/AR/audio frameworks) → `Package/WaypointCore/Sources/WaypointCore/…`
      **with a unit test** in `Package/WaypointCore/Tests/WaypointCoreTests/`. This is what we can
