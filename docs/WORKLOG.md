@@ -93,6 +93,40 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Keyframe relocalization (D-035 option 2)   [tags: BUILD, CONTRACT CHANGE]
+Area: A (maps/relocalization) + C (vision). Branch `keyframe-relocalization` off `navigation-overhaul`. See D-038.
+
+CONTRACT CHANGE: `BuildingMap.keyframes: [Keyframe]`, `schemaVersion` 2 -> 3.
+Files created (WaypointCore): `Model/Keyframe.swift` - `Keyframe` (position, yaw, opaque descriptor; pose recovery by
+the same maths as the marker) and `KeyframeIndex` (nearest match with a maxDistance, an AMBIGUITY test, and a spacing
+rule), with the distance function injected so the whole thing is testable without Vision.
+Files created (app): `Waypoint/Vision/KeyframeRecorder.swift` - Vision feature prints, archived for storage, and the
+distance between two of them.
+Files edited: `Model/BuildingMap.swift` (+keyframes, +hand-written `init(from:)`), `Waypoint/Capture/CaptureController.swift`
+(records one keyframe per 2.5 m on a background queue, only while tracking is normal; written into the map on save),
+`Waypoint/Relocalization/Relocalizer.swift` (+`fix` telling coarse from exact; matches a live frame at most twice a
+second until something exact arrives).
+Tests added: `KeyframeTests` (9) - closest match, REFUSES to choose between two places that look alike, neighbours of
+the same spot do not count as ambiguity, nothing-close is no match, uncomparable descriptors are skipped, pose
+recovery round-trips, spacing, and TWO format-compatibility tests.
+A mistake worth recording: I added `keyframes` with a default value and claimed old maps would still decode. They did
+not - Swift's synthesized decoder requires the key regardless of the default - and 37 tests failed at once. Fixed with
+an explicit `init(from:)` using `decodeIfPresent`. This is the second time this session a "safe optional field"
+assumption was wrong; the lesson is that a default value is not the same as an optional KEY.
+Verified: `make test` -> **213 tests, 0 failures** (was 204); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED; `tools/validate_map.py` PASSes both the sample map and a hand-written map WITH
+keyframes.
+NOT verified: **UNVERIFIED ON DEVICE.** No feature print has been computed on a phone. The `maxDistance` of 18 is a
+guess - Vision's distances are not normalised - and must be calibrated in a real corridor before this is trusted. The
+`.right` image orientation passed to Vision assumes a portrait phone and wants checking.
+Open / handoff:
+1. Calibrate `KeyframeIndex.defaultMaxDistance` and `defaultAmbiguityRatio` on a phone: log the distances of correct
+   and incorrect matches in a corridor, then set the threshold between them.
+2. Only maps scanned AFTER this change have keyframes; older maps relocalize exactly as before.
+3. Map files grow by a few KB per keyframe - worth measuring against the 40 MB export budget on a long scan.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — One move at a time: stop speaking paragraphs   [tags: BUILD, BUG]
 Area: B (Guidance). Branch `one-move-at-a-time` off `navigation-overhaul`. See D-037.
 

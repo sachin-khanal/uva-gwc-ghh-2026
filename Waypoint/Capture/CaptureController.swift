@@ -91,6 +91,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var isPreparing = false
     /// The decoded world map, handed back to `start` by `prepareExtension`.
     private var preparedExtension: ARWorldMap?
+    /// Visual fingerprints collected during this scan; written into the map on save.
+    private var keyframes: [Keyframe] = []
+    /// One feature print at a time: they are cheap but not free, and frames arrive at 60 Hz.
+    private var isMakingKeyframe = false
 
     /// Reads and decodes the segment's world map off the main thread, then calls `done` on the main
     /// one. Any failure is reported in `errorMessage` and `done` is not called.
@@ -154,6 +158,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             config.initialWorldMap = prepared
         }
         isExtension = map != nil
+        keyframes = []
+        isMakingKeyframe = false
         isSaving = false
         extensionAttached = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -188,6 +194,32 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
         Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
+    }
+
+    /// Records a visual fingerprint of this spot, at most one per `KeyframeRecorder.defaultSpacing`
+    /// metres walked. The Vision work happens on a background queue; only the result comes back here.
+    /// Skipped entirely while tracking is poor, because a keyframe whose pose we do not trust is worse
+    /// than none - it would hand a returning user a confident wrong position.
+    private func recordKeyframeIfDue(_ frame: ARFrame) {
+        guard builder != nil, !isMakingKeyframe,
+              case .normal = frame.camera.trackingState else { return }
+        let position = Geometry.translation(of: frame.camera.transform)
+        guard KeyframeIndex(keyframes: keyframes).shouldRecord(at: position,
+                                                               spacing: KeyframeRecorder.defaultSpacing) else { return }
+
+        isMakingKeyframe = true
+        let pixelBuffer = frame.capturedImage
+        let forward = Geometry.cameraForward(of: frame.camera.transform)
+        let yaw = atan2(forward.x, -forward.z)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let descriptor = KeyframeRecorder.storableDescriptor(for: pixelBuffer, orientation: .right)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isMakingKeyframe = false
+                guard let descriptor else { return }
+                self.keyframes.append(Keyframe(position: position, yaw: yaw, descriptor: descriptor))
+            }
+        }
     }
 
     func cancelPreparing() {
@@ -279,7 +311,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Saves map JSON + ARWorldMap. Disabled in the UI until `mappingStatus == .mapped`.
     func save() {
         guard canRecord, mappingStatus == .mapped, let builder else { return }
-        let map = builder.map
+        var map = builder.map
+        map.keyframes += keyframes
+        Log.capture.info("saving \(self.keyframes.count) keyframe(s)")
         let savedSegment = segmentId
         // Freeze acquisition while obtaining the world map so JSON and scan bytes describe
         // the same capture. Tracking telemetry continues until the save completes.
@@ -313,6 +347,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         latestCameraTransform = frame.camera.transform
+        recordKeyframeIfDue(frame)
         // PERFORMANCE (lossless): assigning an @Published property re-renders the SwiftUI screen even when the value is unchanged, and this
         // runs ~60x per second. Only publish real changes.
         if mappingStatus != frame.worldMappingStatus { mappingStatus = frame.worldMappingStatus }

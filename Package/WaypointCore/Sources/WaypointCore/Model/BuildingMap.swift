@@ -15,7 +15,9 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     /// Bump when the JSON shape changes incompatibly, and note it in docs/WORKLOG.md.
     /// 2 (2026-10-17): `MapNode.extent` added. The field is optional, so schema-1 maps still decode;
     /// they simply have no room extents and fall back to `ArrivalRadius`.
-    public static let schemaVersion = 2
+    /// 3 (2026-10-17): `keyframes` added for faster relocalization. Also optional with a default, so
+    /// every older map still decodes and simply has none.
+    public static let schemaVersion = 3
 
     public var id: UUID
     /// Display name, e.g. "Rice Hall, floor 1".
@@ -26,6 +28,10 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     public var edges: [MapEdge]
     /// Optional fallback relocalization marker (see MarkerRef).
     public var marker: MarkerRef?
+    /// Visual fingerprints recorded along the walk, used to recognise WHERE the user is standing much
+    /// faster than ARKit's own feature matching manages in a repetitive corridor (see `Keyframe`).
+    /// Empty on maps scanned before this existed; relocalization then behaves exactly as it did.
+    public var keyframes: [Keyframe] = []
 
     public init(
         id: UUID = UUID(),
@@ -33,7 +39,8 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         version: Int = 1,
         nodes: [MapNode] = [],
         edges: [MapEdge] = [],
-        marker: MarkerRef? = nil
+        marker: MarkerRef? = nil,
+        keyframes: [Keyframe] = []
     ) {
         self.id = id
         self.name = name
@@ -41,6 +48,7 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         self.nodes = nodes
         self.edges = edges
         self.marker = marker
+        self.keyframes = keyframes
     }
 
     // MARK: Queries
@@ -84,6 +92,25 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     }
 
     // MARK: JSON
+
+    // MARK: Decoding
+
+    private enum CodingKeys: String, CodingKey { case id, name, version, nodes, edges, marker, keyframes }
+
+    /// Written by hand for ONE reason: `keyframes` must be optional on the way IN.
+    /// A property with a default value is still REQUIRED by Swift's synthesized decoder, so adding it
+    /// made every existing map fail to load with "Key 'keyframes' not found" - caught by the test
+    /// suite, and exactly the breakage this project cannot afford (2026-10-17).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        version = try c.decode(Int.self, forKey: .version)
+        nodes = try c.decode([MapNode].self, forKey: .nodes)
+        edges = try c.decode([MapEdge].self, forKey: .edges)
+        marker = try c.decodeIfPresent(MarkerRef.self, forKey: .marker)
+        keyframes = try c.decodeIfPresent([Keyframe].self, forKey: .keyframes) ?? []
+    }
 
     /// Pretty, stable-ordered JSON so diffs are readable in git and Live Share.
     public func jsonData() throws -> Data {

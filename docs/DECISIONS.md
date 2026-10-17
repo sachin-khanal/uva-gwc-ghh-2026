@@ -420,3 +420,27 @@ clause goes the same way and stairs are still warned by the countdown, earlier t
 its destination ("...about 12 metres to Room 442."), because reaching that place IS the move.
 A test now asserts that no line the planner emits contains ", then " at all.
 **Status:** accepted; 204 tests pass. UNVERIFIED ON DEVICE.
+
+## D-038 — Keyframes: recognise the PLACE to relocalize faster (2026-10-17)   [CONTRACT CHANGE]
+Chosen by the team from the options in D-035, option 2. ARKit's relocalization is already image-based, so more of the
+same kind of matching would not help; a keyframe adds DIFFERENT information - a whole-image descriptor compared by
+nearest neighbour, which recognises a place from one frame instead of accumulating feature matches.
+While scanning, one `Keyframe` is recorded every ~2.5 m: an Apple Vision feature print plus the camera's position and
+yaw in the map frame. Relocalizing, a live frame is compared against them at most twice a second; a confident match
+gives `mapToWorld` immediately, by the same derivation the marker path uses (`cameraWorld * poseInMap.inverse`).
+**It is a COARSE fix and is labelled as one.** The descriptor says "this looks like where the volunteer stood", not an
+exact pose - standing a metre aside or 20 degrees off still matches. `Relocalizer.fix` records whether the position
+came from a keyframe, the world map or a marker, and an exact fix always supersedes a coarse one. The point is to
+start guiding in seconds instead of waiting, with ARKit refining when it lands.
+**Refusing to answer is part of the design.** A corridor photographs much the same from several places, so a match is
+rejected unless it is clearly better than the best match from somewhere ELSE (more than 3 m away). A confident wrong
+position is far worse for a blind user than no position. Covered by a test.
+**Privacy:** the DESCRIPTOR is stored, never the photograph. It cannot be inverted to the image, which matters because
+these are recorded inside buildings full of people and maps get shared between phones and to the cloud.
+**CONTRACT CHANGE:** `BuildingMap.keyframes` and `schemaVersion` 2 -> 3. A hand-written `init(from:)` was needed:
+a property with a default value is still REQUIRED by Swift's synthesized decoder, so simply adding the field made
+every existing map fail to load with "Key 'keyframes' not found". The test suite caught it; there is now a test that
+decodes a map with no `keyframes` key. `tools/validate_map.py` accepts the new field unchanged (checked).
+**Status:** accepted; 213 tests pass. **UNVERIFIED ON DEVICE** - no feature print has ever been computed on a phone.
+The distance threshold (18) is a guess: Vision's feature-print distances are not normalised and MUST be calibrated in
+a real corridor before this is trusted.

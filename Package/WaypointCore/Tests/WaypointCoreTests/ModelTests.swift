@@ -235,3 +235,98 @@ final class MapDeletionTests: XCTestCase {
         XCTAssertEqual(try store.listMaps().count, 1)
     }
 }
+
+// MARK: - Keyframes: recognising a place to relocalize faster (2026-10-17)
+
+final class KeyframeTests: XCTestCase {
+
+    /// Descriptors are opaque bytes here; the test supplies its own distance, exactly as Vision does
+    /// in the app. One byte per descriptor keeps the arithmetic obvious.
+    private func frame(_ byte: UInt8, at x: Float, _ z: Float, yaw: Float = 0) -> Keyframe {
+        Keyframe(position: SIMD3(x, 0, z), yaw: yaw, descriptor: Data([byte]))
+    }
+
+    private func absoluteDistance(_ a: Data, _ b: Data) -> Float? {
+        guard let x = a.first, let y = b.first else { return nil }
+        return abs(Float(x) - Float(y))
+    }
+
+    func testFindsTheClosestLookingPlace() throws {
+        let index = KeyframeIndex(keyframes: [frame(10, at: 0, 0), frame(50, at: 20, 0), frame(90, at: 40, 0)])
+        let match = try XCTUnwrap(index.best(matching: Data([52]), distance: absoluteDistance))
+        XCTAssertEqual(match.keyframe.position.x, 20)
+        XCTAssertEqual(match.distance, 2, accuracy: 1e-5)
+    }
+
+    /// The safety rule. A corridor photographs much the same from several places; if two DIFFERENT
+    /// places match nearly as well, we must say "I don't know" rather than hand a blind user a
+    /// confident wrong position.
+    func testRefusesToGuessBetweenTwoPlacesThatLookAlike() {
+        let index = KeyframeIndex(keyframes: [frame(50, at: 0, 0), frame(52, at: 30, 0)])
+        XCTAssertNil(index.best(matching: Data([51]), distance: absoluteDistance),
+                     "both ends of the corridor look the same: refuse")
+    }
+
+    /// Neighbouring keyframes of the SAME spot naturally score alike and must not count as ambiguity.
+    func testNeighbouringKeyframesOfTheSameSpotDoNotBlockAMatch() throws {
+        let index = KeyframeIndex(keyframes: [frame(50, at: 0, 0), frame(52, at: 1.5, 0)])
+        let match = try XCTUnwrap(index.best(matching: Data([50]), distance: absoluteDistance),
+                                  "1.5 m apart is the same place")
+        XCTAssertEqual(match.keyframe.position.x, 0)
+    }
+
+    func testNothingCloseEnoughIsNoMatch() {
+        let index = KeyframeIndex(keyframes: [frame(10, at: 0, 0)])
+        XCTAssertNil(index.best(matching: Data([200]), maxDistance: 18, distance: absoluteDistance))
+    }
+
+    func testUncomparableDescriptorsAreSkippedNotCrashed() throws {
+        let index = KeyframeIndex(keyframes: [Keyframe(position: .zero, yaw: 0, descriptor: Data()),
+                                              frame(10, at: 20, 0)])
+        let match = try XCTUnwrap(index.best(matching: Data([11]), distance: absoluteDistance))
+        XCTAssertEqual(match.keyframe.position.x, 20)
+    }
+
+    // MARK: Pose recovery
+
+    /// Standing where the volunteer stood, facing the same way, the transform must put map points
+    /// back where they belong.
+    func testPoseRecoveryRoundTrips() {
+        let keyframe = Keyframe(position: SIMD3(3, 0, -4), yaw: .pi / 2, descriptor: Data([1]))
+        // The user is at an arbitrary place in the ARKit world frame, facing the same way.
+        let cameraWorld = Geometry.translationMatrix(SIMD3(10, 0, 7)) * Geometry.rotationY(.pi / 2)
+        let mapToWorld = keyframe.mapToWorldTransform(cameraWorld: cameraWorld)
+        let recovered = Geometry.transformPoint(mapToWorld, keyframe.position)
+        XCTAssertEqual(recovered.x, 10, accuracy: 1e-4)
+        XCTAssertEqual(recovered.z, 7, accuracy: 1e-4)
+    }
+
+    // MARK: Spacing
+
+    func testKeyframesAreNotRecordedOnTopOfEachOther() {
+        let index = KeyframeIndex(keyframes: [frame(1, at: 0, 0)])
+        XCTAssertFalse(index.shouldRecord(at: SIMD3(1, 0, 0), spacing: 2.5))
+        XCTAssertTrue(index.shouldRecord(at: SIMD3(3, 0, 0), spacing: 2.5))
+    }
+
+    // MARK: Format compatibility - the thing that nearly broke every existing map
+
+    /// A map written before keyframes existed has no `keyframes` key at all. Swift's synthesized
+    /// decoder REQUIRES a key even when the property has a default, so this must stay covered.
+    func testMapsWithoutKeyframesStillDecode() throws {
+        let json = """
+        {"id":"5A3E0000-0000-4000-8000-0000000000D1","name":"old","version":1,
+         "nodes":[],"edges":[]}
+        """
+        let map = try BuildingMap.from(jsonData: Data(json.utf8))
+        XCTAssertTrue(map.keyframes.isEmpty)
+        XCTAssertEqual(map.name, "old")
+    }
+
+    func testKeyframesSurviveARoundTrip() throws {
+        let map = BuildingMap(name: "t", nodes: [], edges: [],
+                              keyframes: [Keyframe(position: SIMD3(1, 0, 2), yaw: 0.5, descriptor: Data([7, 8, 9]))])
+        let decoded = try BuildingMap.from(jsonData: try map.jsonData())
+        XCTAssertEqual(decoded.keyframes, map.keyframes)
+    }
+}
