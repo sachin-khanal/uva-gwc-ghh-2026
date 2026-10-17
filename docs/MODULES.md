@@ -110,3 +110,5 @@ large single Start target and voice destination input (stretch).
 
 **Update 2026-10-17 — files added by D-022 (accessibility):** core `Guidance/PhonePosture.swift` (A/B), `Guidance/SpokenPhrases.swift` (B, wording reviewed by U4), `Vision/ObstacleKind.swift` (C); `Routing/RouteFollower.swift` gained look-ahead and landmarks; `Guidance/FeedbackPlanner.swift` was rewritten around them;
 app `Waypoint/Vision/ObstacleDetector.swift` (rewritten: world-space, floor/ceiling aware), `Waypoint/Vision/ObstacleIdentifier.swift` (new: mesh class + Vision), `Waypoint/Navigation/NavigationController.swift` (posture + report wiring, corrected camera axes). Tests: `AccessibilityGuidanceTests.swift` (24).
+
+**Update 2026-10-17 (Codex, U3):** standalone web viewer implemented in web/ (U3 ownership), with browser routing, map validation, schema-3 OBJ surfaces, mock cloud and DOM checks. Browser fixtures are web-local; native sample/schema unchanged. Live scan/cloud verification pending.

@@ -1,5 +1,8 @@
 # Work log
 
+## 2026-10-17 - Codex for U3 - Publish standalone web viewer to main
+User authorized commit and push to main. Prepared isolated publish-web-viewer worktree from origin/main; preserved original U3 working tree and all native/backend edits. Added web/ static explorer, router, OBJ integrity loading and WebGL surfaces, mock/DOM tests, loopback server, web-local synthetic schema-3 sample; added Samples/route-vectors.json. Native sample and Swift sources unchanged to preserve main's schema-2 compatibility. README adds deployment/native integration corrections. Edited docs/MODULES.md and this log additively.
+Verification: pre-integration browser 46/46 logic/GPU and 16/16 UI PASS; Python 15 PASS. Integrated browser checks recorded below before push. Native make test/typecheck unavailable on Windows; no Swift changes. Live cloud downloads and real scan fidelity/performance UNVERIFIED ON DEVICE. No dependencies added. Commands: git fetch/worktree, targeted copy/edit, Python loopback server, hidden headless Edge, git diff --check, targeted git add/commit/push. No native/backend files included.
 ## 2026-10-18 00:50 — Claude (agent, for Sachin) — First REAL LiDAR scan run on the phone (headless probes): export + coverage verified on real mesh data   [tags: BUILD]
 Area: A/C (scan, export). Command: `xcrun devicectl ... -- -autoScan YES -scanExportProbe YES -scanCoverage YES` for ~75 s on Sachin's iPhone 16 Pro Max (hand held, a room), current build from `fix/guidance-voice` 6034a76. Nothing was saved to the map store; the probe export file is deleted after reading it back.
 Verified on real data: tracking OK at 60 fps; mesh grew to 45 anchors / 249k triangles; scan box 9.7 x 4.0 x 5.9 m; ARKit mapping status reached `mapped` (3) several times, so Finish is reachable in a room. EXPORT PROBE PASS: 8 anchors -> 21,451 triangles, read back by SceneKit 21,451, 1.5 MB USDZ, 364 ms, within budget with no simplification needed. Coverage overlay computation: 10-24% of box-face tiles covered (1,471 open tiles + 2,360 outline dashes at the end, under the 4,000-tile cap); the 1 Hz background fit took 38-158 ms and fps stayed 60.
@@ -1033,3 +1036,5 @@ wanted a CLI-first build and docs readable by humans and agents.
    scan/marker path works. B/C can still test audio/haptics/obstacles by temporarily feeding fake poses.)
 4. Fill in team names in `docs/MODULES.md`; decide Live Share vs git (`docs/WORKFLOW.md`).
 5. Known logic gaps are listed per owner at the bottom of `docs/MODULES.md`.
+
+**Update 2026-10-17 (Codex):** isolated main integration re-run: 46/46 browser logic/GPU/mock checks and 16/16 UI checks PASS; git diff --check PASS. Temporary preview server stopped.
