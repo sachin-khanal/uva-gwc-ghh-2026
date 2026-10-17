@@ -672,3 +672,95 @@ final class FollowerProgressTests: XCTestCase {
                           "2 m outside the room's edge")
     }
 }
+
+// MARK: - Starting from where you stand, and noticing an unclosed loop (device report, 2026-10-17)
+
+final class LoopRoutingTests: XCTestCase {
+
+    /// A rectangular corridor loop, like a building with a central core. Nodes every 2 m, and the
+    /// walk comes back to where it began, so the loop IS closed.
+    private func loop(closed: Bool) -> (BuildingMap, [MapNode]) {
+        var nodes: [MapNode] = []
+        for i in 0..<10 { nodes.append(MapNode(kind: .corridor, position: SIMD3(Float(i) * 2, 0, 0))) }
+        for i in 1..<6 { nodes.append(MapNode(kind: .corridor, position: SIMD3(18, 0, Float(i) * -2))) }
+        for i in 1..<10 { nodes.append(MapNode(kind: .corridor, position: SIMD3(18 - Float(i) * 2, 0, -10))) }
+        // ...and back up to where we started, so the final node sits on the first one.
+        for i in 1...5 { nodes.append(MapNode(kind: .corridor, position: SIMD3(0, 0, -10 + Float(i) * 2))) }
+        var edges: [MapEdge] = []
+        for i in 0..<(nodes.count - 1) {
+            edges.append(MapEdge(from: nodes[i].id, to: nodes[i + 1].id,
+                                 distance: Geometry.horizontalDistance(nodes[i].position, nodes[i + 1].position)))
+        }
+        if closed {
+            edges.append(MapEdge(from: nodes[nodes.count - 1].id, to: nodes[0].id,
+                                 distance: Geometry.horizontalDistance(nodes[nodes.count - 1].position, nodes[0].position)))
+        }
+        return (BuildingMap(name: "core", nodes: nodes, edges: edges), nodes)
+    }
+
+    /// The reported bug: standing near one end of the loop, the single NEAREST node sat on the wrong
+    /// branch, so the route went all the way round instead of a few metres the other way.
+    func testRouteStartsFromTheBranchThatIsActuallyShorter() throws {
+        let (map, nodes) = loop(closed: true)
+        let graph = WaypointGraph(map: map)
+        let destination = nodes[nodes.count - 2] // just "behind" the start, the short way round
+
+        // The user stands next to the first node, i.e. a step away from BOTH branches.
+        let position = SIMD3<Float>(0.4, 0, -0.4)
+        let best = try XCTUnwrap(Router.bestRoute(in: graph, from: position, to: destination.id))
+        let naiveStart = try XCTUnwrap(graph.nearestNode(to: position))
+        let naive = try XCTUnwrap(Router.route(in: graph, from: naiveStart.id, to: destination.id))
+
+        XCTAssertLessThanOrEqual(Router.length(of: best), Router.length(of: naive))
+        XCTAssertLessThan(Router.length(of: best), 10, "a few metres the short way, not all the way round")
+    }
+
+    func testBestRouteStillWorksWhenOnlyOneWayExists() throws {
+        let (map, nodes) = loop(closed: false)
+        let graph = WaypointGraph(map: map)
+        let route = try XCTUnwrap(Router.bestRoute(in: graph, from: SIMD3(0.4, 0, -0.4), to: nodes[nodes.count - 2].id))
+        XCTAssertEqual(route.last?.id, nodes[nodes.count - 2].id)
+    }
+
+    func testRouteLengthIsTheWalkedLength() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -3))
+        let c = MapNode(kind: .corridor, position: SIMD3(4, 0, -3))
+        XCTAssertEqual(Router.length(of: [a, b, c]), 7, accuracy: 1e-4)
+        XCTAssertEqual(Router.length(of: [a]), 0)
+    }
+
+    // MARK: Off-route distance, which drives re-routing
+
+    func testDistanceFromRouteIsZeroOnItAndGrowsAsYouLeave() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let map = BuildingMap(name: "t", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 10)])
+        let follower = RouteFollower(route: [a, b], graph: WaypointGraph(map: map))
+        XCTAssertEqual(follower.distanceFromRoute(position: SIMD3(0, 0, -5)), 0, accuracy: 1e-4)
+        XCTAssertEqual(follower.distanceFromRoute(position: SIMD3(6, 0, -5)), 6, accuracy: 1e-4)
+    }
+
+    // MARK: Map health notices an unclosed loop
+
+    func testAnUnclosedLoopIsReported() {
+        let (map, _) = loop(closed: false)
+        XCTAssertGreaterThan(MapHealth.unclosedRevisits(map), 0,
+                             "the walk ends next to where it began but nothing joins them")
+        XCTAssertTrue(MapHealth.check(map).contains { if case .unclosedLoop = $0 { return true } else { return false } })
+    }
+
+    func testAClosedLoopIsNotReported() {
+        let (map, _) = loop(closed: true)
+        XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
+    }
+
+    /// A straight corridor has no loops either, and that is perfectly fine - it must not be flagged.
+    func testAStraightCorridorIsNotFlagged() {
+        let nodes = (0..<20).map { MapNode(kind: .corridor, position: SIMD3(0, 0, Float($0) * -1.5)) }
+        var edges: [MapEdge] = []
+        for i in 0..<(nodes.count - 1) { edges.append(MapEdge(from: nodes[i].id, to: nodes[i + 1].id, distance: 1.5)) }
+        let map = BuildingMap(name: "straight", nodes: nodes, edges: edges)
+        XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
+    }
+}

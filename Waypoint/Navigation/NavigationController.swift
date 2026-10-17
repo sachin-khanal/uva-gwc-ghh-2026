@@ -85,6 +85,12 @@ final class NavigationController: ObservableObject {
     private var follower: RouteFollower?
     /// Holds the first route back until the relocalized pose has settled (see StartGate).
     private var startGate = StartGate()
+    /// Consecutive ticks spent far from the route; drives re-routing.
+    private var offRouteTicks = 0
+    /// How far off the route counts as "off route". Wider than a corridor, so normal drift is ignored.
+    private static let rerouteMeters: Float = 5
+    /// ~1.5 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
+    private static let rerouteTicks = 15
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -157,6 +163,7 @@ final class NavigationController: ObservableObject {
         headingRadians = nil
         self.destination = destination
         follower = nil
+        offRouteTicks = 0
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
@@ -251,6 +258,27 @@ final class NavigationController: ObservableObject {
             self.mapPosition = mapPosition
             headingRadians = atan2(mapForward.x, -mapForward.z)
             updateRouteWorldPositions(mapToWorld: mapToWorld)
+            // Re-route when the user is genuinely somewhere else. The route used to be computed once
+            // and kept for the whole session, so walking a different (often shorter) way than the one
+            // the volunteer scanned left the app insisting on its original path (device report
+            // 2026-10-17).
+            if let current = follower, current.distanceFromRoute(position: mapPosition) > Self.rerouteMeters {
+                offRouteTicks += 1
+                if offRouteTicks >= Self.rerouteTicks {
+                    offRouteTicks = 0
+                    if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
+                        follower = rebuilt
+                        routeNodeIds = rebuilt.route.map(\.id)
+                        lastRouteWorldKey = ""
+                        planner.reset()
+                        speech.say("Recalculating.", priority: .high)
+                        Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
+                    }
+                }
+            } else {
+                offRouteTicks = 0
+            }
+
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
                 lastLoggedKind = i.kind
@@ -291,12 +319,13 @@ final class NavigationController: ObservableObject {
     }
 
     private func makeFollower(from position: SIMD3<Float>, graph: WaypointGraph, destination: MapNode) -> RouteFollower? {
-        guard let start = graph.nearestNode(to: position),
-              let route = Router.route(in: graph, from: start.id, to: destination.id) else {
+        // From where the user STANDS, not from whichever node is nearest: on a loop the nearest node
+        // can be on the wrong branch and send them the long way round.
+        guard let route = Router.bestRoute(in: graph, from: position, to: destination.id) else {
             Log.nav.error("no route to destination")
             return nil
         }
-        Log.nav.info("route has \(route.count) nodes")
+        Log.nav.info("route has \(route.count) nodes, \(String(format: "%.1f", Router.length(of: route))) m")
         return RouteFollower(route: route, graph: graph)
     }
 

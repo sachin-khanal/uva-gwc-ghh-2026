@@ -155,6 +155,16 @@ public final class RouteFollower {
         return bestIndex + 1
     }
 
+    /// How far the user is from the route polyline, floor plane. Used to decide when to re-route.
+    public func distanceFromRoute(position: SIMD3<Float>) -> Float {
+        guard route.count > 1 else {
+            return route.first.map { Geometry.horizontalDistance(position, $0.position) } ?? 0
+        }
+        return (0..<(route.count - 1)).map {
+            RouteSimplifier.perpendicularDistance(position, from: route[$0].position, to: route[$0 + 1].position)
+        }.min() ?? 0
+    }
+
     /// A point `steeringLookaheadMeters` further along the route: the "carrot" the user walks toward.
     /// Falls back to the last node when the route runs out, so the final approach aims at the destination.
     func steeringPoint(from position: SIMD3<Float>, distanceToTarget: Float) -> SIMD3<Float> {

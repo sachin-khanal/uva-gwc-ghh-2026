@@ -276,3 +276,23 @@ Also: the debug overlay draws the route over the CAMERA in AR (markers on the fl
 on the plan, and the scan review screen lists each room's measured boundary so a bad extraction is visible on review
 rather than during a walk.
 **Status:** accepted; 160 tests pass. UNVERIFIED ON DEVICE.
+
+## D-029 — Route from where you STAND, and re-route when you are not on it (2026-10-17)
+From a Rice Hall walk around the central core: "it makes me go the long way even though there is clearly a shorter way;
+it only corrects it when getting close enough to the path after walking down."
+Two causes, both in how the route was chosen rather than in A*:
+1. **The start node.** `makeFollower` routed from `graph.nearestNode(to:)` - the single closest breadcrumb. On a loop
+corridor the closest node can sit on the WRONG branch: a metre away, but facing the long way round. `Router.bestRoute`
+now tries the 8 nearest nodes and keeps the one with the smallest total of "walk to that node" + "route from it", so
+the branch that is genuinely shorter from where the user is standing wins.
+2. **Nothing ever re-routed.** The follower was built once per session and kept whatever it first decided, so walking a
+different (often shorter) way than the volunteer scanned left the app insisting on its original path forever. The
+controller now measures the distance from the route polyline each tick and, after 1.5 s consistently more than 5 m off,
+rebuilds the route from the current position and says "Recalculating." The thresholds are deliberately slack: normal
+corridor drift and a single bad pose sample must not trigger it.
+Also added a map-health warning, `unclosedLoop`: the scan passes back through a place it has already been without the
+two visits being joined, which is exactly the condition that makes A* take the long way round. It counts REVISITS
+rather than cycles, because a straight corridor has no cycles either and that is perfectly fine - flagging it would be
+noise. Shown on the review screen so the problem is visible when the map is made, not during a walk.
+**Status:** accepted; 167 tests pass. UNVERIFIED ON DEVICE. Thresholds to tune: 8 start candidates, 5 m off-route,
+1.5 s dwell, and MapHealth's 1.5 m / 10-node revisit test.

@@ -19,6 +19,44 @@ public enum Router {
     /// Added to the cost of stairs edges when `allowStairs == false`. 1000 m ~ "only if no other way".
     public static let stairsPenalty: Float = 1000
 
+    /// How many nearby nodes `bestRoute` will try as a starting point.
+    public static let startCandidates = 8
+
+    /// Walking length of a route, floor plane.
+    public static func length(of route: [MapNode]) -> Float {
+        guard route.count > 1 else { return 0 }
+        return (0..<(route.count - 1)).reduce(Float(0)) {
+            $0 + Geometry.horizontalDistance(route[$1].position, route[$1 + 1].position)
+        }
+    }
+
+    /// The best route from where the user actually STANDS, rather than from whichever node happens to
+    /// be nearest.
+    ///
+    /// Why: on a loop corridor the nearest node can be on the wrong branch - a metre away but facing
+    /// the long way round - and routing from it sent the user all the way around the core when the
+    /// other direction was far shorter (device report 2026-10-17). We try several nearby nodes and
+    /// keep the one with the smallest total of "walk to that node" plus "route from it".
+    public static func bestRoute(
+        in graph: WaypointGraph,
+        from position: SIMD3<Float>,
+        to goal: UUID,
+        allowStairs: Bool = false,
+        candidates: Int = startCandidates
+    ) -> [MapNode]? {
+        var best: [MapNode]?
+        var bestCost = Float.greatestFiniteMagnitude
+        for start in graph.nearestNodes(to: position, limit: candidates) {
+            guard let route = route(in: graph, from: start.id, to: goal, allowStairs: allowStairs) else { continue }
+            let cost = Geometry.horizontalDistance(position, start.position) + length(of: route)
+            if cost < bestCost {
+                bestCost = cost
+                best = route
+            }
+        }
+        return best
+    }
+
     /// Returns the ordered nodes from `start` to `goal` inclusive, or nil if unreachable / unknown ids.
     ///
     /// The result is passed through `RouteSimplifier` by default. A* is optimal over the graph, but the

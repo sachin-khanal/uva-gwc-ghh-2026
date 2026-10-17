@@ -48,6 +48,17 @@ public struct WaypointGraph {
         map.nodes.min { simd_distance($0.position, position) < simd_distance($1.position, position) }
     }
 
+    /// The `limit` nodes closest to `position`, nearest first.
+    /// Routing uses this rather than the single nearest node: on a loop corridor the closest node can
+    /// sit on the wrong branch, and starting there sends the user the long way round (device report
+    /// 2026-10-17).
+    public func nearestNodes(to position: SIMD3<Float>, limit: Int) -> [MapNode] {
+        map.nodes
+            .sorted { simd_distance($0.position, position) < simd_distance($1.position, position) }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
+
     /// Case/space/punctuation-insensitive substring search over node labels.
     public func nodes(matchingLabel query: String) -> [MapNode] {
         let q = Self.normalize(query)

@@ -19,6 +19,33 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Route from the user's position; re-route when off it   [tags: BUILD, BUG]
+Area: B (Routing/Navigation). Branch `routing-start-and-reroute` off `main`. See D-029.
+
+Reported with screenshots: the route went the long way round the central core while the user walked the short way, and
+only "corrected" later. Causes: (1) the route started from the single nearest NODE, which on a loop can be on the wrong
+branch; (2) nothing ever re-routed, so the first decision stood for the whole session.
+Files edited (WaypointCore): `Routing/WaypointGraph.swift` (+`nearestNodes(to:limit:)`), `Routing/Router.swift`
+(+`bestRoute(in:from:to:)` choosing the start node by walk-in + route length, +`length(of:)`),
+`Routing/RouteFollower.swift` (+`distanceFromRoute(position:)`), `Flows/MapHealth.swift` (+`unclosedLoop(count:)` and
+`unclosedRevisits`, which counts REVISITS not cycles so a straight corridor is not flagged).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (`makeFollower` uses `bestRoute`; re-routes after
+1.5 s more than 5 m off the route, resets the planner and says "Recalculating.").
+Tests added: `LoopRoutingTests` (7) - the shorter branch is chosen from where the user stands, bestRoute still works
+when only one way exists, route length, off-route distance, an unclosed loop IS reported, a closed one is not, and a
+straight corridor is not flagged.
+Two of my own mistakes, both caught by tests: my first health check flagged any map without a cycle, which failed on
+the sample map (a straight corridor legitimately has none) - rewritten to look for unjoined revisits; and my loop
+fixture ended 2 m from the start, outside the revisit radius, so the test proved nothing until I closed it properly.
+Verified: `make test` -> **167 tests, 0 failures** (was 160); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Re-routing has never fired on a phone.
+Open / handoff:
+1. Re-routing only helps if the shorter way EXISTS in the graph. If the scan never joined the loop, no amount of
+   re-routing finds it - hence the new review-screen warning. Rescan walking back over your own path.
+2. Still not done: the CarPlay-style Navigator layout.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Route progress by projection; corner cues; AR path overlay   [tags: BUILD, BUG]
 Area: B (Routing/Navigation) + U3 (UI). Branch `follower-progress-and-overlay` off `main` (6c892a1). See D-028.
 
