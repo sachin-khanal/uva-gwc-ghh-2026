@@ -384,3 +384,19 @@ world map rather than only the first that exists (`Relocalizer` still has that T
 D-008, which has been the designed fallback since the first architecture and is still unbuilt - it gives an exact pose
 instantly and does not care how similar the corridor looks. The marker is the real answer; (a) is a useful stopgap.
 **Status:** accepted as analysis; nothing implemented yet. Needs U4.6 (print the marker) and U1.7 (wire it up).
+
+## D-036 — Notice the wrong way sooner, and never brief someone facing backwards (2026-10-17)
+From a good Rice Hall run, two faults in the same moment.
+1. **Re-routing was too slow.** It needed 5 m off the route for 1.5 s. Walking down the wrong corridor stayed under
+that for several seconds. Now 3 m for 1 s, plus a second trigger: if the distance from the route has GROWN by 1.5 m
+within the last 2 s while the user is moving, they are walking away from it and the route is already wrong - no need
+to wait for them to get far. Both reset on a re-route so it cannot fire twice for the same departure.
+2. **The recalculated route was described from the wrong place.** `planner.reset()` re-armed the route briefing, which
+then said "Walk straight about 8 metres, then turn left." at the same moment the user was being told to turn around.
+The briefing now waits while the current cue is `.turnAround`: describing the walk before they are facing the right
+way is both wrong and contradicts the cue beside it.
+3. **The screen contradicted the arrow.** D-034 made the headline show the spoken line so screen and voice agreed, but
+a long briefing truncated to "Walk straight about 8 meters, t..." next to a turn-around arrow. The headline now takes
+the spoken line only when it is a short DIRECTIVE (<= 30 characters, not a "..., then ..." sentence); longer narration
+drops to the detail line, where it fits and cannot be mistaken for the current instruction.
+**Status:** accepted; 199 tests pass. UNVERIFIED ON DEVICE. Tune: 3 m, 1 s, and the 1.5 m / 2 s drift test.

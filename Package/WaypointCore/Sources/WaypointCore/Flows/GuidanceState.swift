@@ -71,8 +71,12 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         case .idle: return "Ready"
         case .localizing: return "Finding your position"
         case .guiding:
-            // Prefer the words actually spoken, so the screen is not a paraphrase of the voice.
-            if let lastSpoken, !lastSpoken.isEmpty { return lastSpoken }
+            // Prefer the words actually spoken, so the screen is not a paraphrase of the voice - but
+            // only when they are a short DIRECTIVE. A briefing ("Walk straight about 8 metres, then
+            // turn left.") is narration: as a headline it truncates to nonsense and can contradict the
+            // arrow beside it, which was exactly what happened on a walk (2026-10-17). Long lines go
+            // in `detail` instead.
+            if let line = Self.directive(lastSpoken) { return line }
             return SpokenText.instruction(kind ?? .continueStraight)
         case .lost: return "Position lost"
         case .obstacleStop: return "Stop"
@@ -81,12 +85,25 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         }
     }
 
+    /// Longest line we are willing to show as a headline before it truncates on a phone.
+    static let maxHeadlineCharacters = 30
+
+    /// A short, single instruction ("Right.", "Turn around.") rather than narration. nil when the text
+    /// is missing, long, or is a sentence describing several steps.
+    static func directive(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        guard text.count <= maxHeadlineCharacters, !text.contains(", then ") else { return nil }
+        return text
+    }
+
     /// The line under the headline.
     public var detail: String {
         switch phase {
         case .idle: return ""
         case .localizing: return "Slowly turn left and right"
         case .guiding:
+            // Narration that was too long to headline still belongs on screen.
+            if let spoken = lastSpoken, !spoken.isEmpty, Self.directive(spoken) == nil { return spoken }
             guard let d = distanceToNext else { return "" }
             return SpokenText.capitalizingFirst(SpokenText.distance(d)) + " to the next point"
         case .lost: return "Hold still"

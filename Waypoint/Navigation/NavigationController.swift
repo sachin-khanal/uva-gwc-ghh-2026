@@ -101,10 +101,17 @@ final class NavigationController: ObservableObject {
     /// How far apart movement samples are taken. Shorter than this and ARKit's pose noise looks like
     /// walking; longer and we react too slowly.
     private static let movementSampleSeconds: TimeInterval = 0.6
-    /// How far off the route counts as "off route". Wider than a corridor, so normal drift is ignored.
-    private static let rerouteMeters: Float = 5
-    /// ~1.5 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
-    private static let rerouteTicks = 15
+    /// How far off the route counts as "off route". Still wider than a corridor so normal drift is
+    /// ignored, but 5 m meant walking the wrong way for several seconds before anything happened
+    /// (device report 2026-10-17).
+    private static let rerouteMeters: Float = 3
+    /// ~1 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
+    private static let rerouteTicks = 10
+    /// Walking AWAY from the route is caught sooner than simply being far from it: if the distance has
+    /// grown by this much while moving, we are heading somewhere else and the route is already wrong.
+    private static let rerouteDriftMeters: Float = 1.5
+    /// Distance from the route a moment ago, for that drift test.
+    private var routeDistanceHistory: [(distance: Float, time: TimeInterval)] = []
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -195,6 +202,7 @@ final class NavigationController: ObservableObject {
         offRouteTicks = 0
         lastMovementSample = nil
         isMoving = true
+        routeDistanceHistory.removeAll()
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
@@ -294,10 +302,21 @@ final class NavigationController: ObservableObject {
             // and kept for the whole session, so walking a different (often shorter) way than the one
             // the volunteer scanned left the app insisting on its original path (device report
             // 2026-10-17).
-            if let current = follower, current.distanceFromRoute(position: mapPosition) > Self.rerouteMeters {
-                offRouteTicks += 1
-                if offRouteTicks >= Self.rerouteTicks {
+            if let current = follower {
+                let offRoute = current.distanceFromRoute(position: mapPosition)
+                routeDistanceHistory.append((offRoute, time))
+                routeDistanceHistory.removeAll { time - $0.time > 2 }
+                // Two ways to notice: far from the route for a while, OR steadily walking away from it.
+                let farForAWhile: Bool = {
+                    if offRoute > Self.rerouteMeters { offRouteTicks += 1 } else { offRouteTicks = 0 }
+                    return offRouteTicks >= Self.rerouteTicks
+                }()
+                let drifting = isMoving
+                    && (routeDistanceHistory.first.map { offRoute - $0.distance >= Self.rerouteDriftMeters } ?? false)
+
+                if farForAWhile || drifting {
                     offRouteTicks = 0
+                    routeDistanceHistory.removeAll()
                     if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
                         follower = rebuilt
                         routeNodeIds = rebuilt.route.map(\.id)
@@ -307,8 +326,7 @@ final class NavigationController: ObservableObject {
                         Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
                     }
                 }
-            } else {
-                offRouteTicks = 0
+                }
             }
 
             instruction = follower?.update(position: mapPosition, forward: mapForward)

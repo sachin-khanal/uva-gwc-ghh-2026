@@ -361,3 +361,69 @@ final class TurnWordingTests: XCTestCase {
         XCTAssertFalse(snapshot.headline.isEmpty, "mock mode still needs a headline")
     }
 }
+
+// MARK: - After a recalculation, and what the screen shows (device report, 2026-10-17)
+
+final class RecalculationWordingTests: XCTestCase {
+
+    private func spoken(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    private func instruction(_ kind: GuidanceInstruction.Kind, upcoming: Maneuver?) -> GuidanceInstruction {
+        GuidanceInstruction(kind: kind, bearingRadians: kind == .turnAround ? .pi : 0,
+                            distanceMeters: 8, targetNodeId: UUID(), targetLabel: nil,
+                            targetPosition: SIMD3(0, 0, -8), hazard: nil, upcoming: upcoming,
+                            targetKind: .corridor)
+    }
+
+    /// The bug: after recalculating while facing the wrong way, it briefed "walk straight about 8
+    /// metres, then turn left" at the same moment it was telling the user to turn around.
+    func testNoBriefingWhileTheUserIsFacingTheWrongWay() {
+        var planner = FeedbackPlanner()
+        let turn = Maneuver(kind: .turnLeft, distanceMeters: 8, nodeId: UUID(), angleRadians: 1.4)
+        let said = spoken(planner.plan(instruction: instruction(.turnAround, upcoming: turn),
+                                       obstacle: .clear, trackingOK: true, time: 1))
+        XCTAssertFalse(said.contains { $0.contains("Walk straight") },
+                       "do not describe the walk before they have turned round: \(said)")
+        XCTAssertTrue(said.contains { $0.hasPrefix("Turn around") }, "\(said)")
+    }
+
+    /// ...and once they ARE facing the right way, the briefing happens as normal.
+    func testTheBriefingArrivesOnceTheyAreFacingTheRightWay() {
+        var planner = FeedbackPlanner()
+        let turn = Maneuver(kind: .turnLeft, distanceMeters: 8, nodeId: UUID(), angleRadians: 1.4)
+        _ = planner.plan(instruction: instruction(.turnAround, upcoming: turn), obstacle: .clear,
+                         trackingOK: true, time: 1)
+        let said = spoken(planner.plan(instruction: instruction(.continueStraight, upcoming: turn),
+                                       obstacle: .clear, trackingOK: true, time: 4))
+        XCTAssertTrue(said.contains { $0.contains("Walk straight") }, "briefed now: \(said)")
+    }
+
+    // MARK: Headline vs detail
+
+    func testAShortDirectiveIsTheHeadline() {
+        var s = GuidanceSnapshot.derive(status: "Navigating", instruction: "turnRight, 1.5 m",
+                                        obstacle: .clear, destinationLabel: "Room 442")
+        s.lastSpoken = "Right."
+        XCTAssertEqual(s.headline, "Right.")
+    }
+
+    /// A long narration must not become a truncated headline sitting next to a contradicting arrow.
+    func testNarrationGoesInTheDetailNotTheHeadline() {
+        var s = GuidanceSnapshot.derive(status: "Navigating", instruction: "turnAround, 8.1 m",
+                                        obstacle: .clear, destinationLabel: "Room 442")
+        s.lastSpoken = "Walk straight about 8 meters, then turn left."
+        XCTAssertNotEqual(s.headline, s.lastSpoken, "too long to headline")
+        XCTAssertFalse(s.headline.isEmpty)
+        XCTAssertEqual(s.detail, "Walk straight about 8 meters, then turn left.")
+    }
+
+    func testDirectiveRecognition() {
+        XCTAssertEqual(GuidanceSnapshot.directive("Turn around."), "Turn around.")
+        XCTAssertEqual(GuidanceSnapshot.directive("Slightly left 20 degrees."), "Slightly left 20 degrees.")
+        XCTAssertNil(GuidanceSnapshot.directive("Walk straight about 8 meters, then turn left."))
+        XCTAssertNil(GuidanceSnapshot.directive(""))
+        XCTAssertNil(GuidanceSnapshot.directive(nil))
+    }
+}

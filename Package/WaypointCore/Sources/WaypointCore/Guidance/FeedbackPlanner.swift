@@ -238,7 +238,10 @@ public struct FeedbackPlanner {
         }
 
         // 4a. Route briefing, once: how far to the first turn/stairs/destination. Replaces the first "Continue straight."
-        if !briefed, i.kind != .arrived {
+        // Never brief somebody who is facing the wrong way: "walk straight about 8 metres, then turn
+        // left" is nonsense until they have turned around, and it directly contradicts the turn-around
+        // cue they are being given at the same moment (device report 2026-10-17). The briefing waits.
+        if !briefed, i.kind != .arrived, i.kind != .turnAround {
             briefed = true
             if let text = ManeuverSpeech.briefing(distanceToFirstManeuver: i.upcoming) {
                 actions.append(.speak(text, priority: .normal))

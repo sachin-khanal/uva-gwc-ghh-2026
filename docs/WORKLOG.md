@@ -93,6 +93,30 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Faster re-routing; no briefing while facing backwards   [tags: BUILD, BUG]
+Area: B (Navigation/Guidance) + UI text. Branch `reroute-and-briefing` off `navigation-overhaul`. See D-036.
+
+Reported after a good run: it did not recalculate until the user was very far off the path, and when it did it said
+"walk straight" while the screen and the right action were "turn around".
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` - re-route threshold 5 m -> 3 m and 1.5 s -> 1 s,
+plus a drift trigger (distance from the route grown by 1.5 m within 2 s while moving). Both counters reset on a
+re-route and on `begin`.
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` - the route briefing is suppressed while the cue is
+`.turnAround`; `Flows/GuidanceState.swift` - `directive(_:)` decides whether the spoken line is short enough to be a
+headline, otherwise it becomes the detail line.
+Tests added: `RecalculationWordingTests` (5) - no briefing while facing the wrong way, the briefing arrives once they
+have turned, a short directive headlines, long narration goes to detail, and directive recognition.
+Verified: `make test` -> **199 tests, 0 failures** (was 194); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nothing here touches recording or the map format - existing recordings are
+unaffected.
+Open / handoff:
+1. The drift trigger depends on `isMoving`, which comes from the camera pose; if that proves noisy on a phone the
+   trigger will fire late rather than wrongly (it requires movement to fire at all).
+2. Still open from D-035: relocalization is slow because nothing anchors it. The printed marker remains the answer.
+3. `TurnReason` is still unused by callers - obstacle-driven turns do not yet say why.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Turn vocabulary, stale-line fix, screen/speech agreement   [tags: BUILD, BUG]
 Area: B (Guidance) + UI. Branch `speech-accuracy` off `navigation-overhaul`. See D-034 and D-035.
 
