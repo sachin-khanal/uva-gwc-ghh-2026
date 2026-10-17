@@ -69,6 +69,11 @@ final class NavigationController: ObservableObject {
 
     // MARK: Collaborators
     private let relocalizer = Relocalizer()
+    private var relocalizerPreparing: AnyCancellable?
+
+    /// True while the saved scan is being read and decoded, before the camera starts. The UI shows a
+    /// loading state instead of appearing frozen (device report 2026-10-17).
+    @Published private(set) var isPreparing = false
     private let audio = SpatialAudioGuide()
     private let haptics = HapticsGuide()
     private let speech = SpeechGuide()
@@ -117,6 +122,19 @@ final class NavigationController: ObservableObject {
         begin(map: map, destination: destination)
         statusText = "Looking for your position..."
         relocalizer.onFrame = { [weak self] frame in self?.handle(frame) }
+        // Mirror the loading flag and say so out loud: "Looking for your position" is misleading while
+        // we have not even opened the file yet.
+        relocalizerPreparing = relocalizer.$isPreparing
+            .receive(on: RunLoop.main)
+            .sink { [weak self] preparing in
+                guard let self else { return }
+                self.isPreparing = preparing
+                if preparing {
+                    self.setIfChanged(\.statusText, "Opening the saved scan...")
+                } else if self.statusText == "Opening the saved scan..." {
+                    self.setIfChanged(\.statusText, "Looking for your position...")
+                }
+            }
         relocalizer.start(map: map, store: store)
         Log.nav.info("navigation started -> \(destination.label ?? "?")")
     }
@@ -155,6 +173,8 @@ final class NavigationController: ObservableObject {
         simulatedObstacle = false
         simulationPaused = false
         relocalizer.onFrame = nil
+        relocalizerPreparing = nil
+        isPreparing = false
         relocalizer.stop()
         audio.stop()
         speech.stop()

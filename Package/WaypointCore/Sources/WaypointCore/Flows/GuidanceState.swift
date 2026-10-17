@@ -128,7 +128,10 @@ public struct GuidanceSnapshot: Equatable, Sendable {
             s.phase = .failed("There is no route to \(destinationLabel.isEmpty ? "that place" : destinationLabel) in this map.")
         } else if status.hasPrefix("Position lost") || status == "Tracking limited" {
             s.phase = .lost
-        } else if status.hasPrefix("Looking for your position") {
+        } else if status.hasPrefix("Looking for your position") || status.hasPrefix("Opening the saved scan") {
+            // Reading the saved scan is part of "finding yourself" from the user's point of view; it
+            // just happens before the camera starts. Without this it fell through to .idle and the
+            // screen looked stuck (device report 2026-10-17).
             s.phase = .localizing
         } else if status == "Idle" || status == "Stopped" {
             s.phase = .idle

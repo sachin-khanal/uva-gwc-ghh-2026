@@ -334,3 +334,21 @@ walk all the way to where I labelled it" report. The two rules together can only
 NOT done (explicitly deferred by the user): predicting that opening a door will complete the route.
 **Status:** accepted; 182 tests pass. UNVERIFIED ON DEVICE. Tune on a phone: 0.15 m/s and the 0.6 s window,
 `postUtteranceDelay` 0.25 s.
+
+## D-033 — Slow work moves off the main thread; loading is shown, not hidden (2026-10-17)
+Report: "when hitting start record, or navigate, it spends a while frozen while loading."
+It was not a missing spinner - it was the main thread being blocked. `Relocalizer.start` read the `.arworldmap` off
+disk and ran `NSKeyedUnarchiver.unarchivedObject` **on the main thread**, and those files are tens of megabytes;
+`CaptureController.start` did the same when EXTENDING a map, plus `MapBundle.validate()`. Loading the marker images
+out of the asset catalog was on there too. A spinner over a blocked main thread does not even animate, so the fix had
+to be the threading first.
+Both now read and decode on a background queue and hand the result back to the main thread, where only `session.run`
+remains (ARKit requires it). Each exposes `isPreparing`, so the UI can say what is happening:
+`NavigationController` mirrors it and sets the status to "Opening the saved scan...", the classic navigator shows a
+row with a spinner, and `GuidanceSnapshot.derive` maps that status to the **localizing** phase - without that it fell
+through to `.idle` and the new interface looked stuck rather than busy.
+Cancellation matters here: a load that finishes AFTER the user backed out must not grab the camera, so both check
+`isPreparing` before running the session, and `stop()` clears it.
+**Status:** accepted; 185 tests pass. **UNVERIFIED ON DEVICE** - the freeze was reported on a phone and the fix has
+not been timed on one. If "Start recording" still pauses on a NEW (non-extend) scan, the remaining cost is ARKit
+starting the camera, which we cannot move.

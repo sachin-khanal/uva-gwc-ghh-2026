@@ -268,3 +268,28 @@ final class FlowTests: XCTestCase {
         XCTAssertTrue(PlanLayout.project([n], width: 10, height: 100, padding: 10).isEmpty)
     }
 }
+
+// MARK: - Loading the saved scan reads as "finding you", not as a frozen screen (2026-10-17)
+
+final class LoadingPhaseTests: XCTestCase {
+
+    /// Reading a big ARWorldMap happens BEFORE the camera starts. The status it produces must map to
+    /// the localizing phase; it used to fall through to .idle and the screen looked stuck.
+    func testOpeningTheSavedScanShowsAsLocalizing() {
+        let s = GuidanceSnapshot.derive(status: "Opening the saved scan...", instruction: "",
+                                        obstacle: .clear, destinationLabel: "Room 442")
+        XCTAssertEqual(s.phase, .localizing)
+    }
+
+    func testLookingForYourPositionStillLocalizes() {
+        let s = GuidanceSnapshot.derive(status: "Looking for your position...", instruction: "",
+                                        obstacle: .clear, destinationLabel: "Room 442")
+        XCTAssertEqual(s.phase, .localizing)
+    }
+
+    /// A genuinely idle controller must still read as idle, not as loading forever.
+    func testIdleIsStillIdle() {
+        XCTAssertEqual(GuidanceSnapshot.derive(status: "Idle", instruction: "", obstacle: .clear,
+                                               destinationLabel: "x").phase, .idle)
+    }
+}

@@ -87,6 +87,48 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// - Parameter recordSurfaceLabels: record ARKit's per-face surface classification (wall, floor, ceiling, door, window, table, seat).
     ///   It cannot be added to a scan afterwards, so it is ON by default for any scan you keep; turn it off only for quick tests or lag A/B runs.
     ///   `nil` = read the launch flag `-scanClassification YES/NO` (default YES).
+    /// True while an existing scan is being read and decoded before the camera starts (extend only).
+    @Published private(set) var isPreparing = false
+    /// The decoded world map, handed back to `start` by `prepareExtension`.
+    private var preparedExtension: ARWorldMap?
+
+    /// Reads and decodes the segment's world map off the main thread, then calls `done` on the main
+    /// one. Any failure is reported in `errorMessage` and `done` is not called.
+    private func prepareExtension(map: BuildingMap, initialSegment: String?,
+                                  done: @escaping () -> Void) {
+        isPreparing = true
+        errorMessage = nil
+        extensionStatus = "Opening the saved scan..."
+        let store = self.store
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var decoded: ARWorldMap?
+            var failure: String?
+            do {
+                try MapBundle(map: map).validate()
+                if let initialSegment, map.segmentIds.contains(initialSegment),
+                   let bytes = try store.loadWorldMap(mapId: map.id, segmentId: initialSegment) {
+                    decoded = try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: bytes)
+                }
+                if decoded == nil {
+                    failure = "This scan segment has no saved world map. Download its scan files or choose another segment."
+                }
+            } catch {
+                failure = "Cannot extend this map: \(error.localizedDescription)"
+            }
+            DispatchQueue.main.async {
+                guard let self, self.isPreparing else { return }
+                if let failure {
+                    self.isPreparing = false
+                    self.extensionStatus = nil
+                    self.errorMessage = failure
+                    return
+                }
+                self.preparedExtension = decoded
+                done()
+            }
+        }
+    }
+
     func start(mapName: String, recordSurfaceLabels: Bool? = nil,
                extending map: BuildingMap? = nil, initialSegment: String? = nil) {
         guard ARWorldTrackingConfiguration.isSupported else {
@@ -95,20 +137,21 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         let config = ARWorldTrackingConfiguration()
         // A failed/missing world map must never silently create an unaligned extension.
+        // Reading and decoding one is slow (tens of megabytes through NSKeyedUnarchiver), so when
+        // EXTENDING we do it on a background queue and re-enter here with the result, rather than
+        // freezing the screen on the tap (device report 2026-10-17).
         if let map {
-            do {
-                try MapBundle(map: map).validate()
-                guard let initialSegment, map.segmentIds.contains(initialSegment),
-                      let bytes = try store.loadWorldMap(mapId: map.id, segmentId: initialSegment),
-                      let worldMap = try NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: bytes) else {
-                    errorMessage = "This scan segment has no saved world map. Download its scan files or choose another segment."
-                    return
+            guard let prepared = preparedExtension else {
+                prepareExtension(map: map, initialSegment: initialSegment) { [weak self] in
+                    guard let self, self.isPreparing else { return } // cancelled meanwhile
+                    self.start(mapName: mapName, recordSurfaceLabels: recordSurfaceLabels,
+                               extending: map, initialSegment: initialSegment)
                 }
-                config.initialWorldMap = worldMap
-            } catch {
-                errorMessage = "Cannot extend this map: \(error.localizedDescription)"
                 return
             }
+            preparedExtension = nil
+            isPreparing = false
+            config.initialWorldMap = prepared
         }
         isExtension = map != nil
         isSaving = false
@@ -147,7 +190,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
     }
 
+    func cancelPreparing() {
+        isPreparing = false
+        preparedExtension = nil
+        extensionStatus = nil
+    }
+
     func stop() {
+        isPreparing = false
+        preparedExtension = nil
         session.pause()
         isRunning = false
         canRecord = false

@@ -77,6 +77,20 @@ struct NavigatorView: View {
             if app.maps.isEmpty {
                 Text("No maps yet. Scan one in Volunteer mode or receive one via Share maps.")
             }
+            if nav.isPreparing {
+                Section {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        VStack(alignment: .leading) {
+                            Text("Opening the saved scan...").font(.headline)
+                            Text("Large scans take a few seconds to read.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Opening the saved scan. Large scans take a few seconds to read.")
+                }
+            }
             Section("Map") {
                 ForEach(app.maps) { map in
                     Button {

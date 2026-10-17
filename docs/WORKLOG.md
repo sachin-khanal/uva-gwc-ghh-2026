@@ -93,6 +93,33 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Load saved scans off the main thread; real loading states   [tags: BUILD, BUG]
+Area: A (capture/relocalization) + B (navigation) + UI. Branch `loading-states` off `navigation-overhaul`. See D-033.
+
+Diagnosis: the freeze was a BLOCKED MAIN THREAD, not a missing spinner. `Relocalizer.start` and the extend branch of
+`CaptureController.start` both did a synchronous disk read plus `NSKeyedUnarchiver` of a multi-megabyte ARWorldMap on
+the main thread, and `ARReferenceImage.referenceImages` was there too.
+Files edited (app): `Waypoint/Relocalization/Relocalizer.swift` (background load + decode, new `runSession`, published
+`isPreparing`, in-flight load discarded if stopped), `Waypoint/Capture/CaptureController.swift` (`prepareExtension`
+does the work off-thread and re-enters `start`; `isPreparing`; `cancelPreparing`; `stop` clears it),
+`Waypoint/Navigation/NavigationController.swift` (mirrors `isPreparing`, status "Opening the saved scan..."),
+`Waypoint/UI/NavigatorView.swift` (loading row with a spinner, one VoiceOver element).
+Files edited (WaypointCore): `Flows/GuidanceState.swift` - "Opening the saved scan" maps to `.localizing`, so the new
+interface shows its localizing screen instead of falling through to `.idle` and looking stuck.
+Tests added: `LoadingPhaseTests` (3) - the loading status reads as localizing, the old status still does, and a truly
+idle controller is still idle.
+Verified: `make test` -> **185 tests, 0 failures** (was 182); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** The freeze was measured by the user on a phone; the fix has not been. Nothing
+here changes recording or the map format - a map recorded on an earlier build is unaffected.
+Open / handoff:
+1. If "Start recording" still pauses on a NEW (non-extend) scan, what is left is ARKit starting the camera and
+   `ARView` setting up RealityKit, which we cannot move off the main thread. Worth timing before chasing further.
+2. The sample-map seeding and `MapStore.listMaps()` at launch are still synchronous; they are small today but would be
+   the next thing to move if a phone ever holds many large maps.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Speech queues instead of interrupting; no nagging at doors   [tags: BUILD, BUG]
 Area: B (Guidance) + navigation. Branch `speech-queue-and-doors` off `navigation-overhaul`. Reasoning in D-032.
 

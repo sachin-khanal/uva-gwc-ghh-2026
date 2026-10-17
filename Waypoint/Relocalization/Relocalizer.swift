@@ -33,6 +33,11 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
 
     @Published private(set) var state: State = .idle
 
+    /// True while the saved scan is being read off disk and decoded, BEFORE the camera session starts.
+    /// An ARWorldMap is tens of megabytes and `NSKeyedUnarchiver` is not quick; doing it on the main
+    /// thread froze the app for seconds after tapping Navigate (device report 2026-10-17).
+    @Published private(set) var isPreparing = false
+
     /// Converts MAP-frame points to ARKit WORLD-frame points: world = mapToWorld * map.
     /// Identity when relocalized via world map.
     private(set) var mapToWorld: simd_float4x4 = matrix_identity_float4x4
@@ -50,12 +55,48 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
         session.delegate = self
     }
 
+    /// Reads the saved scan on a BACKGROUND queue, then starts the camera session on the main one.
+    /// Everything slow (file read, `NSKeyedUnarchiver`, loading the marker images out of the asset
+    /// catalog) happens off the main thread; only `session.run` is left on it, which is required.
     func start(map: BuildingMap, store: MapStore) {
         self.map = map
         mapToWorld = matrix_identity_float4x4
         markerSeen = false
+        usingWorldMap = false
         state = .searching
+        isPreparing = true
 
+        let mapId = map.id
+        let segments = map.segmentIds
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Primary path: saved world map for the first segment that has one.
+            var loaded: ARWorldMap?
+            var loadedSegment: String?
+            for segment in segments {
+                if let data = try? store.loadWorldMap(mapId: mapId, segmentId: segment),
+                   let worldMap = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data) {
+                    loaded = worldMap
+                    loadedSegment = segment
+                    break // TODO(A): multi-segment stitching
+                }
+            }
+            // Fallback path: marker images (nil until the asset catalog group exists).
+            let markers = ARReferenceImage.referenceImages(inGroupNamed: "WaypointMarkers", bundle: nil)
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Navigation may have been stopped while we were loading; do not grab the camera.
+                guard self.isPreparing else {
+                    Log.reloc.info("world map finished loading after stop; discarded")
+                    return
+                }
+                self.runSession(worldMap: loaded, segment: loadedSegment, markers: markers)
+            }
+        }
+    }
+
+    private func runSession(worldMap: ARWorldMap?, segment: String?, markers: Set<ARReferenceImage>?) {
         let config = ARWorldTrackingConfiguration()
         // sceneDepth feeds the obstacle detector (LiDAR depth per frame).
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
@@ -65,30 +106,24 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
             config.sceneReconstruction = .meshWithClassification
         }
-
-        // Primary path: saved world map for the first segment that has one.
-        usingWorldMap = false
-        for segment in map.segmentIds {
-            if let data = try? store.loadWorldMap(mapId: map.id, segmentId: segment),
-               let worldMap = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data) {
-                config.initialWorldMap = worldMap
-                usingWorldMap = true
-                Log.reloc.info("using world map for segment \(segment)")
-                break // TODO(A): multi-segment stitching
-            }
+        if let worldMap {
+            config.initialWorldMap = worldMap
+            usingWorldMap = true
+            Log.reloc.info("using world map for segment \(segment ?? "?")")
+        } else {
+            Log.reloc.info("no world map on disk; relying on marker or session origin")
         }
-        if !usingWorldMap { Log.reloc.info("no world map on disk; relying on marker or session origin") }
-
-        // Fallback path: marker images (nil until the asset catalog group exists).
-        if let images = ARReferenceImage.referenceImages(inGroupNamed: "WaypointMarkers", bundle: nil) {
-            config.detectionImages = images
+        if let markers {
+            config.detectionImages = markers
             config.maximumNumberOfTrackedImages = 1
         }
 
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        isPreparing = false
     }
 
     func stop() {
+        isPreparing = false // also tells an in-flight load to discard itself
         session.pause()
         state = .idle
     }
