@@ -66,13 +66,19 @@ final class WaypointUITests: XCTestCase {
     }
 
     /// Opens Navigator, selects the bundled SAMPLE map and starts the simulated walk to Room 204.
-    private func startSimulatedWalk() {
+    private func startSimulatedWalk(paused: Bool = false) {
         need(app.buttons["mode.navigate"], "Home screen missing").tap()
         // Maps are listed alphabetically; the user's own scans may come first, so pick the SAMPLE map explicitly.
         let sample = app.buttons.matching(NSPredicate(format: "label CONTAINS 'SAMPLE'")).firstMatch
         need(sample, "SAMPLE map not listed").tap()
         need(app.buttons["nav.simulate.Room 204"], "Simulate button for Room 204 missing").tap()
         need(app.staticTexts["nav.status"], "Navigating screen did not appear")
+        if paused { flip(app.switches["nav.pauseWalk"], "Pause toggle missing") } // freeze the walker: the whole walk is only ~15 s
+    }
+
+    /// Switches in this layout are wide rows: label on the left, the real switch at the far right. A plain .tap() hits the label and does nothing.
+    private func flip(_ toggle: XCUIElement, _ message: String) {
+        need(toggle, message).coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
     }
 
     // MARK: tests
@@ -110,6 +116,38 @@ final class WaypointUITests: XCTestCase {
         flip()
         waitUntil("exists == false", on: app.staticTexts["nav.obstacle"], timeout: 10, "warning should clear when the obstacle is removed")
         shot("21-obstacle-cleared")
+    }
+
+    func testObstacleIsNamedByTypeInTheSpokenSentence() {
+        startSimulatedWalk(paused: true)
+        // Default simulated obstacle is a trash can.
+        flip(app.switches["nav.injectObstacle"], "Obstacle toggle missing")
+        let spoken = need(app.staticTexts["nav.lastSpoken"], "nothing was spoken for the obstacle")
+        waitUntil("label CONTAINS 'walk into a trash can'", on: spoken, timeout: 10, "trash can sentence")
+        shot("50-trash-can")
+
+        // Change what the obstacle is: the sentence must change with it.
+        need(app.buttons["nav.obstacleKind"], "obstacle type picker missing").tap()
+        need(app.buttons["wall"], "wall option missing").tap()
+        waitUntil("label CONTAINS 'heading toward a wall'", on: app.staticTexts["nav.lastSpoken"], timeout: 10, "wall sentence")
+        shot("51-wall")
+        note("sentences", "trash can -> \(spoken.label)")
+    }
+
+    func testPhonePostureCoachSpeaksAndRecovers() {
+        startSimulatedWalk(paused: true)
+        need(app.buttons["nav.posture"], "posture picker missing").tap()
+        need(app.buttons["tiltedDown"], "tiltedDown option missing").tap()
+        let message = need(app.staticTexts["nav.postureText"], "no posture warning after the phone was tilted", timeout: 15)
+        XCTAssertTrue(message.label.contains("pointing down"), "got: \(message.label)")
+        waitUntil("label CONTAINS 'pointing down'", on: app.staticTexts["nav.lastSpoken"], timeout: 10, "the user must HEAR it, not just see it")
+        shot("60-posture-bad")
+
+        need(app.buttons["nav.posture"], "posture picker missing").tap()
+        need(app.buttons["good"], "good option missing").tap()
+        waitUntil("label CONTAINS 'Phone position is good'", on: app.staticTexts["nav.recentSpeech"], timeout: 15, "recovery message")
+        waitUntil("exists == false", on: app.staticTexts["nav.postureText"], timeout: 10, "warning text should clear")
+        shot("61-posture-good")
     }
 
     func testScanScreenShowsLiveHUD() {

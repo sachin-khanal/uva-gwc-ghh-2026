@@ -19,6 +19,53 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
+Area: shared (integration check requested by U1 before committing)
+Branches: `origin/U3` = no own commits (old pointer, 3 behind main). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
+  WaypointCore `Flows/*` + 21 `FlowTests`, `Waypoint/Services/*` (mock + live adapters around CaptureController/NavigationController), design system. Based on 27365ec (older than main), written on Windows, never compiled before this check.
+Method: throwaway git worktree outside the repo = main + ALL of Sachin's uncommitted work, then `git merge origin/app-ui-workflows`; nothing in the real working tree was touched except the fix below; worktree and its build folders deleted afterwards.
+Findings: (1) no duplicate type names in WaypointCore or the app; (2) their logging, CaptureController and NavigationController calls are all still valid (APIs only gained defaulted params);
+  (3) ONE compile break: their `LiveScanScreen.swift:68` calls `LiveScanView(session:box:)`, but today's lossless pass added a required `showMesh:` -> fixed on OUR side with a default (`var showMesh: Bool = true`), applied to the working tree;
+  (4) ONE textual conflict, `Waypoint/UI/RootView.swift` (both edited the toolbar + modifier chain): resolution = keep both (our `toolbar.home` id + `-autoE2E` task, their gear/Settings sheet/auto-open; gear gets id `toolbar.settings`); docs auto-merged cleanly.
+Verified on the MERGED code: unit tests 102/102 (81 ours + 21 theirs); type-check 58 app files, 0 errors, 0 warnings; signed `build-for-testing` for the iPhone 16 Pro Max succeeded; ON DEVICE `make uitest`-equivalent 7/7 and the in-app E2E 20/0/1 (Classic interface unchanged). Sachin's own build was reinstalled afterwards.
+NOT verified: their NEW interface (Interface = New) at runtime - no UI tests cover it yet; their Live adapters with a real scan/route.
+Note: the commit labels its work "U3 (UI flows)"; per ROADMAP Revision 3 the author's lane (Windows + non-Pro iPhone 17) is U4. Worth agreeing who owns `Waypoint/UI/{Scanner,Navigator}` + `Waypoint/Services` going forward.
+
+---
+
+## 2026-10-17 22:15 — Claude (agent, for Sachin) — Accessibility features verified on the phone; UI churn fixed; config-tracking question answered   [tags: BUILD, BUG]
+Area: B/D; U1 said the phone's VPN profile prevents auto-lock, so tests were run directly.
+Verified ON DEVICE (iPhone 16 Pro Max): `make uitest` 7/7 (was 5; +`testObstacleIsNamedByTypeInTheSpokenSentence`, +`testPhonePostureCoachSpeaksAndRecovers`); `make selftest-e2e` 20 passed / 0 failed / 1 skipped (cloud); unit tests 81/81; `make typecheck` OK.
+Phone's REAL Vision vocabulary (1,303 labels) for tuning `ObstacleLabelMapper`: trash -> `trash_can` (only one); people -> adult, baby, child, crowd, people (no plain "person"); seating -> armchair, bench, chair, chair_other, folding_chair, high_chair, seat, sofa, stool, swivel_chair, wheelchair (+car_seat, toilet_seat);
+  furniture -> bed, cabinet, cart, desk, refrigerator, shopping_cart, table; structure -> door, elevator, escalator, stairs, window (+glass types); objects -> backpack, bicycle, cardboard_box, decorative_plant, extinguisher, flower, luggage, machine, plant, pole, sign, stroller, suitcase. No "wall" label: walls rely on the ARKit mesh class.
+Bugs found by the on-device UI tests and fixed:
+ 1. The navigation screen was re-rendered 10x per second even when nothing changed (assigning equal values to @Published properties). It kept the app from ever going idle, so UI tests waited minutes (145 s -> 26 s for the same test after the fix). Now `setIfChanged` (also saves battery on a real walk). Same class of bug as the scan HUD fix.
+ 2. Posture recovery said "Phone position is good." and, in the same tick, "Continue straight.", so the confirmation was instantly replaced. The planner now says only the confirmation on that tick and resumes guidance on the next (unit test updated).
+ 3. UI tests raced the 15-second simulated walk; added a "Pause walker" control (`nav.pauseWalk`, useful for a sighted helper too) and a short speech history on screen (`nav.recentSpeech`).
+Files edited: `Waypoint/Navigation/NavigationController.swift` (setIfChanged, `simulationPaused`, `recentSpeech`), `Waypoint/UI/NavigatorView.swift`, `Waypoint/Guidance/FeedbackPlanner.swift`... (path: Package/.../Guidance/FeedbackPlanner.swift), `Tests/.../AccessibilityGuidanceTests.swift`, `WaypointUITests/WaypointUITests.swift`, `Package/.../Vision/ObstacleKind.swift` (+`.furniture`; chair += wheelchair), `Waypoint/Capture/CaptureController.swift` (posture in the scan line).
+STILL NOT verified (needs a person holding the phone): the real-phone posture axes/signs (TESTING.md A1-A3), the beacon being in the correct ear (A5), real depth hits and naming of real objects (A6), hallway countdown timing (A7), haptic feel, calibration, and blind-user review of the wording.
+Config question answered: tracked = `Config/Base.xcconfig` (shared defaults, bundle prefix, empty Supabase placeholders) and `Config/Local.xcconfig.example` (template), `project.yml`; NOT tracked = `Config/Local.xcconfig` (your team id, dev suffix, and later the Supabase URL + anon key) - git-ignored and never committed (checked all history).
+
+---
+
+## 2026-10-17 21:30 — Claude (agent, for Sachin) — Accessibility: phone-posture coach, named obstacles, distance-aware instructions   [tags: BUILD, BUG, CONTRACT CHANGE]
+Area: B (guidance), C (vision), shared geometry; requested by U1 ("remember this is for visually impaired": posture stabilization + explicit/granular instructions + object-type classification)
+Files created (core, tested): `Guidance/PhonePosture.swift`, `Guidance/SpokenPhrases.swift`, `Vision/ObstacleKind.swift`, `Tests/.../AccessibilityGuidanceTests.swift` (24 tests).
+Files created (app): `Waypoint/Vision/ObstacleIdentifier.swift` (mesh class lookup + Vision `VNClassifyImageRequest` on a crop).
+Files edited (code): `Guidance/FeedbackPlanner.swift` (REWRITTEN: posture, obstacle kinds + repeat, briefing, 10/5/2 m countdown, landmarks; new haptic cue `.holdPhoneUpright`), `Routing/GuidanceInstruction.swift` (+`Maneuver`, `Landmark`, optional fields), `Routing/RouteFollower.swift` (look-ahead along the route, landmarks),
+  `Geometry/Geometry.swift` (`cameraTransform` now ARKit's real portrait convention + pitch/roll; `cameraLocalToUser`), `Tests/.../ScanAndSimulationTests.swift` (camera test updated), `Waypoint/Vision/ObstacleDetector.swift` (REWRITTEN), `Waypoint/Navigation/NavigationController.swift`, `Waypoint/Relocalization/Relocalizer.swift` (labelled mesh during navigation),
+  `Waypoint/Guidance/HapticsGuide.swift`, `Waypoint/UI/NavigatorView.swift` (obstacle-type and phone-held pickers, on-screen "what was just said"), `Waypoint/Capture/CaptureController.swift` (posture reading in the scan monitor), `Waypoint/App/E2ESelfTest.swift` (+posture, phrases, Vision vocabulary), `WaypointUITests/WaypointUITests.swift` (+2 tests).
+Docs (strike/update): `docs/DECISIONS.md` (D-022), `docs/TESTING.md` (accessibility checks A1-A7), `docs/ROADMAP.md` (A11Y-1..6), `docs/MODULES.md`.
+REAL BUG FOUND while designing posture: ARKit's camera frame is fixed to the sensor (portrait: +x toward the BOTTOM of the phone, +y toward the user's right). The real-device audio beacon treated camera-local x as "right"; the simulation's fake camera hid it. Fixed centrally (`Geometry.cameraLocalToUser`); the old depth region was also the wrong shape for portrait and the floor could look like an obstacle (now world-space + `ObstacleBand`).
+  These fixes are derived from Apple's documented axes and proven only with synthetic poses -> MUST be confirmed on a real phone (TESTING.md A1-A5).
+Verified: `make test` 81/81 (24 new: posture round trip at any heading, dwell/hysteresis/repeat/recovery, label mapping with whole-word matching, every spoken sentence verbatim, look-ahead turn/stairs/arrival distances along the route, landmarks, planner countdown with no bursts, posture mutes guidance but not obstacle warnings);
+  `make typecheck` OK (22 app files + UI tests). ON DEVICE (iPhone 16 Pro Max): `make selftest-e2e` -> 20 passed, 0 failed, 1 skipped (cloud): posture math ok (upright 0/0, down -49, lean +39), the simulated L-shaped walk now says "Walk straight about 12 meters, then turn right. / In 10 meters... / E2E Room 1 on your right. / In 5 ... In 2 meters, turn right. / Turn right. ...  In 2 meters, you will arrive at E2E Room 2." and ends with arrival;
+  Vision on this phone: 1,303 labels incl. trash_can, chair/folding_chair/swivel_chair/armchair/wheelchair, door, stairs, table, window, plant/decorative_plant, cabinet; no label for "wall" or "person" was in the first list (so walls rely on the ARKit mesh class); the classifier runs without error.
+NOT verified: ~~(1) the two new UI tests and the rest of `make uitest` after these changes (phone locked); (2) the wider `vision.labels.*` printout (phone locked on the rerun; mapper extended with cabinet/wheelchair from the first list);~~ **Update 2026-10-17 (22:15): (1) and (2) are DONE, see the next entry.** (3) everything that needs a person holding the phone: real posture axes, ear/direction of the beacon, real depth hits, mesh-class and Vision naming of real objects, thresholds, haptic feel, and any blind-user review of the wording.
+Open: U1/U2 do TESTING.md A1-A7; U4 reviews wording; unlock the phone and run `make uitest` + `make selftest-e2e`.
+
+---
+
 ## 2026-10-17 20:05 — Claude (agent, for Sachin) — End-to-end testing on the phone; found + fixed repeated "Continue straight."   [tags: BUILD, BUG]
 Area: D (E2E harness), B (planner fix); requested by U1 ("continue testing, how about e2e")
 Files created: `Waypoint/App/E2ESelfTest.swift` (A device capabilities, B storage + Keychain, C synthetic scan -> save -> reload -> share -> validate -> route -> simulated walk, D bundled resource, E optional cloud read).

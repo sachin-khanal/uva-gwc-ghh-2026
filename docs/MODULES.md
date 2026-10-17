@@ -86,3 +86,6 @@ large single Start target and voice destination input (stretch).
 **B** — try Simulate mode with headphones (TESTING.md 2.2-2.6) and tune ping rate, haptic patterns and speech wording; Simulate mode currently starts at the first corridor node.
 **C** — build `MeshExporter` (ARMeshAnchors cropped to the box -> `MDLAsset` -> USDZ, check real file size against `ExportBudget`) and an in-app 3D viewer; calibrate obstacle thresholds.
 **D** — create the Supabase project (SETUP.md §5), run the SQL, test Upload/Refresh/Download on two phones; add an "open .waypointmap" handler (must show the same approval as peer imports); decide REST vs SDK and public vs team-only sharing (Architecture.md §9).
+
+**Update 2026-10-17 — files added by D-022 (accessibility):** core `Guidance/PhonePosture.swift` (A/B), `Guidance/SpokenPhrases.swift` (B, wording reviewed by U4), `Vision/ObstacleKind.swift` (C); `Routing/RouteFollower.swift` gained look-ahead and landmarks; `Guidance/FeedbackPlanner.swift` was rewritten around them;
+app `Waypoint/Vision/ObstacleDetector.swift` (rewritten: world-space, floor/ceiling aware), `Waypoint/Vision/ObstacleIdentifier.swift` (new: mesh class + Vision), `Waypoint/Navigation/NavigationController.swift` (posture + report wiring, corrected camera axes). Tests: `AccessibilityGuidanceTests.swift` (24).

@@ -70,16 +70,24 @@ final class ScanAndSimulationTests: XCTestCase {
 
     // MARK: cameraTransform
 
-    func testCameraTransformMatchesARKitConvention() {
-        let t = Geometry.cameraTransform(position: [2, 1.5, -3], forward: [1, 0.7, 0]) // pitch ignored
+    func testCameraTransformMatchesARKitPortraitConvention() {
+        let t = Geometry.cameraTransform(position: [2, 1.5, -3], forward: [1, 0.7, 0]) // pitch comes only from the pitch argument
         XCTAssertEqual(Geometry.translation(of: t), [2, 1.5, -3])
         let f = Geometry.cameraForward(of: t)
         XCTAssertEqual(f.x, 1, accuracy: 1e-5); XCTAssertEqual(f.y, 0, accuracy: 1e-5); XCTAssertEqual(f.z, 0, accuracy: 1e-5)
-        // A point 3 m ahead and 1 m to the user's right (facing +x, right is +z) is local (+1, 0, -3).
+        // A point 3 m ahead and 1 m to the user's right (facing +x, so right is +z). In ARKit's sensor-fixed camera frame for an upright phone
+        // that is local (x = 0 [no height difference], y = +1 [camera +y = the user's right], z = -3 [looking along -z]).
         let world = SIMD3<Float>(2 + 3, 1.5, -3 + 1)
         let local = Geometry.transformPoint(t.inverse, world)
-        XCTAssertEqual(local.x, 1, accuracy: 1e-4)
+        XCTAssertEqual(local.x, 0, accuracy: 1e-4)
+        XCTAssertEqual(local.y, 1, accuracy: 1e-4)
         XCTAssertEqual(local.z, -3, accuracy: 1e-4)
+        // Converted to the user frame (x right, y up, ahead = -z) the audio engine needs:
+        let user = Geometry.cameraLocalToUser(local)
+        XCTAssertEqual(user.x, 1, accuracy: 1e-4); XCTAssertEqual(user.y, 0, accuracy: 1e-4); XCTAssertEqual(user.z, -3, accuracy: 1e-4)
+        // A point 1 m ABOVE the phone is local x = -1 (camera +x points toward the bottom of the phone) -> user y = +1.
+        let above = Geometry.cameraLocalToUser(Geometry.transformPoint(t.inverse, SIMD3<Float>(2 + 3, 2.5, -3)))
+        XCTAssertEqual(above.y, 1, accuracy: 1e-4)
         // Degenerate forward falls back to -z.
         XCTAssertEqual(Geometry.cameraForward(of: Geometry.cameraTransform(position: .zero, forward: [0, 1, 0])).z, -1, accuracy: 1e-5)
     }

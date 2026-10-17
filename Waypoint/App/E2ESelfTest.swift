@@ -143,6 +143,45 @@ enum E2ESelfTest {
             check("resource.sampleMap", sample.nodes.count == 9, "\(sample.nodes.count) nodes")
         } else { fail("resource.sampleMap", "bundled sample map missing or undecodable") }
 
+        // ---- F. ACCESSIBILITY: phone posture maths, the sentences users hear, and what Apple's image classifier can name on THIS phone
+        func postureAt(_ pitch: Float, _ roll: Float) -> PostureReading {
+            PostureMonitor.reading(cameraTransform: Geometry.cameraTransform(position: [0, 1.3, 0], forward: [0, 0, -1], pitchDegrees: pitch, rollDegrees: roll))
+        }
+        let upright = postureAt(0, 0), down = postureAt(-50, 0), lean = postureAt(0, 40)
+        check("posture.math", abs(upright.pitchDegrees) < 1 && abs(upright.rollDegrees) < 1 && abs(down.pitchDegrees + 50) < 1 && abs(lean.rollDegrees - 40) < 1,
+              "upright (\(Int(upright.pitchDegrees)),\(Int(upright.rollDegrees))) down (\(Int(down.pitchDegrees)),\(Int(down.rollDegrees))) lean (\(Int(lean.pitchDegrees)),\(Int(lean.rollDegrees)))")
+        info("phrase.stop.wall", ObstacleSpeech.stop(ObstacleReport(kind: .wall, distanceMeters: 0.5)))
+        info("phrase.stop.trashCan", ObstacleSpeech.stop(ObstacleReport(kind: .trashCan, distanceMeters: 0.5)))
+        info("phrase.caution.chair", ObstacleSpeech.caution(ObstacleReport(kind: .chair, side: .left, distanceMeters: 1.4)))
+        info("phrase.posture.tiltedDown", PostureIssue.tiltedDown.message)
+
+        do {
+            let identifiers = try VNClassifyImageRequest().supportedIdentifiers()
+            check("vision.classify.vocabulary", !identifiers.isEmpty, "\(identifiers.count) labels")
+            // Print the labels that could matter for walking indoors, grouped by the words we look for, so ObstacleLabelMapper can be tuned
+            // against the REAL vocabulary of this phone (matching here is by whole word, like the mapper).
+            let groups: [(String, [String])] = [
+                ("trash", ["trash", "garbage", "waste", "rubbish", "bin", "litter", "dustbin"]),
+                ("people", ["person", "people", "adult", "child", "baby", "man", "woman", "boy", "girl", "crowd", "pedestrian", "human"]),
+                ("seating", ["chair", "stool", "bench", "sofa", "couch", "armchair", "wheelchair", "seat"]),
+                ("furniture", ["table", "desk", "counter", "cabinet", "shelf", "bookcase", "dresser", "wardrobe", "refrigerator", "bed", "cart"]),
+                ("structure", ["wall", "door", "doorway", "window", "glass", "stairs", "staircase", "escalator", "elevator", "ladder", "railing", "pillar", "column", "gate"]),
+                ("objects", ["plant", "flower", "bicycle", "bike", "stroller", "luggage", "suitcase", "backpack", "box", "extinguisher", "fountain", "machine", "vending", "sign", "pole"]),
+            ]
+            for (name, words) in groups {
+                let found = identifiers.filter { id in
+                    let tokens = Set(id.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+                    return !tokens.isDisjoint(with: words)
+                }
+                info("vision.labels.\(name)", "\(found.count): \(found.prefix(40).joined(separator: ", "))")
+            }
+            // The classifier runs on this phone: a plain grey image should classify without error (the label itself is not meaningful).
+            let grey = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 224, height: 224))
+            let request = VNClassifyImageRequest()
+            try VNImageRequestHandler(ciImage: grey, options: [:]).perform([request])
+            check("vision.classify.run", true, "top: \(request.results?.first?.identifier ?? "-")")
+        } catch { fail("vision.classify", "\(error)") }
+
         // ---- E. CLOUD (read-only; only when configured)
         if let config = SupabaseConfig.validated(urlString: Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String,
                                                  anonKey: Bundle.main.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String) {

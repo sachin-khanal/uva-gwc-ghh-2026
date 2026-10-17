@@ -55,22 +55,35 @@ public enum Geometry {
         return atan2(cross, dot)
     }
 
-    /// Builds an ARKit-style camera transform at `position` looking along `forward` (horizontal part
-    /// only, so the camera stays level). The camera looks down its local -z, local +y is up and
-    /// local +x is to the right. Used by the simulated walker so the audio code can be exercised
-    /// without an AR session. Falls back to facing -z if `forward` has no horizontal component.
-    public static func cameraTransform(position: SIMD3<Float>, forward: SIMD3<Float>) -> simd_float4x4 {
-        var f = SIMD3<Float>(forward.x, 0, forward.z)
-        f = simd_length(f) > 1e-5 ? simd_normalize(f) : SIMD3<Float>(0, 0, -1)
+    /// Builds the camera transform ARKit reports for a phone held in PORTRAIT, looking along `forward` (horizontal part), optionally pitched
+    /// (+ up) and rolled (+ leaning right). ARKit's camera frame is fixed to the SENSOR, not the screen: for an upright phone camera +x points
+    /// toward the BOTTOM of the phone, camera +y toward the user's RIGHT, and the camera looks along -z (so the phone's "up" is -x).
+    /// This is what real devices produce, so the simulated walker and the unit tests exercise the same maths as a real phone.
+    /// Falls back to facing -z if `forward` has no horizontal component.
+    public static func cameraTransform(
+        position: SIMD3<Float>, forward: SIMD3<Float>, pitchDegrees: Float = 0, rollDegrees: Float = 0
+    ) -> simd_float4x4 {
+        var f0 = SIMD3<Float>(forward.x, 0, forward.z)
+        f0 = simd_length(f0) > 1e-5 ? simd_normalize(f0) : SIMD3<Float>(0, 0, -1)
         let up = SIMD3<Float>(0, 1, 0)
-        let zAxis = -f                       // camera local +z points backwards
-        let xAxis = simd_normalize(simd_cross(up, zAxis)) // right
+        let p = pitchDegrees * .pi / 180, r = rollDegrees * .pi / 180
+        let fwd = cos(p) * f0 + sin(p) * up
+        let idealUp = cos(p) * up - sin(p) * f0
+        let idealRight = simd_cross(fwd, idealUp)
+        let phoneUp = cos(r) * idealUp + sin(r) * idealRight
+        let phoneRight = cos(r) * idealRight - sin(r) * idealUp
         var m = matrix_identity_float4x4
-        m.columns.0 = SIMD4<Float>(xAxis.x, xAxis.y, xAxis.z, 0)
-        m.columns.1 = SIMD4<Float>(up.x, up.y, up.z, 0)
-        m.columns.2 = SIMD4<Float>(zAxis.x, zAxis.y, zAxis.z, 0)
+        m.columns.0 = SIMD4<Float>(-phoneUp.x, -phoneUp.y, -phoneUp.z, 0)       // sensor +x = toward the bottom of the phone
+        m.columns.1 = SIMD4<Float>(phoneRight.x, phoneRight.y, phoneRight.z, 0) // sensor +y = toward the user's right
+        m.columns.2 = SIMD4<Float>(-fwd.x, -fwd.y, -fwd.z, 0)                   // sensor +z = toward the user; the camera looks along -z
         m.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
         return m
+    }
+
+    /// Converts a point in ARKit CAMERA-LOCAL coordinates (what `camera.transform.inverse * worldPoint` gives for a phone held in portrait)
+    /// into the USER frame used by the audio engine: x = to the user's right, y = up, z = toward the user (so ahead is negative z).
+    public static func cameraLocalToUser(_ p: SIMD3<Float>) -> SIMD3<Float> {
+        SIMD3<Float>(p.y, -p.x, p.z)
     }
 
     /// Rotation about the +y (up) axis as a 4x4 matrix.

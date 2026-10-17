@@ -1,0 +1,118 @@
+//
+// File:     Guidance/SpokenPhrases.swift
+// Module:   WaypointCore
+// Owner:    B (Navigation/Feedback) with U4 (wording review)
+// Purpose:  Every sentence the app speaks about obstacles, distances and upcoming turns, in one place so wording can be reviewed and tested without a phone.
+// Style:    short, concrete, say what to DO first ("Stop."), then WHAT ("You are about to walk into a trash can.") and WHERE.
+//           Distances use STEPS up close (about 0.7 m each, what a blind walker can feel) and metres further away.
+//           Never claim more than we know: low-confidence object names are "possibly a ...", unknown things are "an obstacle".
+//
+import Foundation
+
+public enum DistanceSpeech {
+    /// "right in front of you", "about 2 steps", "about 4 meters".
+    public static func phrase(meters: Float) -> String {
+        if meters < 0.5 { return "right in front of you" }
+        if meters <= 2.1 {
+            let steps = max(1, Int((meters / 0.7).rounded()))
+            return "about \(steps) \(steps == 1 ? "step" : "steps")"
+        }
+        let m = Int(meters.rounded())
+        return "about \(m) meters"
+    }
+
+    /// For countdowns: "3 meters", "1 meter".
+    public static func meters(_ meters: Float) -> String {
+        let m = max(1, Int(meters.rounded()))
+        return "\(m) \(m == 1 ? "meter" : "meters")"
+    }
+}
+
+public enum ObstacleSpeech {
+
+    private static func noun(_ kind: ObstacleKind) -> String {
+        switch kind {
+        case .wall: return "a wall"
+        case .door: return "a door"
+        case .window: return "a window or glass"
+        case .table: return "a table"
+        case .chair: return "a chair"
+        case .person: return "a person"
+        case .trashCan: return "a trash can"
+        case .plant: return "a plant"
+        case .furniture: return "a piece of furniture"
+        case .stairs: return "stairs"
+        case .unknown: return "an obstacle"
+        }
+    }
+
+    private static func sideText(_ side: Side) -> String {
+        switch side {
+        case .left: return "on your left"
+        case .right: return "on your right"
+        case .ahead: return "ahead"
+        }
+    }
+
+    /// Reports below this are hedged with "possibly".
+    private static let hedgeBelow: Float = 0.6
+
+    private static func hedged(_ r: ObstacleReport) -> String {
+        let n = noun(r.kind)
+        return (r.confidence < hedgeBelow && r.kind != .unknown) ? "possibly \(n)" : n
+    }
+
+    /// STOP level: the user is about to hit something. `report == nil` keeps the plain legacy phrase.
+    public static func stop(_ r: ObstacleReport?) -> String {
+        guard let r else { return "Stop. Obstacle ahead." }
+        let n = hedged(r)
+        // Not sure what it is: say so plainly instead of "...walk into possibly a...".
+        if r.confidence < hedgeBelow, r.kind != .unknown, r.side == .ahead { return "Stop. Possibly \(noun(r.kind)) directly ahead." }
+        switch (r.kind, r.side) {
+        case (.wall, .ahead): return "Stop. You are heading toward a wall."
+        case (.person, .ahead): return "Stop. \(capitalized(n)) is directly ahead."
+        case (.stairs, _): return "Stop. Stairs directly ahead."
+        case (.unknown, .ahead): return "Stop. Obstacle directly ahead."
+        case (_, .ahead): return "Stop. You are about to walk into \(n)."
+        default: return "Stop. \(capitalized(n)) very close \(sideText(r.side))."
+        }
+    }
+
+    /// CAUTION level: something is near but not yet at stop distance.
+    public static func caution(_ r: ObstacleReport?) -> String {
+        guard let r else { return "Obstacle ahead." }
+        return "Careful. \(capitalized(hedged(r))) \(sideText(r.side)), \(DistanceSpeech.phrase(meters: r.distanceMeters))."
+    }
+
+    private static func capitalized(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+}
+
+public enum ManeuverSpeech {
+
+    /// Advance warning, e.g. "In 5 meters, turn right."
+    public static func warning(_ m: Maneuver) -> String {
+        let d = DistanceSpeech.meters(m.distanceMeters)
+        switch m.kind {
+        case .turnLeft: return "In \(d), turn left."
+        case .turnRight: return "In \(d), turn right."
+        case .stairs: return "In \(d), stairs."
+        case .arrive: return "In \(d), you will arrive\(m.label.map { " at \($0)" } ?? "")."
+        }
+    }
+
+    /// Spoken once at the start of a route: "Walk about 12 meters, then turn right."
+    public static func briefing(distanceToFirstManeuver m: Maneuver?) -> String? {
+        guard let m else { return nil }
+        let d = DistanceSpeech.meters(m.distanceMeters)
+        switch m.kind {
+        case .arrive: return "Walk straight about \(d)\(m.label.map { " to \($0)" } ?? "")."
+        case .turnLeft: return "Walk straight about \(d), then turn left."
+        case .turnRight: return "Walk straight about \(d), then turn right."
+        case .stairs: return "Walk straight about \(d). Then there are stairs."
+        }
+    }
+
+    public static func landmark(label: String, side: Side) -> String {
+        "\(label) on your \(side == .left ? "left" : "right")."
+    }
+}

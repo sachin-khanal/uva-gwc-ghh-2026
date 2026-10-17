@@ -60,6 +60,24 @@ The phone must be **plugged in and UNLOCKED** (set Auto-Lock to Never while test
 
 What these CANNOT check: how the audio sounds, how the haptics feel, what the mesh looks like. A person must judge those. Reference run (2026-10-17, iPhone 16 Pro Max): turn right at bearing 57 deg fired `haptic: turnRight` + `say: Turn right.`, beacon local x=+1.5 (to the right), arrival spoke and fired `haptic: arrived`, `SELFTEST PASS`.
 
+## Accessibility checks on a real phone — added 2026-10-17
+**Update 2026-10-17 (22:15):** the automated half is now VERIFIED on the phone (UI tests 7/7, E2E 20/0/1). Handy for helpers: in Simulate mode the screen has "Pause walker", "Inject obstacle", an obstacle-type menu and a phone-held menu, and shows the sentences just spoken (`nav.recentSpeech`).
+
+Automated on the phone (`make selftest-e2e`, `make uitest`): the posture maths, every sentence (printed as `[e2e] INFO phrase.*`), the simulated walk now includes briefing / countdown / landmark phrases, picking an obstacle type changes the spoken sentence, and tilting the simulated phone makes the coach speak and later say "Phone position is good" (UI tests `testObstacleIsNamedByTypeInTheSpokenSentence`, `testPhonePostureCoachSpeaksAndRecovers`).
+The E2E also prints the phone's REAL image-classifier vocabulary (`vision.labels.*`): tune `ObstacleLabelMapper` from it.
+
+**Needs a person with the phone (the part I cannot automate):**
+| # | Check | Pass looks like |
+|---|---|---|
+| A1 | `DEVICE=<id> make selftest-scan`, hold the phone UPRIGHT in portrait facing a wall | console line shows `posture pitch~0 roll~0` |
+| A2 | tilt the top of the phone toward the floor, then toward the ceiling | pitch goes negative (down) then positive (up). **If a sign or axis is wrong, tell me: it is one function (`PostureMonitor.reading`)** |
+| A3 | lean the top of the phone to your RIGHT, then LEFT | roll goes positive (right) then negative (left); turn it sideways: about +-90 |
+| A4 | Navigate a real map; point the phone at the floor for a second | you HEAR the coaching sentence, feel 3 quick taps, the ping stops; fix it: "Phone position is good" and guidance resumes |
+| A5 | headphones on, destination to your RIGHT | the ping is in your RIGHT ear. (This is the camera-axis fix: if it is left/right swapped or comes from above/below, the mapping is wrong) |
+| A6 | walk slowly toward a plain wall, then toward a trash can / chair | "Careful ..." then "Stop. You are heading toward a wall." / "...about to walk into a trash can." (the first words may be "Stop. Obstacle directly ahead." for a moment until the object is identified) |
+| A7 | walk a straight hallway to a turn | briefing at the start, then "In 10 / 5 / 2 meters, turn ...", then "Turn right." |
+Record the results in docs/WORKLOG.md (phone, iOS, pass/fail, the console lines).
+
 ## End-to-end (E2E) tests: what exists, what proves what — added 2026-10-17
 
 `DEVICE=<id> make selftest-e2e` runs an in-app, headless E2E on the phone (`Waypoint/App/E2ESelfTest.swift`, launch switch `-autoE2E YES`): device capabilities, the real Documents folder and Keychain, a synthetic L-shaped scan

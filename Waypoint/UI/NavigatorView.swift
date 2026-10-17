@@ -110,10 +110,36 @@ struct NavigatorView: View {
                     .font(.largeTitle).bold().foregroundStyle(.red)
                     .accessibilityIdentifier("nav.obstacle")
             }
+            if !nav.postureText.isEmpty {
+                Text(nav.postureText).font(.headline).foregroundStyle(.orange).multilineTextAlignment(.center)
+                    .accessibilityIdentifier("nav.postureText")
+            }
+            if !nav.lastSpoken.isEmpty {
+                // What the user just heard (for a sighted helper, and for the UI tests).
+                Text("\u{201C}\(nav.lastSpoken)\u{201D}").font(.callout).italic().multilineTextAlignment(.center)
+                    .accessibilityIdentifier("nav.lastSpoken")
+            }
+            if !nav.recentSpeech.isEmpty {
+                Text(nav.recentSpeech.joined(separator: "\n")).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .accessibilityIdentifier("nav.recentSpeech")
+            }
             if nav.isSimulating {
+                Toggle("Pause walker (keep listening)", isOn: $nav.simulationPaused)
+                    .padding(.horizontal)
+                    .accessibilityIdentifier("nav.pauseWalk")
                 Toggle("Inject obstacle (0.5 m ahead)", isOn: $nav.simulatedObstacle)
                     .padding(.horizontal)
                     .accessibilityIdentifier("nav.injectObstacle")
+                Picker("Obstacle type", selection: $nav.simulatedObstacleKind) {
+                    ForEach(ObstacleKind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("nav.obstacleKind")
+                Picker("Phone held", selection: $nav.simulatedPosture) {
+                    ForEach(SimulatedPosture.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("nav.posture")
             }
             Button("Stop") { stopNavigation() }
                 .buttonStyle(.borderedProminent).controlSize(.large)
