@@ -74,3 +74,34 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(WAYPOINT_BUNDLE_PREFIX).$(WAYPOINT_DEV_SUFFIX)
         INFOPLIST_FILE: Waypoint/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
+
+  # UI tests that run on a real phone from the CLI: `DEVICE=<id> make uitest` (see WaypointUITests/WaypointUITests.swift)
+  WaypointUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: WaypointUITests
+    dependencies:
+      - target: Waypoint
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(WAYPOINT_BUNDLE_PREFIX).$(WAYPOINT_DEV_SUFFIX).uitests
+        TEST_TARGET_NAME: Waypoint
+        GENERATE_INFOPLIST_FILE: YES
+
+# Explicit scheme so `xcodebuild test -scheme Waypoint` runs the UI tests.
+schemes:
+  Waypoint:
+    build:
+      targets:
+        Waypoint: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WaypointUITests
+    profile:
+      config: Release
+    archive:
+      config: Release

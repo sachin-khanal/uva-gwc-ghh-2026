@@ -23,6 +23,9 @@ final class AppState: ObservableObject {
     /// to tell phones apart in `MapNode.createdBy` and in Multipeer peer names.
     let deviceName: String
 
+    /// Self-test switch from launch arguments (see LaunchCommand). `.none` in normal use.
+    let launchCommand = LaunchCommand.fromLaunchArguments()
+
     /// Supabase library (D). Disabled automatically when no URL/key is configured.
     let cloud: CloudController
 
@@ -42,6 +45,13 @@ final class AppState: ObservableObject {
 
         seedSampleMapIfNeeded()
         reloadMaps()
+
+        switch launchCommand {
+        case .simulate: mode = .navigator
+        case .scan: mode = .volunteer
+        case .none, .e2e: break
+        }
+        if launchCommand.isActive { Log.app.info("launch command: \(launchCommand)") }
     }
 
     func reloadMaps() {

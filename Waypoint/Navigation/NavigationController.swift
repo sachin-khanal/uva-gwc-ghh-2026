@@ -46,6 +46,8 @@ final class NavigationController: ObservableObject {
     private var destination: MapNode?
     private var follower: RouteFollower?
     private var lastTick: TimeInterval = 0
+    private var beaconLogCounter = 0
+    private var lastLoggedKind: GuidanceInstruction.Kind?
     private let tickInterval: TimeInterval = 0.1
 
     // Simulation state
@@ -161,6 +163,10 @@ final class NavigationController: ObservableObject {
 
             if follower == nil { follower = makeFollower(from: mapPosition, graph: graph, destination: destination) }
             instruction = follower?.update(position: mapPosition, forward: mapForward)
+            if let i = instruction, i.kind != lastLoggedKind {
+                lastLoggedKind = i.kind
+                Log.nav.info("instruction: \(i.kind.rawValue) bearing=\(Int(i.bearingRadians * 180 / .pi))deg dist=\(String(format: "%.1f", i.distanceMeters))m target=\(i.targetLabel ?? "-")")
+            }
             if let i = instruction {
                 instructionText = "\(i.kind == .arrived ? "arrived" : i.kind.rawValue), \(String(format: "%.1f", i.distanceMeters)) m"
             }
@@ -188,12 +194,18 @@ final class NavigationController: ObservableObject {
             case .speak(let text, let priority):
                 speech.say(text, priority: priority)
             case .haptic(let cue):
+                Log.guidance.info("haptic: \(cue)")
                 haptics.play(cue)
             case .beacon(let mapTarget):
                 if var mapTarget {
                     if isSimulating { mapTarget.y = 1.4 } // match the simulated eye height so the beacon is level
                     let world = Geometry.transformPoint(mapToWorld, mapTarget)
-                    audio.setTarget(relativeToListener: Geometry.transformPoint(camera.inverse, world))
+                    let local = Geometry.transformPoint(camera.inverse, world)
+                    beaconLogCounter += 1
+                    if beaconLogCounter % 10 == 1 { // ~1 per second
+                        Log.guidance.info(String(format: "beacon local x=%.2f (right+) z=%.2f (ahead-) dist=%.1f m", local.x, local.z, simd_length(local)))
+                    }
+                    audio.setTarget(relativeToListener: local)
                 } else {
                     audio.setTarget(relativeToListener: nil)
                 }

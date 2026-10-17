@@ -1,47 +1,64 @@
 //
 // File:     Waypoint/Scan/MeshSampler.swift
 // Owner:    A (AR/Maps) with C (export)
-// Purpose:  Reads the LiDAR mesh ARKit builds (`ARMeshAnchor`s) and returns world-space sample points plus
-//           totals. The scan bounding box (`OrientedBox.fitBest`) is fitted to these samples about once a
-//           second, so we only read every `stride`-th vertex: the box does not need every point.
-// Layout:   ARMeshGeometry.vertices is an ARGeometrySource: a Metal buffer of packed float3 (12 bytes per
-//           vertex; do NOT assume SIMD3's 16-byte stride). `offset`/`stride` come from the source itself.
-//           Vertices are in the anchor's local space; multiply by `anchor.transform` for world space.
-// Cost:     100k vertices at stride 6 is about 17k transforms: cheap enough for the main thread at 1 Hz.
-// Status:   SCAFFOLD, UNVERIFIED ON DEVICE. TODO(C): classification-aware sampling (ignore ceiling/window
-//           outliers) and a background queue if frame time suffers.
+// Purpose:  Measures the LiDAR mesh ARKit builds (`ARMeshAnchor`s) for the scan HUD: vertex/triangle totals and the data the bounding box
+//           needs. EXACT (every vertex is read - the old version read every 6th) and cheap:
+//             * each anchor is reduced to the 2-D convex hull of its vertices on the floor plane plus its min/max height, and the hulls
+//               are merged. The extremes of a point cloud along any direction are hull vertices, so the box fitted to the hull equals
+//               the box fitted to all points (proved by FastBoxFitTests in WaypointCore).
+//             * it is meant to run on a BACKGROUND queue (CaptureController does that); it only reads immutable anchor snapshots.
+// Layout:   ARMeshGeometry.vertices is an ARGeometrySource: a Metal buffer of packed float3 (12 bytes per vertex; do NOT assume SIMD3's
+//           16-byte stride). `offset`/`stride` come from the source itself. Vertices are in the anchor's local space; we apply
+//           `anchor.transform` by hand (only the x, y, z rows we need) to get world space.
+// Status:   SCAFFOLD, UNVERIFIED ON DEVICE with a real mesh. TODO(C): classification-aware filtering (ignore ceiling/window outliers).
 //
 import ARKit
+import WaypointCore
 
 enum MeshSampler {
 
-    struct Result {
-        var points: [SIMD3<Float>] = []
+    struct Measurement {
+        /// Merged floor-plane (x, z) hull points of all anchors, world space. Feed to `OrientedBox.fitBest(hull:minY:maxY:)`.
+        var hull: [SIMD2<Float>] = []
+        var minY: Float = .infinity
+        var maxY: Float = -.infinity
         var vertexCount = 0
         var triangleCount = 0
         var anchorCount = 0
+        var isEmpty: Bool { hull.isEmpty }
     }
 
-    static func sample(anchors: [ARMeshAnchor], stride step: Int = 6) -> Result {
-        var result = Result()
-        let step = max(1, step)
+    static func measure(anchors: [ARMeshAnchor]) -> Measurement {
+        var result = Measurement()
+        var merged: [SIMD2<Float>] = []
+
         for anchor in anchors {
             let geometry = anchor.geometry
             let vertices = geometry.vertices
             result.anchorCount += 1
             result.vertexCount += vertices.count
             result.triangleCount += geometry.faces.count
+            guard vertices.count > 0 else { continue }
 
+            let m = anchor.transform
             let base = vertices.buffer.contents().advanced(by: vertices.offset)
-            var i = 0
-            while i < vertices.count {
+            var floorPoints: [SIMD2<Float>] = []
+            floorPoints.reserveCapacity(vertices.count)
+
+            for i in 0..<vertices.count {
                 let f = base.advanced(by: i * vertices.stride).assumingMemoryBound(to: Float.self)
-                let local = SIMD4<Float>(f[0], f[1], f[2], 1)
-                let world = anchor.transform * local
-                result.points.append(SIMD3<Float>(world.x, world.y, world.z))
-                i += step
+                let x = f[0], y = f[1], z = f[2]
+                // world = m * (x, y, z, 1); only the world x, y, z components are needed.
+                let wx = m.columns.0.x * x + m.columns.1.x * y + m.columns.2.x * z + m.columns.3.x
+                let wy = m.columns.0.y * x + m.columns.1.y * y + m.columns.2.y * z + m.columns.3.y
+                let wz = m.columns.0.z * x + m.columns.1.z * y + m.columns.2.z * z + m.columns.3.z
+                floorPoints.append(SIMD2<Float>(wx, wz))
+                if wy < result.minY { result.minY = wy }
+                if wy > result.maxY { result.maxY = wy }
             }
+            merged += ConvexHull2D.hull(floorPoints) // keep only this anchor's hull vertices
         }
+        result.hull = ConvexHull2D.hull(merged)
         return result
     }
 }

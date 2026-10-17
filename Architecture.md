@@ -212,7 +212,7 @@ Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a de
 | *(added 2026-10-17)* Supabase project paused or unreachable at the venue | Wake the project from the dashboard before the demo; navigation never needs the network; maps pre-loaded on every phone | Use AirDrop/Multipeer export |
 | *(added 2026-10-17)* Row Level Security misconfigured (data visible/writable by the wrong user) | SQL reviewed in `supabase/migrations/0001_init.sql`; anon key is public by design; test with two phones before demo; never ship the service_role key | Make all rows private (no sharing) |
 | *(added 2026-10-17)* Mesh export over the 50 MB free-tier file limit | `ExportBudget` caps at 40 MB and decimates; check real file size | Upload world map only, skip the 3D model |
-| *(added 2026-10-17)* Live scan view slows tracking (mesh rendering + box fit) | Box fit is 1 Hz on sampled vertices; drop debug overlay if frame rate suffers | Hide the overlay, keep the HUD numbers |
+| *(added 2026-10-17)* Live scan view slows tracking (mesh rendering + box fit) | ~~Box fit is 1 Hz on sampled vertices~~ **Update 2026-10-17:** box fit is exact (every vertex, via per-anchor convex hulls), runs on a background queue at ~1 Hz and skips ticks while a fit is still running; the overlay has an on/off switch; drop debug overlay if frame rate suffers | Hide the overlay, keep the HUD numbers |
 | OCR misreads signs | Human-confirmed labels in capture; consistency voting | Labels typed manually by the volunteer |
 | Obstacle detection false positives | Confidence mask, hysteresis, tunable thresholds | Ship a single "something close ahead" haptic |
 | Spatial audio weak on phone speaker | Headphones/AirPods for demo | Add left/right-biased tone + speech cues |

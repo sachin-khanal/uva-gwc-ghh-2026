@@ -19,6 +19,86 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 20:05 — Claude (agent, for Sachin) — End-to-end testing on the phone; found + fixed repeated "Continue straight."   [tags: BUILD, BUG]
+Area: D (E2E harness), B (planner fix); requested by U1 ("continue testing, how about e2e")
+Files created: `Waypoint/App/E2ESelfTest.swift` (A device capabilities, B storage + Keychain, C synthetic scan -> save -> reload -> share -> validate -> route -> simulated walk, D bundled resource, E optional cloud read).
+Files edited (code): `Waypoint/App/LaunchCommand.swift` (+`.e2e`, `-autoE2E YES`), `Waypoint/App/AppState.swift`, `Waypoint/UI/RootView.swift` (runs the E2E once then `exit(0/1)`), `Makefile` (+`selftest-e2e`),
+  `Package/.../Guidance/FeedbackPlanner.swift` (announce on change of instruction KIND, not on every new target; hazard announced once per hazardous target; reset clears it), `Tests/.../FeedbackAndVisionTests.swift` (+3 tests).
+Docs (strike/update where needed): `docs/TESTING.md` (new E2E section + layer table + plan for the real-backend layer), `AGENTS.md` (+`selftest-e2e` row).
+Bug found by the on-device E2E: with real-scan spacing (a node every 1.5 m) the planner spoke "Continue straight." at every waypoint (the sample map's 3 m spacing hid it). Fixed; unit tests 57/57.
+Verified ON DEVICE (iPhone 16 Pro Max, iOS 27.0.1): E2E run 1 -> 17 passed, 0 failed, 1 skipped (cloud not configured). Capability matrix: LiDAR mesh yes, mesh+classification yes, scene depth yes, haptics yes, en-US voice yes, text recognition yes, audio engine starts, Documents writable, Keychain round trip works.
+  Run 2 (after the planner fix): the walk spoke "Continue straight / Turn right / Continue straight / Turn left / Continue straight / arrived" (correct for an L-shaped hallway); my own assertion (<= 2 straights) was wrong -> 16 passed 1 failed; assertion corrected to "no phrase twice in a row".
+  `make selftest-sim` after the fix: Turn right, Continue straight, You have arrived at Room 204, PASS.
+NOT verified: the corrected E2E assertion on the phone (phone locked at the final rerun); real Supabase (SQL never executed anywhere; Docker daemon is not running here, no Supabase CLI); two-phone Multipeer; LiDAR geometry; relocalization; audio/haptic feel.
+Open: (1) U1 unlock the phone and rerun `make selftest-e2e` (expect 17/0/1). (2) Run it on other teammates' phones (esp. the non-LiDAR ones: expect `lidar.mesh false`). (3) Decide how to E2E-test the SQL: Supabase project (U3) or local Postgres via Docker/Homebrew (needs a download; not done without approval).
+
+---
+
+## 2026-10-17 19:20 — Claude (agent, for Sachin) — "Keep lossless": classification default ON + start-screen switch; test status check   [tags: BUILD, DOCS]
+Area: A (scan); requested by U1 ("keep lossless, implement the changes; what's happening with the current tests?")
+Files edited (code): `Waypoint/Capture/CaptureController.swift` (`start(mapName:recordSurfaceLabels:)`; classification ON by default, `-scanClassification NO` to disable; logs `surfaceLabels=`), `Waypoint/UI/VolunteerView.swift` (start form toggle "Record surface labels", id `scan.labels`),
+  `WaypointUITests/WaypointUITests.swift` (re-activate the app if it is not in the foreground; header warns not to use the phone during a run).
+Docs (strike/update): `docs/DECISIONS.md` (D-020 item 4 struck + updated; new D-021 lossless-first policy, vector layer parked, capture-vs-display reversibility rule), `docs/TESTING.md` (A/B step 4 wording; "do not touch the phone" note).
+Test status right now: unit tests 54/54 pass (`make test`); `make typecheck` OK (20 app files + 1 UI test file); `make check`/test-bundle build OK; ON THE PHONE `make uitest` 5/5 pass after the change (earlier today 5/5 too).
+Failures seen and explained: (1) toggle tapped in its middle (test bug, fixed); (2) one-off "Home screen missing" and (3) one-off "Navigate button missing": both runs started with the app NOT usable in the foreground; the recording for (3) shows the app launching over another app ("<| Instagram" in the status bar), i.e. the phone was being used mid-run. Not app bugs; mitigated with re-activation + the do-not-touch note.
+Not run / not verified: the lag A/B numbers (needs a real room + someone holding the phone), `make selftest-sim` after the latest change (UI test covers the same screen text), anything on LiDAR mesh content, relocalization, cloud.
+Open: U1 still owes TESTING 3.1-3.6 in a real room. Classification is now on, so expect slightly more compute while scanning; use the A/B recipe to see what it costs.
+
+---
+
+## 2026-10-17 18:40 — Claude (agent, for Sachin) — Scan lag: lossless performance pass   [tags: BUILD]
+Area: A (scan) ; requested by U1: "make this lag a lot less ... only if it's lossless"
+Diagnosis (from code, NOT yet measured on a phone - nobody had a real mesh running while I could observe): (1) RealityKit `.showSceneUnderstanding` redraws the whole mesh every frame; (2) box fit on the main thread, brute force, every 6th vertex only;
+(3) ~60 unnecessary SwiftUI re-renders/s from @Published writes of unchanged values; (4) plane detection on but unused; (5) per-face classification on but unused; (6) Debug (unoptimised) builds.
+Files created: `Package/.../Scan/ConvexHull2D.swift`. Files edited (code): `Scan/OrientedBox.swift` (`fitBest` now hull-based and EXACT; `fitBest(hull:minY:maxY:)`; brute force kept as `fitBestBruteForce` for tests), `Tests/.../ScanAndSimulationTests.swift` (+4 tests in `FastBoxFitTests`),
+  `Waypoint/Scan/MeshSampler.swift` (REWRITTEN: `measure` reads ALL vertices, per-anchor hulls), `Waypoint/Capture/CaptureController.swift` (background fit with no overlap, publish-only-on-change, classification/plane detection off by default, fps/fitMs/overlay telemetry, `showMeshOverlay`),
+  `Waypoint/Scan/LiveScanView.swift` (overlay switch, unused render effects off), `Waypoint/UI/VolunteerView.swift` (overlay toggle, id `scan.overlay`), `Makefile` (`EXTRA=` passes launch args to `selftest-scan`).
+Docs (strike/update): `Architecture.md` (risk row), `docs/DECISIONS.md` (D-020 rules + what was deliberately NOT done), `docs/TESTING.md` (new "Measuring scan performance" A/B recipe).
+Verified: `make test` -> 54 tests, 0 failures. The new equivalence test proves the fast box equals the brute-force box on 60 random clouds (that is what "lossless" means for the box); 300k-point fit in a DEBUG test build: brute force 484 ms vs hull 254 ms (sorting dominates there; in the app each anchor is hulled separately and off the main thread).
+  `make typecheck` OK; `make build` and `CONFIG=Release make build` -> BUILD SUCCEEDED (Debug installed on the phone).
+NOT verified: any improvement on a real phone (no before/after numbers yet); the app launch after this change (phone was LOCKED, so the regression run of `make selftest-sim` could not start); LiDAR mesh in a real room.
+Honest limits: if the dominant cost is ARKit's own mesh reconstruction + camera pipeline (system code), none of this can remove it; the remaining lossless lever is the overlay switch. Things that would help but are NOT lossless and were not done: lower video resolution/fps, decimating meshes, slower mesh updates.
+Next for U1: unlock the phone, run the 4-step A/B in docs/TESTING.md, paste the `scan:` lines. U2/U3 can reuse `EXTRA=` for other launch flags.
+
+---
+
+## 2026-10-17 18:00 — Claude (agent, for Sachin) — UI tests on the phone from the CLI (taps + screenshots); first scan-screen evidence   [tags: BUILD]
+Area: D (tests) with A/B findings; requested by U1 ("yes do 1 and 2")
+Tools check: I have NO desktop computer-use tool (twice searched; only browser/Figma-scoped ones surfaced), so no mirroring. Substitute built: scripted UI tests on the device itself.
+Files created: `WaypointUITests/WaypointUITests.swift` (5 tests; attaches screenshots + HUD values; interruption monitor accepts permission prompts; returns to Home at start).
+Files edited (code/config): `project.yml` (+`WaypointUITests` target `bundle.ui-testing`, explicit `Waypoint` scheme that runs it), `Makefile` (+`uitest`, `uitest-shots`, `ONLY=`), `scripts/typecheck.sh` (also type-checks the UI tests; needs `-F <platform>/Developer/Library/Frameworks -I <platform>/Developer/usr/lib`),
+  `Waypoint/UI/RootView.swift`, `VolunteerView.swift`, `NavigatorView.swift` (stable `.accessibilityIdentifier`s: mode.navigate, mode.scan, toolbar.home/share, scan.start/save/tag.*, hud.tracking/mapping/mesh/box, nav.simulate.*, nav.status/instruction/obstacle/injectObstacle/stop).
+Docs (strike/update where old text changed): `docs/TESTING.md` (new UI-test section; Level-3 "meshAnchors=0" explanation struck + updated), `AGENTS.md` (+`make uitest` row), `docs/SETUP.md` (+headless testing note).
+Verified ON DEVICE (iPhone 16 Pro Max): `make uitest` -> 5 of 5 passed. Along the way: (a) a UI-test compile error caught by `make typecheck` (helper named `wait(for:)` clashed with XCTest) -> fixed; (b) obstacle test first failed because tapping a Toggle row in its middle does not flip it (tap the switch at the right edge) -> fixed;
+  (c) one run failed with "Home screen missing": the app was on the Navigator picker at launch (cause not found; a normal launch is clean) -> made `setUp` return to Home; 5/5 afterwards. If it recurs, check `app launch command` lines in the console.
+Scan-screen evidence (phone lying on a desk): Tracking OK, Mapping not available, Nodes 1, Mesh 0 triangles, no box; screenshot shows live (blurry) camera + HUD + controls rendered. Conclusion: our AR delegate receives frames, so the "AR view steals the session" risk is ruled out; mesh/box on a real scene is STILL UNVERIFIED (needs the phone held up in a room).
+Observed: `devicectl list devices` also lists "Neeha's iPhone" (iPhone 17, unavailable) - a teammate's phone was connected to this Mac before; a non-LiDAR iPhone 17 can be used for the no-LiDAR QA (U4 tasks) once connected.
+NOT verified: LiDAR mesh/box in a real room; audio quality; haptic feel; cloud (not configured); relocalization.
+Open for U1: hold the phone in a room and run `DEVICE=00008140-000914590E01801C make selftest-scan` (or the Scan screen by hand) -> U1.4, then U1.5/U1.6.
+
+---
+
+## 2026-10-17 17:10 — Claude (agent, for Sachin) — Headless on-phone testing + first real device run; arrival-speech bug found and fixed   [tags: BUILD, BUG]
+Area: B (guidance) + D (harness); requested by U1 ("can you test this headless / CLI?")
+Findings before building anything:
+- I have NO tool that can see/click the Mac screen (only browser/Figma tools), so iPhone Mirroring cannot be driven by me. It is also unsuited to AR (phone must be locked while mirrored; camera/AR likely unavailable - not verified).
+- `devicectl --console` showed NOTHING from the app: it captures stdout/stderr only, and we logged with os.Logger. The earlier docs claim "make launch streams logs" was wrong (struck through in docs/TESTING.md).
+Files created: `Waypoint/App/LaunchCommand.swift` (launch-argument switches `-autoSimulate "<label>"`, `-autoFacingAway YES`, `-autoScan YES`).
+Files edited (code): `Waypoint/App/Log.swift` (REWRITTEN: `AppLog` writes to os.Logger AND stderr), `Waypoint/App/AppState.swift` (reads the launch command, picks the mode), `Waypoint/UI/NavigatorView.swift`
+  (auto-runs the simulated walk, exits 0/1/2), `Waypoint/UI/VolunteerView.swift` (auto-starts scanning), `Waypoint/Capture/CaptureController.swift` (1 Hz `scan:` status line),
+  `Waypoint/Navigation/NavigationController.swift` (logs instruction changes, haptics, beacon direction ~1/s), `Makefile` (`selftest-sim`, `selftest-scan`, `ROOM=`; app args need a `--` after the bundle id),
+  `Package/.../Guidance/FeedbackPlanner.swift` (arrival, turns, hazards now `.high` speech priority) and `Tests/.../FeedbackAndVisionTests.swift` (3 assertions updated).
+Files edited (docs, strike/update): `docs/TESTING.md` (logs claim corrected + new "Headless tests" section), `AGENTS.md` (command table +3 rows).
+Bug found by the on-phone test: `.normal` speech is skipped while the voice is busy, so "You have arrived at Room 204." was never spoken (it arrived while "Continue straight." was talking). Fixed by making arrival/turn/hazard speech `.high`
+  (interrupts); re-ran on the phone: arrival now spoken. Also found while building the test: my first harness picked `maps.first` (alphabetical), which was U1's own scan, so it failed with exit 2; now it searches all maps.
+Observed state: the phone already holds 2 maps (the seeded SAMPLE map and a map saved by U1 - name "Rice Hall, floor 1"), i.e. U1 has already saved at least one scan (U1.5 partly done; relocalization U1.6 still unmeasured).
+Verified ON DEVICE (iPhone 16 Pro Max, iOS 27, USB, unlocked): `make selftest-sim` -> instruction changes continueStraight -> turnRight(57 deg) -> continueStraight -> arrived; `say:` lines incl. arrival; `haptic: turnRight`, `haptic: arrived` (no haptic errors);
+  `spatial audio started` (no audio errors); beacon local x=+1.50 (to the right) at the right turn; `SELFTEST PASS`, exit 0. Also `make test` 50 pass, `make typecheck` OK (20 app files), build succeeded and installed.
+NOT verified: that the audio is actually audible/directional to a human (needs headphones + ears), that haptics are felt, `make selftest-scan` (not run yet), anything LiDAR/mesh/relocalization.
+Open: U1 to run `make selftest-scan` while walking (U1.4). U2 owns tuning audio now that the walk is reproducible with one command.
+
+---
+
 ## 2026-10-17 16:20 — Claude (agent, for Sachin) — U1.1 signing: certificate found, Team ID set, app built + installed on iPhone 16 Pro Max   [tags: BUILD]
 Area: U1 (setup)
 What happened: Sachin created the Apple Development certificate in Xcode (Personal Team, certificate under khanalsachin@icloud.com). Read the real team id from the certificate OU

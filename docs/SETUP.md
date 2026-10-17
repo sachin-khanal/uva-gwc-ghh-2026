@@ -91,6 +91,12 @@ Reality check (verify numbers in your dashboard): the free tier allows about 500
 Restore before the demo. If Cloud shows "denied access (401/403)": Anonymous Sign-Ins is off or the SQL
 was not run. The anon key is public by design; the SQL's Row Level Security rules are what protect data.
 
+## Headless / UI testing from the terminal (2026-10-17)
+
+`DEVICE=<id> make selftest-sim`, `make selftest-scan` and `make uitest` test the app on your phone without tapping (see docs/TESTING.md). Requirements: phone unlocked and awake
+(Settings > Display & Brightness > Auto-Lock > Never while testing), volume up. `make uitest` also uses Settings > Developer > Enable UI Automation. The first `make uitest` installs a second tiny app, the
+test runner, under your Apple ID (free accounts allow ~10 new app ids per week; the runner uses one).
+
 ## Free-account limits to remember
 
 - The app **expires after 7 days** (re-run `make run` to renew). Fine for a 24h hackathon.

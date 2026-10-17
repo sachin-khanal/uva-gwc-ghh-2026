@@ -97,8 +97,51 @@ public struct OrientedBox: Equatable, Sendable {
     }
 
     /// Tries yaws from 0 up to (not including) 90 degrees and returns the fit with the smallest floor
-    /// area (a rectangle's best orientation repeats every 90 degrees). Cost: steps * points.
+    /// area (a rectangle's best orientation repeats every 90 degrees).
+    /// EXACT and fast: reduces the points to their 2-D convex hull first (the extremes along any direction are hull vertices),
+    /// so the result equals `fitBestBruteForce` but costs O(n log n + yaws * hull) instead of O(yaws * n).
     public static func fitBest(points: [SIMD3<Float>], yawStepDegrees: Float = 5) -> OrientedBox? {
+        guard let first = points.first else { return nil }
+        var minY = first.y, maxY = first.y
+        var floorPoints: [SIMD2<Float>] = []
+        floorPoints.reserveCapacity(points.count)
+        for p in points {
+            minY = min(minY, p.y)
+            maxY = max(maxY, p.y)
+            floorPoints.append(SIMD2<Float>(p.x, p.z))
+        }
+        return fitBest(hull: ConvexHull2D.hull(floorPoints), minY: minY, maxY: maxY, yawStepDegrees: yawStepDegrees)
+    }
+
+    /// Same search starting from an already-computed floor-plane hull (x, z) and the vertical extent. Callers that
+    /// stream huge meshes (the app) reduce each mesh anchor to its own hull and pass the merged hull here.
+    public static func fitBest(hull: [SIMD2<Float>], minY: Float, maxY: Float, yawStepDegrees: Float = 5) -> OrientedBox? {
+        guard let first = hull.first else { return nil }
+        var best: OrientedBox?
+        var yawDeg: Float = 0
+        while yawDeg < 90 {
+            let yaw = yawDeg * .pi / 180
+            let c = cos(yaw), s = sin(yaw)
+            // Rotate by -yaw (same arithmetic as `rotateY(_, by: -yaw)`), tracking min/max of the rotated x and z.
+            var lo = SIMD2<Float>(first.x * c - first.y * s, first.x * s + first.y * c)
+            var hi = lo
+            for p in hull.dropFirst() {
+                let r = SIMD2<Float>(p.x * c - p.y * s, p.x * s + p.y * c)
+                lo = simd_min(lo, r)
+                hi = simd_max(hi, r)
+            }
+            let local = SIMD3<Float>((lo.x + hi.x) / 2, (minY + maxY) / 2, (lo.y + hi.y) / 2)
+            let candidate = OrientedBox(center: rotateY(local, by: yaw),
+                                        halfExtents: SIMD3<Float>((hi.x - lo.x) / 2, (maxY - minY) / 2, (hi.y - lo.y) / 2),
+                                        yaw: yaw)
+            if best == nil || candidate.floorArea < best!.floorArea - 1e-6 { best = candidate }
+            yawDeg += max(1, yawStepDegrees)
+        }
+        return best
+    }
+
+    /// The original O(yaws * points) search over every point. Kept as the reference implementation that tests compare the fast one against.
+    static func fitBestBruteForce(points: [SIMD3<Float>], yawStepDegrees: Float = 5) -> OrientedBox? {
         var best: OrientedBox?
         var yawDeg: Float = 0
         while yawDeg < 90 {

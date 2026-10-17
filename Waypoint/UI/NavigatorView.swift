@@ -17,6 +17,7 @@ struct NavigatorView: View {
     @StateObject private var nav = NavigationController()
     @State private var selectedMapId: UUID?
     @State private var isNavigating = false
+    @State private var autoRun = false // true while a -autoSimulate self-test is running
 
     private var selectedMap: BuildingMap? { app.maps.first { $0.id == selectedMapId } ?? app.maps.first }
 
@@ -29,6 +30,33 @@ struct NavigatorView: View {
             }
         }
         .onDisappear { stopNavigation() }
+        .onAppear(perform: runLaunchCommandIfNeeded)
+        .onChange(of: nav.statusText) { _, status in
+            // Headless self-test (-autoSimulate): finish once the walker has arrived.
+            if autoRun, status == "Simulation finished" {
+                Log.app.info("SELFTEST PASS: simulated walk finished")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { exit(0) }
+            }
+        }
+    }
+
+    /// `-autoSimulate "<label>"` (see LaunchCommand): start the simulated walk with no taps and exit when done.
+    private func runLaunchCommandIfNeeded() {
+        guard case .simulate(let label, let facingAway) = app.launchCommand, !autoRun else { return }
+        autoRun = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+            Log.app.error("SELFTEST FAIL: timed out after 120 s")
+            exit(1)
+        }
+        // First map (alphabetical) that actually contains a destination matching the label.
+        guard let (map, destination) = app.maps.lazy.compactMap({ m in
+                  WaypointGraph(map: m).nodes(matchingLabel: label).first.map { (m, $0) }
+              }).first else {
+            Log.app.error("SELFTEST FAIL: no map has a destination matching \"\(label)\" (maps: \(app.maps.map(\.name)))")
+            exit(2)
+        }
+        Log.app.info("SELFTEST start: \"\(map.name)\" -> \(destination.label ?? "?")")
+        startSimulation(map: map, destination: destination, facingAway: facingAway)
     }
 
     private var pickerBody: some View {
@@ -61,6 +89,7 @@ struct NavigatorView: View {
                         Button("Simulate walk to \(dest.label ?? "unnamed")") {
                             startSimulation(map: map, destination: dest, facingAway: false)
                         }
+                        .accessibilityIdentifier("nav.simulate.\(dest.label ?? "unnamed")")
                     }
                     if let dest = map.destinations.first {
                         Button("Simulate, starting facing the wrong way") {
@@ -74,18 +103,21 @@ struct NavigatorView: View {
 
     private var navigatingBody: some View {
         VStack(spacing: 20) {
-            Text(nav.statusText).font(.title)
-            Text(nav.instructionText).font(.title3).foregroundStyle(.secondary)
+            Text(nav.statusText).font(.title).accessibilityIdentifier("nav.status")
+            Text(nav.instructionText).font(.title3).foregroundStyle(.secondary).accessibilityIdentifier("nav.instruction")
             if nav.obstacleLevel != .clear {
                 Text(nav.obstacleLevel == .stop ? "STOP" : "Obstacle ahead")
                     .font(.largeTitle).bold().foregroundStyle(.red)
+                    .accessibilityIdentifier("nav.obstacle")
             }
             if nav.isSimulating {
                 Toggle("Inject obstacle (0.5 m ahead)", isOn: $nav.simulatedObstacle)
                     .padding(.horizontal)
+                    .accessibilityIdentifier("nav.injectObstacle")
             }
             Button("Stop") { stopNavigation() }
                 .buttonStyle(.borderedProminent).controlSize(.large)
+                .accessibilityIdentifier("nav.stop")
         }
         .padding()
     }

@@ -6,6 +6,9 @@
 //           Input each tick: current `GuidanceInstruction?`, the obstacle level from LiDAR, and
 //           whether tracking is healthy. Output: a list of `FeedbackAction`s for the app target to
 //           perform (speak / vibrate / move the spatial beacon).
+// Speech priority (found by the on-phone self-test, 2026-10-17): `.normal` speech is SKIPPED while the voice is busy, which dropped the
+//           arrival announcement. So anything the user must not miss - arrival, turns, hazards, obstacle stop, lost position - is `.high`
+//           (interrupts); only "Continue straight", "Position found" and the soft obstacle-caution notice are `.normal`.
 // Priority (Architecture.md 4.4): lost-tracking > obstacle stop > obstacle caution > hazard >
 //           turn > ambient beacon.
 // De-duplication: speech and haptics fire only when the situation CHANGES (new target or new kind),
@@ -41,6 +44,7 @@ public enum FeedbackAction: Equatable, Sendable {
 public struct FeedbackPlanner {
 
     private var lastKey: String?
+    private var lastHazardTarget: UUID?
     private var lastObstacle: ObstacleLevel = .clear
     private var lastTrackingOK = true
 
@@ -49,6 +53,7 @@ public struct FeedbackPlanner {
     /// Forget what was announced (call when a new navigation starts).
     public mutating func reset() {
         lastKey = nil
+        lastHazardTarget = nil
         lastObstacle = .clear
         lastTrackingOK = true
     }
@@ -73,6 +78,7 @@ public struct FeedbackPlanner {
             actions.append(.speak("Position found.", priority: .normal))
             lastTrackingOK = true
             lastKey = nil // re-announce the current instruction after recovering
+            lastHazardTarget = nil
         }
 
         // 2. Obstacles: announce on level change only.
@@ -100,28 +106,36 @@ public struct FeedbackPlanner {
             return actions
         }
 
-        let key = "\(i.kind.rawValue)-\(i.targetNodeId.uuidString)"
+        // Announce when the KIND of instruction changes (straight -> turn right -> straight ...), NOT every time the target waypoint advances:
+        // real scans have a node every 1.5 m, and keying on the target made "Continue straight." repeat at every one (found by the on-phone
+        // end-to-end test, 2026-10-17). Hazards are announced once per hazardous target, below.
+        let key = i.kind.rawValue
         if key != lastKey {
             lastKey = key
             switch i.kind {
             case .arrived:
                 let where_ = i.targetLabel.map { " at \($0)" } ?? ""
-                actions.append(.speak("You have arrived\(where_).", priority: .normal))
+                actions.append(.speak("You have arrived\(where_).", priority: .high))
                 actions.append(.haptic(.arrived))
             case .turnLeft:
                 actions.append(.haptic(.turnLeft))
-                actions.append(.speak("Turn left.", priority: .normal))
+                actions.append(.speak("Turn left.", priority: .high))
             case .turnRight:
                 actions.append(.haptic(.turnRight))
-                actions.append(.speak("Turn right.", priority: .normal))
+                actions.append(.speak("Turn right.", priority: .high))
             case .turnAround:
-                actions.append(.speak("Turn around.", priority: .normal))
+                actions.append(.speak("Turn around.", priority: .high))
             case .continueStraight:
                 actions.append(.speak("Continue straight.", priority: .normal))
             }
-            if let hazard = i.hazard {
-                actions.append(.speak(Self.hazardText(hazard), priority: .normal))
+        }
+        if let hazard = i.hazard {
+            if lastHazardTarget != i.targetNodeId {
+                lastHazardTarget = i.targetNodeId
+                actions.append(.speak(Self.hazardText(hazard), priority: .high))
             }
+        } else {
+            lastHazardTarget = nil
         }
 
         actions.append(.beacon(i.kind == .arrived ? nil : i.targetPosition))
