@@ -93,6 +93,19 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Fix a broken build I pushed one commit earlier   [tags: BUILD, BUG]
+Area: B (Navigation). Branch `navigation-overhaul`.
+My previous commit (28c88fd) left an EXTRA CLOSING BRACE in `Waypoint/Navigation/NavigationController.swift` when I
+restructured the re-route block, so the app target did not compile. I committed and pushed it anyway: I read
+"BUILD SUCCEEDED" from `make check` in a combined command whose earlier step had already failed, and `make test` passes
+regardless because it only builds WaypointCore, not the app.
+Fix: removed the stray brace. `make typecheck` OK (60 app files, 1 UI test file); `make check` -> BUILD SUCCEEDED;
+`make test` -> 199 tests, 0 failures.
+Lesson for anyone chaining these: `make test` green says nothing about the app target. Check `make typecheck` or
+`make check` output on its own line before committing app-side changes.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Faster re-routing; no briefing while facing backwards   [tags: BUILD, BUG]
 Area: B (Navigation/Guidance) + UI text. Branch `reroute-and-briefing` off `navigation-overhaul`. See D-036.
 

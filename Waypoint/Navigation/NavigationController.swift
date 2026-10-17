@@ -326,7 +326,6 @@ final class NavigationController: ObservableObject {
                         Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
                     }
                 }
-                }
             }
 
             instruction = follower?.update(position: mapPosition, forward: mapForward)
