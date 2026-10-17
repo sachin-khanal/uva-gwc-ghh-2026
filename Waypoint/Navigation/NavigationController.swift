@@ -23,7 +23,10 @@
 //           In simulation mapToWorld is the identity and the "camera" is built from the walker's pose.
 // Status:   SCAFFOLD - wired end to end, UNVERIFIED ON DEVICE. The cue logic itself is proven by
 //           ScanAndSimulationTests.testEndToEndWalkProducesExpectedCues (`make test`).
-//           TODO(B): re-route if the user wanders far off the route; sign-reader announcements.
+//           Live adaptation (2026-10-17, branch feature/route-memory): routes come from `RoutePlanner` (remembered shortest path, re-validated every
+//           time). REAL mode only: if the user strays > 6 m from the route, or an obstacle stays at STOP for 4 s, the route is recomputed (the blocked
+//           leg is avoided for 10 min); confirmed signs (`SignReader`) are checked against the believed position and LOGGED only (not acted on yet).
+//           UNVERIFIED ON DEVICE. TODO(B): tune thresholds in a real hallway; persist `RouteMemory` with the map.
 //
 import ARKit
 import Combine
@@ -61,6 +64,13 @@ final class NavigationController: ObservableObject {
     private var obstacles = ObstacleClassifier()
     private var postureMonitor = PostureMonitor()
     private let identifier = ObstacleIdentifier()
+    private let signReader = SignReader()
+    private var routePlanner: RoutePlanner?
+    private var blockage = BlockageTracker()
+    private var lastReroute: TimeInterval = -100
+    private var lastMapPosition: SIMD3<Float> = .zero
+    /// A stray further than this from the route polyline triggers a re-route (metres).
+    private let offRouteThreshold: Float = 6
     private var simulatedTime: TimeInterval = 0
     private var postureLogCounter = 0
 
@@ -86,6 +96,8 @@ final class NavigationController: ObservableObject {
         statusText = "Looking for your position..."
         relocalizer.onFrame = { [weak self] frame in self?.handle(frame) }
         relocalizer.start(map: map, store: store)
+        signReader.reset()
+        signReader.onRoomNumberConfirmed = { [weak self] number in self?.handleSign(number) }
         Log.nav.info("navigation started -> \(destination.label ?? "?")")
     }
 
@@ -97,7 +109,7 @@ final class NavigationController: ObservableObject {
         begin(map: map, destination: destination)
         let graph = WaypointGraph(map: map)
         guard let startNode = map.nodes.first(where: { $0.kind == .corridor }) ?? map.nodes.first,
-              let route = Router.route(in: graph, from: startNode.id, to: destination.id) else {
+              let route = routePlanner?.plan(from: startNode.id, to: destination.id)?.nodes else {
             statusText = "No route in this map"
             return
         }
@@ -122,6 +134,7 @@ final class NavigationController: ObservableObject {
         simulatedObstacle = false
         simulationPaused = false
         relocalizer.onFrame = nil
+        signReader.onRoomNumberConfirmed = nil
         relocalizer.stop()
         audio.stop()
         speech.stop()
@@ -132,7 +145,11 @@ final class NavigationController: ObservableObject {
 
     private func begin(map: BuildingMap, destination: MapNode) {
         stop() // clean slate if a previous session is still running
-        graph = WaypointGraph(map: map)
+        let newGraph = WaypointGraph(map: map)
+        graph = newGraph
+        if let routePlanner { routePlanner.update(graph: newGraph) } else { routePlanner = RoutePlanner(graph: newGraph) }
+        routePlanner?.clearAllBlockages()
+        blockage.reset()
         self.destination = destination
         follower = nil
         planner.reset()
@@ -173,6 +190,7 @@ final class NavigationController: ObservableObject {
                 report = ObstacleReport(kind: known.report.kind, side: hit.side, distanceMeters: hit.depth, confidence: known.report.confidence)
             }
         }
+        if trackingOK { signReader.process(frame) }
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
              nearestDepth: hit?.depth, report: report, time: frame.timestamp)
     }
@@ -215,7 +233,11 @@ final class NavigationController: ObservableObject {
             if isSimulating { mapPosition.y = 0 }
             let mapForward = Geometry.transformDirection(worldToMap, Geometry.cameraForward(of: camera))
 
+            lastMapPosition = mapPosition
             if follower == nil { follower = makeFollower(from: mapPosition, graph: graph, destination: destination) }
+            if !isSimulating, let f = follower {
+                adaptRoute(follower: f, mapPosition: mapPosition, level: level, time: time)
+            }
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
                 lastLoggedKind = i.kind
@@ -242,12 +264,51 @@ final class NavigationController: ObservableObject {
 
     private func makeFollower(from position: SIMD3<Float>, graph: WaypointGraph, destination: MapNode) -> RouteFollower? {
         guard let start = graph.nearestNode(to: position),
-              let route = Router.route(in: graph, from: start.id, to: destination.id) else {
+              let route = routePlanner?.plan(from: start.id, to: destination.id)?.nodes else {
             Log.nav.error("no route to destination")
             return nil
         }
         Log.nav.info("route has \(route.count) nodes")
         return RouteFollower(route: route, graph: graph)
+    }
+
+    // MARK: Live route adaptation (REAL mode)
+
+    /// Re-route when the user is far off the route or the way ahead stays blocked. Rate-limited so it cannot thrash.
+    private func adaptRoute(follower: RouteFollower, mapPosition: SIMD3<Float>, level: ObstacleLevel, time: TimeInterval) {
+        guard let graph, let destination, let routePlanner, time - lastReroute > 5 else { return }
+        let blockedNow = blockage.update(level: level, time: time)
+        let strayed = RoutePlanner.offRouteDistance(position: mapPosition, route: follower.route) > offRouteThreshold
+        guard blockedNow || strayed, let here = graph.nearestNode(to: mapPosition) else { return }
+
+        let target = follower.route[follower.targetIndex]
+        var plan: PlannedRoute?
+        if blockedNow, follower.targetIndex > 0 {
+            let previous = follower.route[follower.targetIndex - 1]
+            plan = routePlanner.detour(around: (previous.id, target.id), from: here.id, to: destination.id, now: Date())
+        } else {
+            plan = routePlanner.plan(from: here.id, to: destination.id)
+        }
+        lastReroute = time
+        guard let plan, plan.nodes.map(\.id) != follower.route.map(\.id) else { return }
+        self.follower = RouteFollower(route: plan.nodes, graph: graph)
+        let words = blockedNow ? "Path blocked. Taking another way." : "Finding a new route."
+        setIfChanged(\.lastSpoken, words)
+        recentSpeech = Array((recentSpeech + [words]).suffix(6))
+        speech.say(words, priority: .high)
+        Log.nav.info("re-routed (\(blockedNow ? "blocked" : "off route")): \(plan.nodes.count) nodes, \(String(format: "%.1f", plan.totalDistance)) m")
+    }
+
+    /// A sign was read. DELIBERATELY LOG-ONLY for now: a sign can be legible from far down a hall, so acting on a disagreement could
+    /// teleport the route. Field data (`sign ... disagrees` lines) should decide whether `.relocate` may re-anchor (TODO B).
+    private func handleSign(_ number: String) {
+        guard let routePlanner, !isSimulating else { return }
+        switch routePlanner.interpretSign(number, userPosition: lastMapPosition) {
+        case .consistent(let id): Log.nav.info("sign \(number) confirms position near node \(id)")
+        case .relocate(let id): Log.nav.info("sign \(number) disagrees with believed position; it belongs to node \(id) (not acting)")
+        case .ambiguous: Log.nav.info("sign \(number) matches several places")
+        case .unknown: Log.nav.info("sign \(number) is not in this map")
+        }
     }
 
     /// Executes FeedbackPlanner output. Beacon positions arrive in the MAP frame and are converted

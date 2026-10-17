@@ -55,7 +55,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Cloud UI** | D | `Waypoint/Cloud/CloudController.swift`, `UI/SyncView.swift` (Cloud section) | SCAFFOLD | – (needs a Supabase project) |
 | **Relocalization** | A | `Waypoint/Relocalization/Relocalizer.swift` | SCAFFOLD | – (device) |
 | **Routing** | B | `Routing/WaypointGraph.swift`, `Router.swift`, `RouteFollower.swift`, `GuidanceInstruction.swift` | DONE (logic) | `RoutingTests` |
-| **Route memory + live replanning** | B | `Routing/RoutePlanner.swift` (+ `avoiding:` in `Router.swift`) | logic DONE · not wired into NavigationController (TODO B) | `RoutePlannerTests` (10) |
+| **Route memory + live replanning** | B | `Routing/RoutePlanner.swift` (+ `avoiding:` in `Router.swift`) | logic DONE · wired into NavigationController (real mode: off-route + blockage re-route; signs log-only) · UNVERIFIED ON DEVICE | `RoutePlannerTests` (10) |
 | **Feedback decisions** | B | `Guidance/FeedbackPlanner.swift` | DONE (logic) | `FeedbackAndVisionTests` |
 | **Spatial audio / haptics / speech** | B | `Waypoint/Guidance/*.swift` | SCAFFOLD | – (device, needs headphones) |
 | **Navigation integration** | B + A | `Waypoint/Navigation/NavigationController.swift` | SCAFFOLD | – (device) |

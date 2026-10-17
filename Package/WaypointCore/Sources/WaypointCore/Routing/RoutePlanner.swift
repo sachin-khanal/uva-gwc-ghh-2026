@@ -209,3 +209,41 @@ public final class RoutePlanner {
         return h
     }
 }
+
+// MARK: - Live-adaptation helpers (pure, tested)
+
+extension RoutePlanner {
+    /// Horizontal distance from `position` to the nearest point of the route polyline (metres).
+    /// Used to notice that the user has wandered off the route.
+    public static func offRouteDistance(position: SIMD3<Float>, route: [MapNode]) -> Float {
+        guard let first = route.first else { return .infinity }
+        guard route.count > 1 else { return Geometry.horizontalDistance(position, first.position) }
+        var best = Float.infinity
+        for (a, b) in zip(route, route.dropFirst()) {
+            let ax = a.position.x, az = a.position.z
+            let dx = b.position.x - ax, dz = b.position.z - az
+            let len2 = dx * dx + dz * dz
+            let t = len2 > 0 ? max(0, min(1, ((position.x - ax) * dx + (position.z - az) * dz) / len2)) : 0
+            let px = ax + t * dx, pz = az + t * dz
+            best = min(best, hypot(position.x - px, position.z - pz))
+        }
+        return best
+    }
+}
+
+/// Fires once when an obstacle has stayed at `.stop` level for `seconds`: a person walking past
+/// must not re-route the user, but a closed door or a parked cart should.
+public struct BlockageTracker: Sendable {
+    public let seconds: TimeInterval
+    private var since: TimeInterval?
+    private var fired = false
+    public init(seconds: TimeInterval = 4) { self.seconds = seconds }
+
+    public mutating func update(level: ObstacleLevel, time: TimeInterval) -> Bool {
+        guard level == .stop else { since = nil; fired = false; return false }
+        if since == nil { since = time }
+        if !fired, time - (since ?? time) >= seconds { fired = true; return true }
+        return false
+    }
+    public mutating func reset() { since = nil; fired = false }
+}

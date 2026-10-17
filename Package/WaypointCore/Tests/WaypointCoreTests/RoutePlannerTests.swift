@@ -129,3 +129,34 @@ final class RoutePlannerTests: XCTestCase {
         _ = b
     }
 }
+
+final class LiveAdaptationHelperTests: XCTestCase {
+    func testOffRouteDistance() {
+        let a = MapNode(kind: .corridor, position: [0, 0, 0])
+        let b = MapNode(kind: .corridor, position: [10, 0, 0])
+        let route = [a, b]
+        XCTAssertEqual(RoutePlanner.offRouteDistance(position: [5, 0, 3], route: route), 3, accuracy: 0.001)
+        XCTAssertEqual(RoutePlanner.offRouteDistance(position: [13, 0, 4], route: route), 5, accuracy: 0.001) // beyond the end: distance to endpoint
+        XCTAssertEqual(RoutePlanner.offRouteDistance(position: [3, 0, 4], route: [a]), 5, accuracy: 0.001)
+        XCTAssertEqual(RoutePlanner.offRouteDistance(position: [0, 0, 0], route: []), .infinity)
+    }
+
+    func testBlockageTrackerNeedsSustainedStopAndFiresOnce() {
+        var t = BlockageTracker(seconds: 4)
+        XCTAssertFalse(t.update(level: .stop, time: 0))
+        XCTAssertFalse(t.update(level: .stop, time: 3.9))
+        XCTAssertTrue(t.update(level: .stop, time: 4.0))
+        XCTAssertFalse(t.update(level: .stop, time: 6))          // already fired
+        XCTAssertFalse(t.update(level: .clear, time: 7))         // person walked away: re-arm
+        XCTAssertFalse(t.update(level: .stop, time: 8))
+        XCTAssertTrue(t.update(level: .stop, time: 12))
+    }
+
+    func testBriefStopDoesNotFire() {
+        var t = BlockageTracker(seconds: 4)
+        XCTAssertFalse(t.update(level: .stop, time: 0))
+        XCTAssertFalse(t.update(level: .caution, time: 2))
+        XCTAssertFalse(t.update(level: .stop, time: 3))
+        XCTAssertFalse(t.update(level: .stop, time: 6))          // only 3 s since re-start
+    }
+}

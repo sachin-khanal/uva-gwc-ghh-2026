@@ -1,5 +1,15 @@
 # Work log
 
+## 2026-10-17 18:00 — Claude (agent, for Sachin) — Merge app-ui-workflows + wire RoutePlanner into NavigationController (branch feature/route-memory)   [tags: ROUTING, BUILD]
+Area: B (Navigation) + shared merge. Touches U3's `app-ui-workflows` files only through the merge; `NavigationController` is B/A.
+Merge: `origin/app-ui-workflows` merged into `feature/route-memory` (commit 03d9007). Conflicts resolved by keeping BOTH sides: `Waypoint/UI/RootView.swift` (Home button keeps `toolbar.home` id AND the Settings gear/sheet; E2E `.task` kept AND the new-interface `.onAppear`), `docs/MODULES.md`, `docs/TESTING.md` (both sets of rows).
+Files edited: `Package/.../Routing/RoutePlanner.swift` (+`RoutePlanner.offRouteDistance`, `BlockageTracker`), `Tests/.../RoutePlannerTests.swift` (+3 tests), `Waypoint/Navigation/NavigationController.swift` (routes now come from `RoutePlanner`; REAL mode only: re-route when > 6 m off route or STOP obstacle for 4 s, 5 s rate limit, "Path blocked. Taking another way."; `SignReader` now fed with frames, confirmed signs are LOGGED only, not acted on), `docs/MODULES.md`.
+Simulation mode deliberately does NOT re-route (the virtual walker follows its fixed route).
+Commands run: `make test` -> 119 tests, 0 failures (85 main + 21 app-ui-workflows FlowTests + 13 mine); `make typecheck` -> OK (58 app files, 1 UI test file).
+Verified: the two commands above.
+NOT verified: `make selftest-sim` / `selftest-e2e` after this change (phone was locked -> launch denied; they passed before the merge); `make check`; `make uitest`; every new live behaviour (re-route, blockage detour, sign logging) is UNVERIFIED ON DEVICE; thresholds (6 m, 4 s, 5 s) are guesses; the new UI (app-ui-workflows) has still not been run on a device by anyone.
+Open problems / handoff: unlock the phone and run `DEVICE=<id> make selftest-sim selftest-e2e`; decide whether sign disagreement may re-anchor (needs field logs); `RouteMemory` lives only in memory (not persisted with MapStore); map JSON has no written schema version (see answer in chat: `BuildingMap.schemaVersion` is never encoded).
+
 ## 2026-10-17 17:10 — Claude (agent, for Sachin) — Route memory + live-adaptive RoutePlanner (branch feature/route-memory)   [tags: ROUTING]
 Area: B (Routing). Requested by Sachin: remember shortest paths between any two points, but never defer to memory; stay adaptable (blockages, signs).
 Files created: `Package/WaypointCore/Sources/WaypointCore/Routing/RoutePlanner.swift` (EdgeKey, RouteMemory, RoutePlanner, SignVerdict), `Package/WaypointCore/Tests/WaypointCoreTests/RoutePlannerTests.swift` (10 tests).
