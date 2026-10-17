@@ -239,7 +239,7 @@ final class CloudTests: XCTestCase {
     }
 
     func testKeychainSessionStoreRoundTrip() throws {
-        let store = KeychainSessionStore(service: "edu.virginia.waypoint.test.\(UUID().uuidString)", account: "t")
+        let store = KeychainSessionStore(service: "io.github.sachin-khanal.waypoint.test.\(UUID().uuidString)", account: "t")
         let session = AuthSession(accessToken: "a", refreshToken: "r", userId: userId, expiresAt: Date(timeIntervalSince1970: 2_000_000_000))
         store.save(session)
         guard store.load() != nil else {

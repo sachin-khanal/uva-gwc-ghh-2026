@@ -44,7 +44,7 @@ Run after SETUP.md §3 (`DEVICE=<id> make run`). Owner B/D. Mark each result in 
 
 ## Reading logs from the phone
 
-`DEVICE=<id> make launch` streams `os.Logger` output (subsystem `edu.virginia.waypoint`, categories:
+`DEVICE=<id> make launch` streams `os.Logger` output (subsystem ~~`edu.virginia.waypoint`~~ **Update 2026-10-17:** `io.github.sachin-khanal.waypoint`, categories:
 app, capture, reloc, nav, guidance, vision, sync). Include relevant lines when reporting a bug.
 
 ## Reporting a result

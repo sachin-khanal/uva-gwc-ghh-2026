@@ -16,7 +16,7 @@ Indoor navigation for blind users. A sighted volunteer scans a building once; a 
 | Campus Wi-Fi often isolates clients | Do not depend on Wi-Fi LAN reachability. Use MultipeerConnectivity (works over Bluetooth/peer-to-peer Wi-Fi) with a file-export fallback. **Update 2026-10-17 (rev 2):** Multipeer/export are now the OFFLINE fallback; Supabase is the primary sync (§10, D-016). |
 | Blind user, safety-adjacent | Audio/haptic feedback must degrade gracefully: if tracking is lost, say so and stop issuing directions. |
 
-**Setup checklist (everyone, before hour 1):** Xcode 16+, iPhone Developer Mode on, device trusted, unique bundle ID (`edu.virginia.waypoint.<name>`), Local Network + Camera permissions accepted once. Either MacBook can build; use the Pro for long builds if the Air struggles.
+**Setup checklist (everyone, before hour 1):** Xcode 16+, iPhone Developer Mode on, device trusted, unique bundle ID (~~`edu.virginia.waypoint.<name>`~~ **Update 2026-10-17:** `io.github.sachin-khanal.waypoint.<suffix>` (prefix set in `Config/Base.xcconfig`; no university domain)), Local Network + Camera permissions accepted once. Either MacBook can build; use the Pro for long builds if the Air struggles.
 
 Minimum target: **iOS 17**, Swift 5.10+, SwiftUI, no third-party dependencies.
 

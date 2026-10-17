@@ -70,7 +70,7 @@ public final class KeychainSessionStore: SessionStore, @unchecked Sendable {
     private let service: String
     private let account: String
 
-    public init(service: String = "edu.virginia.waypoint.supabase", account: String = "session") {
+    public init(service: String = "io.github.sachin-khanal.waypoint.supabase", account: String = "session") {
         self.service = service
         self.account = account
     }

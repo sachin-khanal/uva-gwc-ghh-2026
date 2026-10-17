@@ -101,7 +101,7 @@ was not run. The anon key is public by design; the SQL's Row Level Security rule
 |---|---|
 | `xcodebuild` says a required plug-in failed (CoreSimulator) | `sudo xcodebuild -runFirstLaunch`, then retry |
 | `codesign ... resource fork, Finder information... not allowed` | Build output must be outside iCloud folders (`~/Desktop`, `~/Documents`). The Makefile already does this; do not pass your own `-derivedDataPath` inside the repo |
-| `No profiles for 'edu.virginia.waypoint.<x>' were found` | `DEVELOPMENT_TEAM` empty/wrong in `Config/Local.xcconfig`, or you have not added your Apple ID in Xcode |
+| ~~`No profiles for 'edu.virginia.waypoint.<x>' were found`~~ **Update 2026-10-17:** `No profiles for 'io.github.sachin-khanal.waypoint.<x>' were found` | `DEVELOPMENT_TEAM` empty/wrong in `Config/Local.xcconfig`, or you have not added your Apple ID in Xcode |
 | `Failed to register bundle identifier` | Someone else already used that suffix with a free account; pick a more unique `WAYPOINT_DEV_SUFFIX` |
 | "Untrusted Developer" on phone | Settings → General → VPN & Device Management → Trust |
 | Developer Mode option missing | Plug phone into the Mac with Xcode once; the option appears after |

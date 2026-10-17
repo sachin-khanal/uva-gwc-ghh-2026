@@ -35,6 +35,7 @@ if xcrun --find devicectl >/dev/null 2>&1; then pass "devicectl present"; else b
 if command -v xcodegen >/dev/null; then pass "xcodegen $(xcodegen --version | head -1)"; else bad "xcodegen missing: run 'make setup' (brew install xcodegen)"; fi
 
 # 4. Local signing config
+prefix=$(sed -n 's/^WAYPOINT_BUNDLE_PREFIX *= *//p' Config/Local.xcconfig Config/Base.xcconfig 2>/dev/null | tail -1 | tr -d ' ')
 if [ -f Config/Local.xcconfig ]; then
   team=$(sed -n 's/^DEVELOPMENT_TEAM *= *//p' Config/Local.xcconfig | tr -d ' ')
   suffix=$(sed -n 's/^WAYPOINT_DEV_SUFFIX *= *//p' Config/Local.xcconfig | tr -d ' ')
@@ -44,9 +45,9 @@ if [ -f Config/Local.xcconfig ]; then
     pass "DEVELOPMENT_TEAM=$team"
   fi
   if [ -z "$suffix" ] || [[ "$suffix" == replacewith* ]]; then
-    warn "Config/Local.xcconfig: WAYPOINT_DEV_SUFFIX not set; bundle id will be edu.virginia.waypoint.shared"
+    warn "Config/Local.xcconfig: WAYPOINT_DEV_SUFFIX not set; bundle id will be $prefix.shared"
   else
-    pass "bundle id edu.virginia.waypoint.$suffix"
+    pass "bundle id $prefix.$suffix"
   fi
 else
   warn "Config/Local.xcconfig missing: run 'make setup' and edit it"

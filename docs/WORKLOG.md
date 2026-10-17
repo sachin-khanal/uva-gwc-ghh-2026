@@ -19,6 +19,20 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 15:40 — Claude (agent, for Sachin) — Bundle id prefix changed from edu.virginia.* to io.github.sachin-khanal.waypoint   [tags: BUILD, CONTRACT CHANGE]
+Area: shared (U1 asked while doing U1.1 signing)
+Why: I had used a UVA domain for bundle ids without asking; the team does not own or represent that domain. See D-019.
+Files edited (code/config): `Config/Base.xcconfig` (+`WAYPOINT_BUNDLE_PREFIX`), `project.yml` (`bundleIdPrefix`, `PRODUCT_BUNDLE_IDENTIFIER` now uses the variable),
+  `Makefile` (reads the prefix from xcconfig), `scripts/doctor.sh`, `Waypoint/App/Log.swift` (logger subsystem), `Package/.../Cloud/CloudModels.swift` (Keychain service),
+  `Package/.../Tests/.../CloudTests.swift`, `Config/Local.xcconfig.example` (comment).
+Files edited (docs, strike-through + Update): `Architecture.md` (setup checklist), `docs/SETUP.md` (troubleshooting row), `docs/TESTING.md` (log subsystem); `docs/DECISIONS.md` (+D-019).
+Effect for everyone: final bundle id is `io.github.sachin-khanal.waypoint.<WAYPOINT_DEV_SUFFIX>` (e.g. ...waypoint.sachin). Nothing else to do except pick a suffix in your `Config/Local.xcconfig`.
+  Anyone who had already installed a build would now see it as a different app (nobody had).
+Verified: `make test` -> 50 tests, 0 failures; `make typecheck` OK; `make check` -> BUILD SUCCEEDED; built Info.plist CFBundleIdentifier = `io.github.sachin-khanal.waypoint.<suffix from Local.xcconfig>` (it showed the unedited placeholder suffix `replacewithyourname`, so set a real suffix); `make doctor` shows the new prefix.
+NOT verified: signing/installing with the new id (no signing identity exists on this Mac yet; U1.1 in progress).
+
+---
+
 ## 2026-10-17 15:10 — Claude (agent, for Sachin) — Detailed per-person roadmap (Revision 3)   [tags: DOCS]
 Area: shared (docs only, no code, tests not re-run)
 Request: "make a roadmap with explicit granular details from start to finish, what we have so far, and what is attributed to each user" with the real team: U1 Mac Pro + iPhone 16 Pro Max, U2 Mac Air + iPhone Pro, U3 Windows + iPhone Pro, U4 Windows + regular iPhone.

@@ -4,6 +4,9 @@
 //          Config/Local.xcconfig (git-ignored) and edit THAT. `make setup` does the copy.
 
 // Defaults so the project still generates/compiles on a machine with no Local.xcconfig.
+// Reverse-DNS prefix for every build. GitHub-pages style (io.github.<user>) because we do not own a domain;
+// it is only a unique label, nothing contacts it. Final bundle id = $(WAYPOINT_BUNDLE_PREFIX).$(WAYPOINT_DEV_SUFFIX).
+WAYPOINT_BUNDLE_PREFIX = io.github.sachin-khanal.waypoint
 WAYPOINT_DEV_SUFFIX = shared
 DEVELOPMENT_TEAM =
 CODE_SIGN_STYLE = Automatic

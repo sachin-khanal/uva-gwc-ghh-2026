@@ -102,3 +102,12 @@ steered a download URL. Now ids must match `[A-Za-z0-9_-]{1,64}` (`SegmentID.isV
 whole map BEFORE building any URL. (2) The Supabase access/refresh tokens were stored in UserDefaults; they now live in the Keychain
 (`KeychainSessionStore`: generic password, accessible after first unlock, this device only). The anon key is public by design and
 stays in Info.plist. **Status:** accepted; covered by tests (traversal attempts, Keychain round trip).
+
+## D-019 — Bundle ids use `io.github.sachin-khanal.waypoint.<suffix>`, not a university domain (2026-10-17)
+The first scaffold used `edu.virginia.waypoint` because the hackathon is UVA-hosted. That namespaces our app under a domain nobody on the team
+owns or represents, so it was wrong to assume. A bundle id is only a unique label (nothing contacts it, free signing does not verify it), but it should
+not claim an institution. We use the GitHub-pages convention `io.github.<github-user>`: prefix `io.github.sachin-khanal.waypoint`, final id `io.github.sachin-khanal.waypoint.<suffix>` where the
+suffix is per developer (`WAYPOINT_DEV_SUFFIX` in `Config/Local.xcconfig`) so free Apple IDs do not collide. The prefix is now ONE setting
+(`WAYPOINT_BUNDLE_PREFIX` in `Config/Base.xcconfig`) read by `project.yml`, the Makefile and `scripts/doctor.sh`. The Swift logger subsystem and Keychain
+service name use the same prefix as constants. Changed before anyone had installed the app, so no migration is needed. If the repo ever moves to another
+GitHub account, change the prefix in `Config/Base.xcconfig`, `project.yml` (`bundleIdPrefix`), `Log.swift` and `CloudModels.swift`. **Status:** accepted.

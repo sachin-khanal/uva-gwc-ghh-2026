@@ -30,7 +30,8 @@ LOCAL_XCCONFIG := Config/Local.xcconfig
 TEAM   := $(strip $(shell sed -n 's/^DEVELOPMENT_TEAM *= *//p' $(LOCAL_XCCONFIG) 2>/dev/null))
 SUFFIX := $(strip $(shell sed -n 's/^WAYPOINT_DEV_SUFFIX *= *//p' $(LOCAL_XCCONFIG) 2>/dev/null))
 SUFFIX := $(if $(SUFFIX),$(SUFFIX),shared)
-BUNDLE_ID := edu.virginia.waypoint.$(SUFFIX)
+BUNDLE_PREFIX := $(strip $(shell sed -n 's/^WAYPOINT_BUNDLE_PREFIX *= *//p' Config/Local.xcconfig Config/Base.xcconfig 2>/dev/null | tail -1))
+BUNDLE_ID := $(BUNDLE_PREFIX).$(SUFFIX)
 
 # DEVICE = the iPhone's identifier from `make devices` (the "Identifier" column / UDID).
 DEST := $(if $(DEVICE),id=$(DEVICE),generic/platform=iOS)
