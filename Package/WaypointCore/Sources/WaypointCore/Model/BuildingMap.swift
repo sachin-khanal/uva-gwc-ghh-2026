@@ -13,10 +13,11 @@ import Foundation
 /// Versions of the map JSON FORMAT. One spec per version lives in docs/MAP_FORMAT.md.
 ///  * 1 - original shape; has no `schemaVersion` key (so "missing" means 1).
 ///  * 2 - identical shape, plus `schemaVersion` written explicitly (CONTRACT CHANGE 2026-10-17).
+///  * 3 - adds the OPTIONAL `MapNode.extent` (room floor area, from navigation-overhaul). Older maps simply have none.
 /// To add version N+1: bump `current`, add a spec + fixture (docs/map-format/), extend `migrate`, add a test in MapSchemaTests,
 /// update tools/validate_map.py (`CURRENT_SCHEMA`), and announce CONTRACT CHANGE in the WORKLOG.
 public enum MapSchema {
-    public static let current = 2
+    public static let current = 3
     public static let oldestReadable = 1
 
     /// Upgrades a decoded map's format number step by step. Shapes 1 and 2 are identical, so this only advances the number;
@@ -26,6 +27,7 @@ public enum MapSchema {
         while v < current {
             switch v {
             case 1: v = 2 // 1 -> 2: nothing to convert; `schemaVersion` is now written explicitly
+            case 2: v = 3 // 2 -> 3: `extent` is optional; nothing to convert
             default: v = current
             }
         }

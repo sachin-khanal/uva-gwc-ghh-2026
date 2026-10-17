@@ -27,10 +27,10 @@ final class RoutePlannerTests: XCTestCase {
         let p = RoutePlanner(graph: WaypointGraph(map: map))
         let first = p.plan(from: a.id, to: d.id)
         XCTAssertEqual(first?.source, .computed)
-        XCTAssertEqual(first?.nodes.map(\.id), [a.id, b.id, d.id])
+        XCTAssertEqual(first?.path.map(\.id), [a.id, b.id, d.id])
         let second = p.plan(from: a.id, to: d.id)
         XCTAssertEqual(second?.source, .memory)
-        XCTAssertEqual(second?.nodes.map(\.id), [a.id, b.id, d.id])
+        XCTAssertEqual(second?.path.map(\.id), [a.id, b.id, d.id])
         XCTAssertEqual(second?.totalDistance, 8)
         XCTAssertEqual(p.memory.entries.values.first?.uses, 2)
     }
@@ -42,13 +42,13 @@ final class RoutePlannerTests: XCTestCase {
         _ = p.plan(from: a.id, to: d.id, now: t0)                       // memorise A-B-D
         let detour = p.detour(around: (b.id, d.id), from: a.id, to: d.id, ttl: 60, now: t0)
         XCTAssertEqual(detour?.source, .detour)
-        XCTAssertEqual(detour?.nodes.map(\.id), [a.id, c.id, d.id])
+        XCTAssertEqual(detour?.path.map(\.id), [a.id, c.id, d.id])
         // Detour must not overwrite the default memory.
-        XCTAssertEqual(p.plan(from: a.id, to: d.id, now: t0.addingTimeInterval(30))?.nodes.map(\.id), [a.id, c.id, d.id])
+        XCTAssertEqual(p.plan(from: a.id, to: d.id, now: t0.addingTimeInterval(30))?.path.map(\.id), [a.id, c.id, d.id])
         // After the TTL the blockage lapses and the remembered shortest route is back.
         let later = p.plan(from: a.id, to: d.id, now: t0.addingTimeInterval(61))
         XCTAssertEqual(later?.source, .memory)
-        XCTAssertEqual(later?.nodes.map(\.id), [a.id, b.id, d.id])
+        XCTAssertEqual(later?.path.map(\.id), [a.id, b.id, d.id])
     }
 
     func testFullyBlockedReturnsNil() {
@@ -69,8 +69,8 @@ final class RoutePlannerTests: XCTestCase {
         p.update(graph: WaypointGraph(map: map))
         let r = p.plan(from: a.id, to: d.id)
         XCTAssertEqual(r?.source, .computed)
-        XCTAssertEqual(r?.nodes.map(\.id), [a.id, d.id])
-        XCTAssertNotEqual(r?.nodes.map(\.id), [a.id, b.id, d.id])
+        XCTAssertEqual(r?.path.map(\.id), [a.id, d.id])
+        XCTAssertNotEqual(r?.path.map(\.id), [a.id, b.id, d.id])
     }
 
     func testStairsPreferenceIsPartOfTheKey() {
@@ -81,9 +81,9 @@ final class RoutePlannerTests: XCTestCase {
             MapEdge(from: a.id, to: b.id, distance: 2, hazard: .stairs),
             MapEdge(from: a.id, to: c.id, distance: 4), MapEdge(from: c.id, to: b.id, distance: 4)])
         let p = RoutePlanner(graph: WaypointGraph(map: map))
-        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: false)?.nodes.count, 3)
-        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: true)?.nodes.count, 2)
-        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: false)?.nodes.count, 3)
+        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: false)?.path.count, 3)
+        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: true)?.path.count, 2)
+        XCTAssertEqual(p.plan(from: a.id, to: b.id, allowStairs: false)?.path.count, 3)
     }
 
     func testMemoryRoundTripsThroughJSON() throws {
@@ -125,7 +125,7 @@ final class RoutePlannerTests: XCTestCase {
         // User believed to be at A, but reads "Room 7": re-anchor at C and plan to D.
         guard case .relocate(let at) = p.interpretSign("Room 7", userPosition: a.position) else { return XCTFail() }
         XCTAssertEqual(at, c.id)
-        XCTAssertEqual(p.plan(from: at, to: d.id)?.nodes.map(\.id), [c.id, d.id])
+        XCTAssertEqual(p.plan(from: at, to: d.id)?.path.map(\.id), [c.id, d.id])
         _ = b
     }
 }

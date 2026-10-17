@@ -56,8 +56,12 @@ public enum RouteSource: Sendable, Equatable {
 }
 
 public struct PlannedRoute: Sendable {
+    /// The route to WALK: the raw graph path passed through `RouteSimplifier` (the graph is a trail of the volunteer's footsteps).
     public let nodes: [MapNode]
+    /// The raw A* path, every consecutive pair joined by an edge. This is what memory stores and re-validates.
+    public let path: [MapNode]
     public let source: RouteSource
+    /// Length of `path` along its edges (metres).
     public var totalDistance: Float
 }
 
@@ -100,11 +104,11 @@ public final class RoutePlanner {
         let key = RouteMemory.key(from, to, allowStairs)
 
         if var hit = memory.entries[key] {
-            if let nodes = validated(hit, allowStairs: allowStairs, blocked: blocked) {
+            if let path = validated(hit, allowStairs: allowStairs, blocked: blocked) {
                 hit.uses += 1
                 hit.lastUsed = now
                 memory.entries[key] = hit
-                return PlannedRoute(nodes: nodes, source: .memory, totalDistance: hit.cost)
+                return PlannedRoute(nodes: Router.simplified(path, in: graph), path: path, source: .memory, totalDistance: hit.cost)
             }
             // Invalid now. If it is only the blockage that broke it, keep it for later;
             // if the map changed under it, drop it.
@@ -113,16 +117,30 @@ public final class RoutePlanner {
             }
         }
 
-        guard let nodes = Router.route(in: graph, from: from, to: to, allowStairs: allowStairs, avoiding: blocked) else {
+        guard let path = Router.route(in: graph, from: from, to: to, allowStairs: allowStairs, avoiding: blocked, simplify: false) else {
             return nil
         }
-        let cost = length(of: nodes)
+        let cost = length(of: path)
+        let walk = Router.simplified(path, in: graph)
         if blocked.isEmpty {
             memory.entries[key] = RememberedRoute(
-                nodeIds: nodes.map(\.id), cost: cost, fingerprint: fingerprint, uses: 1, lastUsed: now)
-            return PlannedRoute(nodes: nodes, source: .computed, totalDistance: cost)
+                nodeIds: path.map(\.id), cost: cost, fingerprint: fingerprint, uses: 1, lastUsed: now)
+            return PlannedRoute(nodes: walk, path: path, source: .computed, totalDistance: cost)
         }
-        return PlannedRoute(nodes: nodes, source: .detour, totalDistance: cost)
+        return PlannedRoute(nodes: walk, path: path, source: .detour, totalDistance: cost)
+    }
+
+    /// Plan from where the user STANDS: tries the few nearest nodes as a start and keeps the cheapest "walk to it + route from it"
+    /// (on a loop corridor the nearest node can be on the wrong branch). Each candidate goes through the memory.
+    public func plan(fromPosition position: SIMD3<Float>, to goal: UUID, allowStairs: Bool = false,
+                     candidates: Int = Router.startCandidates, now: Date = Date()) -> PlannedRoute? {
+        var best: (route: PlannedRoute, cost: Float)?
+        for start in graph.nearestNodes(to: position, limit: candidates) {
+            guard let route = plan(from: start.id, to: goal, allowStairs: allowStairs, now: now) else { continue }
+            let cost = Geometry.horizontalDistance(position, start.position) + Router.length(of: route.nodes)
+            if best == nil || cost < best!.cost { best = (route, cost) }
+        }
+        return best?.route
     }
 
     /// Precompute routes between every pair of labelled places so the first request is instant.

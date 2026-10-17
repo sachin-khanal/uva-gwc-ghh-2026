@@ -25,10 +25,21 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(graph.nearestNode(to: [0.1, 0, -8.7])?.id, id("A4"))
     }
 
+    /// A* itself, on the raw graph: every breadcrumb in order.
     func testRouteToRoom204() throws {
         let graph = WaypointGraph(map: try loadSampleMap())
-        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1")))
+        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1"), simplify: false))
         XCTAssertEqual(route.map(\.id), [id("A1"), id("A2"), id("A3"), id("A4"), id("B1")])
+    }
+
+    /// What navigation actually walks: the same path with the straight run of breadcrumbs collapsed,
+    /// so the user hears one "continue straight" instead of one per breadcrumb.
+    func testRouteToRoom204IsSimplifiedForWalking() throws {
+        let graph = WaypointGraph(map: try loadSampleMap())
+        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1")))
+        XCTAssertEqual(route.map(\.id), [id("A1"), id("A4"), id("B1")])
+        XCTAssertEqual(route.first?.id, id("A1"), "start is kept")
+        XCTAssertEqual(route.last?.id, id("B1"), "destination is kept")
     }
 
     func testRouteSameNodeAndUnknownNode() throws {
@@ -102,12 +113,21 @@ final class RoutingTests: XCTestCase {
 
     func testFollowerLeftRightBehind() {
         let (f, _) = straightRoute()
+        /// Cues are debounced now (HeadingCue): a CHANGE must persist for a few ticks before it is
+        /// announced, which is what stopped "go left, go right, turn around" while walking straight
+        /// down a corridor. This test spins the user on the spot between calls, so it has to hold each
+        /// heading for a few ticks - a real user cannot rotate 180 degrees between two AR frames either.
+        func settle(forward: SIMD3<Float>) -> GuidanceInstruction.Kind {
+            var kind = GuidanceInstruction.Kind.continueStraight
+            for _ in 0..<4 { kind = f.update(position: [0, 0, 0], forward: forward).kind }
+            return kind
+        }
         // Target is straight down -z. Facing +x (east): -z is on the user's LEFT.
-        XCTAssertEqual(f.update(position: [0, 0, 0], forward: [1, 0, 0]).kind, .turnLeft)
+        XCTAssertEqual(settle(forward: [1, 0, 0]), .turnLeft, "the first cue is immediate")
         // Facing -x (west): -z is on the user's RIGHT.
-        XCTAssertEqual(f.update(position: [0, 0, 0], forward: [-1, 0, 0]).kind, .turnRight)
+        XCTAssertEqual(settle(forward: [-1, 0, 0]), .turnRight)
         // Facing +z: target is behind.
-        XCTAssertEqual(f.update(position: [0, 0, 0], forward: [0, 0, 1]).kind, .turnAround)
+        XCTAssertEqual(settle(forward: [0, 0, 1]), .turnAround)
     }
 
     func testFollowerAdvancesAndArrives() {
@@ -140,5 +160,607 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(p.x, 10, accuracy: 1e-4)
         XCTAssertEqual(p.y, 0, accuracy: 1e-4)
         XCTAssertEqual(p.z, 3, accuracy: 1e-4)
+    }
+}
+
+// MARK: - Arrival wording and the start gate (device reports, 2026-10-17)
+
+final class ArrivalAndStartGateTests: XCTestCase {
+
+    // MARK: ArrivalSpeech - general over NodeKind, not special-cased to doors
+
+    func testArrivalNamesThePlaceAndTheThingInFrontOfYou() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .door, label: "Room 204"),
+                       "You have arrived at Room 204. The door is right in front of you.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .elevator, label: "North wing"),
+                       "You have arrived at North wing. The elevator is right in front of you.")
+        // "stairs" is plural: the verb has to agree or it reads as broken English.
+        XCTAssertEqual(ArrivalSpeech.text(kind: .stairs, label: "Level 2"),
+                       "You have arrived at Level 2. The stairs are right in front of you.")
+    }
+
+    func testArrivalWithoutALabelNamesTheFeature() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .door, label: nil), "You have arrived at the door.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .stairs, label: "  "), "You have arrived at the stairs.")
+    }
+
+    /// A room/corridor node is the place itself, so the label already says everything.
+    func testArrivalAtAPlaceDoesNotInventAFeature() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .room, label: "Room 204"), "You have arrived at Room 204.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .junction, label: "Lobby"), "You have arrived at Lobby.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: nil, label: nil), "You have arrived.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .room, label: nil), "You have arrived.")
+    }
+
+    // MARK: Arrival outranks the obstacle warning
+
+    private func arrivedInstruction(kind: NodeKind, label: String?) -> GuidanceInstruction {
+        GuidanceInstruction(kind: .arrived, bearingRadians: 0, distanceMeters: 0.4,
+                            targetNodeId: UUID(), targetLabel: label,
+                            targetPosition: .zero, hazard: nil, targetKind: kind)
+    }
+
+    private func spokenText(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    /// The bug: the door you walked to is within STOP range, so the obstacle branch spoke
+    /// "Stop. You are about to walk into a door." and returned before arrival was ever announced.
+    func testArrivalIsAnnouncedEvenWhenTheDestinationIsAtStopRange() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(
+            instruction: arrivedInstruction(kind: .door, label: "Room 204"),
+            obstacle: .stop, trackingOK: true,
+            report: ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.4, confidence: 0.9),
+            time: 1)
+
+        let said = spokenText(actions)
+        XCTAssertEqual(said, ["You have arrived at Room 204. The door is right in front of you."])
+        XCTAssertFalse(said.contains { $0.contains("walk into") }, "the destination must not be described as an obstacle")
+        XCTAssertTrue(actions.contains { if case .haptic(.arrived) = $0 { return true } else { return false } })
+        XCTAssertTrue(actions.contains { if case .beacon(nil) = $0 { return true } else { return false } },
+                      "the beacon is muted once there is nothing left to steer toward")
+    }
+
+    func testArrivalIsSaidOnceNotOnEveryTick() {
+        var planner = FeedbackPlanner()
+        let i = arrivedInstruction(kind: .room, label: "Room 204")
+        let first = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 1)
+        let second = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 2)
+        let third = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 9)
+
+        XCTAssertEqual(spokenText(first), ["You have arrived at Room 204."])
+        XCTAssertTrue(spokenText(second).isEmpty, "no repeat")
+        XCTAssertTrue(spokenText(third).isEmpty, "and no repeat once the stop-repeat timer would have fired")
+    }
+
+    /// Before arrival the obstacle warning must still work exactly as it did.
+    func testObstacleWarningIsUnchangedWhileStillWalking() {
+        var planner = FeedbackPlanner()
+        let walking = GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 8,
+                                          targetNodeId: UUID(), targetLabel: nil, targetPosition: .zero,
+                                          hazard: nil, targetKind: .corridor)
+        let actions = planner.plan(instruction: walking, obstacle: .stop, trackingOK: true,
+                                   report: ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9),
+                                   time: 1)
+        XCTAssertTrue(spokenText(actions).contains { $0.hasPrefix("Stop.") })
+    }
+
+    // MARK: StartGate
+
+    func testGateWaitsForThePoseToStopJumping() {
+        var gate = StartGate(requiredStableTicks: 3, maxJumpMeters: 0.35)
+        // Relocalization converging: large jumps, so the gate never opens.
+        XCTAssertFalse(gate.update(position: SIMD3(0, 0, 0), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(4, 0, 0), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(0.5, 0, -3), trackingOK: true))
+        // Settled: three consecutive small moves.
+        XCTAssertFalse(gate.update(position: SIMD3(9, 0, -9), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(9.1, 0, -9), trackingOK: true))
+        XCTAssertTrue(gate.update(position: SIMD3(9.2, 0, -9), trackingOK: true))
+    }
+
+    func testLostTrackingRestartsTheCount() {
+        var gate = StartGate(requiredStableTicks: 2, maxJumpMeters: 0.35)
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: false), "tracking lost")
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: true), "count starts again")
+        XCTAssertTrue(gate.update(position: SIMD3(1.05, 0, 1), trackingOK: true))
+    }
+
+    func testGateRejectsNonFinitePositions() {
+        var gate = StartGate(requiredStableTicks: 1, maxJumpMeters: 0.35)
+        XCTAssertFalse(gate.update(position: SIMD3(.nan, 0, 0), trackingOK: true))
+        XCTAssertTrue(gate.update(position: SIMD3(1, 0, 1), trackingOK: true))
+    }
+
+    /// The point of the gate: routing from the FIRST pose picks the node nearest the scan origin,
+    /// routing from the SETTLED pose picks the node the user is actually standing on.
+    func testGateChangesWhichNodeTheRouteStartsFrom() throws {
+        let origin = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let middle = MapNode(kind: .corridor, position: SIMD3(0, 0, -5))
+        let far = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let room = MapNode(kind: .room, label: "Room 204", position: SIMD3(2, 0, -10))
+        let map = BuildingMap(name: "t", nodes: [origin, middle, far, room], edges: [
+            MapEdge(from: origin.id, to: middle.id, distance: 5),
+            MapEdge(from: middle.id, to: far.id, distance: 5),
+            MapEdge(from: far.id, to: room.id, distance: 2),
+        ])
+        let graph = WaypointGraph(map: map)
+
+        // The user really stands next to `far`, but the first converging pose reads as the origin.
+        let converging = SIMD3<Float>(0.1, 0, -0.2)
+        let settled = SIMD3<Float>(0.1, 0, -9.8)
+
+        let fromConverging = try XCTUnwrap(graph.nearestNode(to: converging))
+        let fromSettled = try XCTUnwrap(graph.nearestNode(to: settled))
+        XCTAssertEqual(fromConverging.id, origin.id, "this is the wrong start that the gate prevents")
+        XCTAssertEqual(fromSettled.id, far.id)
+
+        let badRoute = try XCTUnwrap(Router.route(in: graph, from: fromConverging.id, to: room.id))
+        let goodRoute = try XCTUnwrap(Router.route(in: graph, from: fromSettled.id, to: room.id))
+        XCTAssertEqual(badRoute.first?.id, origin.id, "starts back at the scan origin and walks the length of it")
+        XCTAssertGreaterThan(badRoute.count, goodRoute.count)
+        XCTAssertEqual(goodRoute.map(\.id), [far.id, room.id], "goes straight to the destination")
+    }
+}
+
+// MARK: - Natural path following, loop closure, doors and turn angles (device reports, 2026-10-17)
+
+final class NaturalGuidanceTests: XCTestCase {
+
+    // MARK: HeadingCue - "it kept saying go left, go right, turn around"
+
+    func testSmallWobbleWhileWalkingStraightNeverProducesATurn() {
+        var cue = HeadingCue()
+        _ = cue.update(bearing: 0)
+        // +-20 degrees of drift, the sort of thing half a step sideways produces.
+        for degrees in [8, -12, 15, -18, 5, -20, 19, -6] {
+            XCTAssertEqual(cue.update(bearing: Float(degrees) * .pi / 180), .continueStraight,
+                           "\(degrees) degrees off-course is normal walking, not a turn")
+        }
+    }
+
+    func testARealTurnIsAnnouncedOnceItPersists() {
+        var cue = HeadingCue(enterDegrees: 45, exitDegrees: 22, turnAroundDegrees: 150, requiredTicks: 3)
+        _ = cue.update(bearing: 0)
+        let sixty: Float = 60 * .pi / 180
+        XCTAssertEqual(cue.update(bearing: sixty), .continueStraight, "not yet - could be a wobble")
+        XCTAssertEqual(cue.update(bearing: sixty), .continueStraight)
+        XCTAssertEqual(cue.update(bearing: sixty), .turnRight, "held long enough to be real")
+    }
+
+    /// Hysteresis: once turning, we do not flip back to "straight" the moment the angle dips.
+    func testTurnDoesNotFlutterBackToStraight() {
+        var cue = HeadingCue(enterDegrees: 45, exitDegrees: 22, turnAroundDegrees: 150, requiredTicks: 3)
+        _ = cue.update(bearing: 60 * .pi / 180) // first cue is immediate
+        XCTAssertEqual(cue.update(bearing: 30 * .pi / 180), .turnRight, "30 is below enter but above exit")
+        for _ in 0..<3 { _ = cue.update(bearing: 10 * .pi / 180) }
+        XCTAssertEqual(cue.update(bearing: 10 * .pi / 180), .continueStraight, "comfortably back on course")
+    }
+
+    func testFirstCueIsImmediateSoAUserFacingTheWrongWayIsToldAtOnce() {
+        var cue = HeadingCue()
+        XCTAssertEqual(cue.update(bearing: .pi), .turnAround)
+    }
+
+    // MARK: Steering point - follow the corridor, not the exact line the volunteer walked
+
+    func testSteeringAimsFurtherAheadThanTheNextBreadcrumb() {
+        let nodes = (0..<8).map { MapNode(kind: .corridor, position: SIMD3(0, 0, Float($0) * -1.5)) }
+        var edges: [MapEdge] = []
+        for i in 0..<(nodes.count - 1) { edges.append(MapEdge(from: nodes[i].id, to: nodes[i + 1].id, distance: 1.5)) }
+        let map = BuildingMap(name: "corridor", nodes: nodes, edges: edges)
+        let follower = RouteFollower(route: nodes, graph: WaypointGraph(map: map))
+
+        let aim = follower.steeringPoint(from: SIMD3(0, 0, 0), distanceToTarget: 0)
+        XCTAssertLessThanOrEqual(aim.z, -3.0, "aims at least the lookahead distance down the corridor")
+        XCTAssertNotEqual(aim.z, -1.5, "not just the next breadcrumb")
+    }
+
+    func testSteeringFallsBackToTheDestinationAtTheEndOfTheRoute() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .room, label: "Room 204", position: SIMD3(0, 0, -1))
+        let map = BuildingMap(name: "t", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 1)])
+        let follower = RouteFollower(route: [a, b], graph: WaypointGraph(map: map))
+        XCTAssertEqual(follower.steeringPoint(from: SIMD3(0, 0, 0), distanceToTarget: 1).z, -1, accuracy: 1e-4)
+    }
+
+    // MARK: Arrival radius depends on what the destination is
+
+    func testArrivalRadiusIsLargerForARoomThanADoor() {
+        XCTAssertGreaterThan(ArrivalRadius.meters(for: .room), ArrivalRadius.meters(for: .door))
+        XCTAssertEqual(ArrivalRadius.meters(for: .door), 1.2, accuracy: 1e-5)
+        XCTAssertEqual(ArrivalRadius.meters(for: nil), 1.0, accuracy: 1e-5)
+    }
+
+    func testYouArriveAtARoomFromFurtherAwayThanADoor() {
+        func arrives(kind: NodeKind, at distance: Float) -> Bool {
+            let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+            let b = MapNode(kind: kind, label: "X", position: SIMD3(0, 0, -10))
+            let map = BuildingMap(name: "t", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 10)])
+            let f = RouteFollower(route: [a, b], graph: WaypointGraph(map: map))
+            // Walk from the start so the follower advances past `a`; it only tests arrival once the
+            // destination is the current target.
+            _ = f.update(position: SIMD3(0, 0, 0), forward: SIMD3(0, 0, -1))
+            return f.update(position: SIMD3(0, 0, -10 + distance), forward: SIMD3(0, 0, -1)).kind == .arrived
+        }
+        XCTAssertTrue(arrives(kind: .room, at: 2.0), "2 m inside a room counts as arrived")
+        XCTAssertFalse(arrives(kind: .door, at: 2.0), "2 m from a door does not")
+        XCTAssertTrue(arrives(kind: .door, at: 1.0))
+    }
+
+    // MARK: Loop closure - "it made me walk around the whole room"
+
+    func testWalkingBackToAnEarlierSpotClosesTheLoop() throws {
+        let builder = MapBuilder(map: BuildingMap(name: "core"), deviceName: "test")
+        // A square loop around a central core, 2 m spacing, back to the start.
+        builder.breadcrumbSpacing = 2
+        var path: [SIMD3<Float>] = []
+        for i in 0...4 { path.append(SIMD3(Float(i) * 2, 0, 0)) }
+        for i in 1...4 { path.append(SIMD3(8, 0, Float(i) * -2)) }
+        for i in 1...4 { path.append(SIMD3(8 - Float(i) * 2, 0, -8)) }
+        for i in 1...4 { path.append(SIMD3(0, 0, -8 + Float(i) * 2)) }
+        for p in path { builder.observe(position: p) }
+
+        let map = builder.map
+        let graph = WaypointGraph(map: map)
+        let start = try XCTUnwrap(map.nodes.first)
+        let last = try XCTUnwrap(map.nodes.last)
+        let route = try XCTUnwrap(Router.route(in: graph, from: start.id, to: last.id))
+        XCTAssertLessThanOrEqual(route.count, 3,
+                                 "the walker came back to the start, so the ends must be joined, not routed all the way round")
+    }
+
+    /// The safety side of loop closure: two corridors either side of a thin wall are close in space,
+    /// and joining them would route a blind user into the wall. Only an actual revisit may add an edge,
+    /// so walking two parallel corridors must leave the graph a pure chain (no extra edges).
+    func testParallelCorridorsAreNotJoinedThroughTheWall() {
+        let builder = MapBuilder(map: BuildingMap(name: "parallel"), deviceName: "test")
+        builder.breadcrumbSpacing = 2 // default revisitRadius: this is the shipped behaviour
+        for i in 0...5 { builder.observe(position: SIMD3(Float(i) * 2, 0, 0)) }
+        for i in stride(from: 5, through: 0, by: -1) { builder.observe(position: SIMD3(Float(i) * 2, 0, -1.5)) }
+
+        XCTAssertEqual(builder.map.edges.count, builder.map.nodes.count - 1,
+                       "a pure chain: the only edges are the ones the volunteer actually walked")
+    }
+
+    // MARK: A door on your route is the way IN, not an obstacle
+
+    func testDoorOfTheDestinationRoomIsTreatedAsTheWayThrough() {
+        XCTAssertTrue(RouteFeature.isWayThrough(obstacle: .door, target: .room))
+        XCTAssertTrue(RouteFeature.isWayThrough(obstacle: .door, target: .door))
+        XCTAssertTrue(RouteFeature.isWayThrough(obstacle: .stairs, target: .stairs))
+        XCTAssertFalse(RouteFeature.isWayThrough(obstacle: .wall, target: .room), "a wall is never the way in")
+        XCTAssertFalse(RouteFeature.isWayThrough(obstacle: .person, target: .door))
+        XCTAssertFalse(RouteFeature.isWayThrough(obstacle: .stairs, target: .room), "stairs we did not route to")
+    }
+
+    func testDoorAheadSaysToOpenItAndKeepsGuiding() {
+        var planner = FeedbackPlanner()
+        let approaching = GuidanceInstruction(
+            kind: .continueStraight, bearingRadians: 0, distanceMeters: 1.6,
+            targetNodeId: UUID(), targetLabel: "Room 204", targetPosition: SIMD3(0, 0, -1.6),
+            hazard: nil, targetKind: .room)
+        let actions = planner.plan(instruction: approaching, obstacle: .stop, trackingOK: true,
+                                   report: ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.5, confidence: 0.9),
+                                   time: 1)
+        let said = actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+        XCTAssertTrue(said.contains { $0.contains("open it") }, "it must say the door has to be opened: \(said)")
+        XCTAssertFalse(said.contains { $0.contains("walk into") })
+        XCTAssertTrue(actions.contains { if case .beacon(.some) = $0 { return true } else { return false } },
+                      "guidance continues toward the door rather than stopping dead")
+    }
+
+    func testARealObstacleStillStopsTheUser() {
+        var planner = FeedbackPlanner()
+        let approaching = GuidanceInstruction(
+            kind: .continueStraight, bearingRadians: 0, distanceMeters: 5,
+            targetNodeId: UUID(), targetLabel: "Room 204", targetPosition: SIMD3(0, 0, -5),
+            hazard: nil, targetKind: .room)
+        let actions = planner.plan(instruction: approaching, obstacle: .stop, trackingOK: true,
+                                   report: ObstacleReport(kind: .person, side: .ahead, distanceMeters: 0.5, confidence: 0.9),
+                                   time: 1)
+        let said = actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+        XCTAssertTrue(said.contains { $0.hasPrefix("Stop.") })
+        XCTAssertTrue(actions.contains { if case .beacon(nil) = $0 { return true } else { return false } })
+    }
+
+    // MARK: Turn cues carry an angle, and come one at a time
+
+    func testTurnCuesIncludeARoundedAngle() {
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: 47 * .pi / 180), "Turn right 45 degrees.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnLeft, bearingRadians: -63 * .pi / 180), "Turn left 65 degrees.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnAround, bearingRadians: .pi), "Turn around.")
+        XCTAssertNil(TurnSpeech.text(kind: .arrived, bearingRadians: 0))
+    }
+
+    func testAnglesAreRoundedNotFalselyPrecise() {
+        XCTAssertEqual(TurnSpeech.rounded(degrees: 47), 45)
+        XCTAssertEqual(TurnSpeech.rounded(degrees: 48), 50)
+        XCTAssertEqual(TurnSpeech.rounded(degrees: 1), 5, "never announce a zero-degree turn")
+    }
+
+    func testDirectionsAreSpacedOutSoTheUserIsNotOverwhelmed() {
+        var planner = FeedbackPlanner()
+        func cue(_ kind: GuidanceInstruction.Kind, at time: TimeInterval) -> [String] {
+            let i = GuidanceInstruction(kind: kind, bearingRadians: 0.9, distanceMeters: 5,
+                                        targetNodeId: UUID(), targetLabel: nil, targetPosition: SIMD3(0, 0, -5),
+                                        hazard: nil, targetKind: .corridor)
+            return planner.plan(instruction: i, obstacle: .clear, trackingOK: true, time: time)
+                .compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+        }
+        XCTAssertFalse(cue(.turnRight, at: 10).isEmpty, "first direction is spoken")
+        XCTAssertTrue(cue(.turnLeft, at: 10.3).isEmpty, "a second direction 0.3 s later is held back")
+        XCTAssertTrue(cue(.turnLeft, at: 11.0).isEmpty, "still inside the cooldown")
+        XCTAssertFalse(cue(.turnLeft, at: 12.0).isEmpty, "announced once the cooldown has passed, not dropped")
+    }
+}
+
+// MARK: - RouteSimplifier: walk the route, not the volunteer's footsteps (device report, 2026-10-17)
+
+final class RouteSimplifierTests: XCTestCase {
+
+    private func corridor(_ x: Float, _ z: Float) -> MapNode {
+        MapNode(kind: .corridor, position: SIMD3(x, 0, z))
+    }
+
+    /// The reported symptom: "straight, turn right, turn around, straight" where the real route was
+    /// "straight then left". The volunteer had walked past the turn and come back.
+    func testThereAndBackIsRemoved() {
+        let route = [
+            corridor(0, 0), corridor(0, -2), corridor(0, -4),
+            corridor(2, -4), corridor(4, -4),      // overshoot to the right...
+            corridor(2, -4), corridor(0.3, -4),    // ...and back again
+            corridor(-2, -4), corridor(-4, -4),    // the real continuation: left
+        ]
+        let simplified = RouteSimplifier.simplify(route)
+        let xs = simplified.map(\.position.x)
+        XCTAssertFalse(xs.contains { $0 > 1 }, "the overshoot to the right is gone: \(xs)")
+        XCTAssertEqual(simplified.first?.position.x, 0)
+        XCTAssertEqual(simplified.last?.position.x, -4, "destination kept")
+    }
+
+    func testStraightRunCollapsesToItsEndpoints() {
+        let route = (0..<9).map { corridor(0, Float($0) * -1.5) }
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertEqual(simplified.count, 2, "one straight leg, so one instruction")
+        XCTAssertEqual(simplified.first?.id, route.first?.id)
+        XCTAssertEqual(simplified.last?.id, route.last?.id)
+    }
+
+    func testARealCornerIsKept() {
+        let route = [corridor(0, 0), corridor(0, -3), corridor(0, -6), corridor(3, -6), corridor(6, -6)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertEqual(simplified.count, 3, "start, the corner, the end")
+        XCTAssertEqual(simplified[1].position, SIMD3<Float>(0, 0, -6), "the corner itself survives")
+    }
+
+    /// SAFETY: simplification must never move the path outside the corridor that was walked.
+    func testSimplifiedPathStaysCloseToTheWalkedPath() {
+        // A gently curving corridor.
+        let route = (0..<20).map { i -> MapNode in
+            let t = Float(i)
+            return corridor(sin(t / 6) * 0.4, t * -1.0)
+        }
+        let simplified = RouteSimplifier.simplify(route)
+        for original in route {
+            let nearest = (0..<(simplified.count - 1)).map {
+                RouteSimplifier.perpendicularDistance(original.position,
+                                                      from: simplified[$0].position,
+                                                      to: simplified[$0 + 1].position)
+            }.min() ?? .greatestFiniteMagnitude
+            XCTAssertLessThan(nearest, RouteSimplifier.defaultTolerance + 0.01,
+                              "every walked point stays within tolerance of the simplified route")
+        }
+    }
+
+    /// Found by an earlier version of this change: thinning removed a stairs node and the hazard
+    /// warning vanished with it.
+    func testTaggedAndProtectedNodesAreNeverRemoved() {
+        let stairs = MapNode(kind: .stairs, label: "Stairs up", position: SIMD3(0, 0, -3))
+        let door = MapNode(kind: .door, label: "Side door", position: SIMD3(0, 0, -6))
+        let route = [corridor(0, 0), corridor(0, -1.5), stairs, corridor(0, -4.5), door, corridor(0, -7.5), corridor(0, -9)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertTrue(simplified.contains { $0.id == stairs.id }, "a stairs node carries a hazard warning")
+        XCTAssertTrue(simplified.contains { $0.id == door.id })
+    }
+
+    func testADetourPastSomethingTaggedIsNotCollapsed() {
+        let stairs = MapNode(kind: .stairs, label: "Stairs", position: SIMD3(3, 0, 0))
+        // Out to the stairs and back to almost the same spot.
+        let route = [corridor(0, 0), stairs, corridor(0.2, 0), corridor(0, -3)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertTrue(simplified.contains { $0.id == stairs.id },
+                      "collapsing this detour would silently drop the stairs")
+    }
+
+    func testShortRoutesAreUntouched() {
+        let a = corridor(0, 0), b = corridor(0, -2)
+        XCTAssertEqual(RouteSimplifier.simplify([a]).map(\.id), [a.id])
+        XCTAssertEqual(RouteSimplifier.simplify([a, b]).map(\.id), [a.id, b.id])
+    }
+
+    func testPerpendicularDistanceMeasuresToTheSegmentNotTheInfiniteLine() {
+        let a = SIMD3<Float>(0, 0, 0), b = SIMD3<Float>(0, 0, -10)
+        XCTAssertEqual(RouteSimplifier.perpendicularDistance(SIMD3(2, 0, -5), from: a, to: b), 2, accuracy: 1e-4)
+        // Beyond the end: distance to the endpoint, not a perpendicular to an imaginary extension.
+        XCTAssertEqual(RouteSimplifier.perpendicularDistance(SIMD3(0, 0, -14), from: a, to: b), 4, accuracy: 1e-4)
+    }
+}
+
+// MARK: - Progress along the route (device report: "turn around... turn around...", 2026-10-17)
+
+final class FollowerProgressTests: XCTestCase {
+
+    /// An L-shaped route: 10 m along -z, then 6 m along +x.
+    private func lRoute() -> (RouteFollower, [MapNode]) {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let c = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10))
+        let map = BuildingMap(name: "L", nodes: [a, b, c], edges: [
+            MapEdge(from: a.id, to: b.id, distance: 10),
+            MapEdge(from: b.id, to: c.id, distance: 6),
+        ])
+        return (RouteFollower(route: [a, b, c], graph: WaypointGraph(map: map)), [a, b, c])
+    }
+
+    /// The reported bug. Walking the corridor but 1.5 m off to one side never brought the user within
+    /// the 1 m waypoint radius, so the target stayed BEHIND them and the app kept saying "turn around".
+    func testWalkingPastAWaypointOffToOneSideStillMakesProgress() {
+        let (follower, nodes) = lRoute()
+        // Walk down the corridor, consistently 1.5 m to the side of the line of waypoints.
+        for z in stride(from: Float(0), through: -9, by: -1) {
+            _ = follower.update(position: SIMD3(1.5, 0, z), forward: SIMD3(0, 0, -1))
+        }
+        XCTAssertGreaterThan(follower.targetIndex, 0, "progress was made despite never touching a waypoint")
+        let instruction = follower.update(position: SIMD3(1.5, 0, -9), forward: SIMD3(0, 0, -1))
+        XCTAssertNotEqual(instruction.kind, .turnAround, "the target must not be behind the user")
+        XCTAssertEqual(instruction.targetNodeId, nodes[2].id, "heading for the room, not back up the corridor")
+    }
+
+    func testProgressNeverGoesBackwards() {
+        let (follower, _) = lRoute()
+        for z in stride(from: Float(0), through: -10, by: -1) {
+            _ = follower.update(position: SIMD3(0, 0, z), forward: SIMD3(0, 0, -1))
+        }
+        let reached = follower.targetIndex
+        // Step backwards up the corridor: the follower must not rewind and re-announce old legs.
+        _ = follower.update(position: SIMD3(0, 0, -6), forward: SIMD3(0, 0, -1))
+        XCTAssertEqual(follower.targetIndex, reached)
+    }
+
+    /// Wandering well off the route must not skip progress ahead to a far segment.
+    func testFarOffRouteDoesNotJumpAhead() {
+        let (follower, _) = lRoute()
+        _ = follower.update(position: SIMD3(0, 0, 0), forward: SIMD3(0, 0, -1))
+        let before = follower.targetIndex
+        _ = follower.update(position: SIMD3(40, 0, 40), forward: SIMD3(0, 0, -1))
+        XCTAssertEqual(follower.targetIndex, before, "15 m off route: guide them back, do not skip on")
+    }
+
+    /// The other half of the same bug: a target index that had not caught up meant standing INSIDE
+    /// the destination room never counted as arriving.
+    func testInsideTheRoomCountsAsArrivedEvenIfTheIndexLagsBehind() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let extent = RoomExtent(center: SIMD3(6, 0, -10), halfExtents: SIMD2(2, 2), yaw: 0,
+                                areaSquareMeters: 16)
+        let room = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10), extent: extent)
+        let map = BuildingMap(name: "L", nodes: [a, b, room], edges: [
+            MapEdge(from: a.id, to: b.id, distance: 10),
+            MapEdge(from: b.id, to: room.id, distance: 6),
+        ])
+        let follower = RouteFollower(route: [a, b, room], graph: WaypointGraph(map: map))
+
+        // Never walked the route at all - teleport into the room, as a lagging index would look.
+        let instruction = follower.update(position: SIMD3(5, 0, -9.5), forward: SIMD3(1, 0, 0))
+        XCTAssertEqual(instruction.kind, .arrived)
+        XCTAssertEqual(instruction.targetLabel, "Room 442")
+    }
+
+    func testStandingOutsideTheRoomIsNotArrival() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let extent = RoomExtent(center: SIMD3(6, 0, -10), halfExtents: SIMD2(2, 2), yaw: 0,
+                                areaSquareMeters: 16)
+        let room = MapNode(kind: .room, label: "Room 442", position: SIMD3(6, 0, -10), extent: extent)
+        let map = BuildingMap(name: "L", nodes: [a, room],
+                              edges: [MapEdge(from: a.id, to: room.id, distance: 11.6)])
+        let follower = RouteFollower(route: [a, room], graph: WaypointGraph(map: map))
+        XCTAssertNotEqual(follower.update(position: SIMD3(0, 0, 0), forward: SIMD3(0, 0, -1)).kind, .arrived)
+        XCTAssertNotEqual(follower.update(position: SIMD3(2, 0, -10), forward: SIMD3(1, 0, 0)).kind, .arrived,
+                          "2 m outside the room's edge")
+    }
+}
+
+// MARK: - Starting from where you stand, and noticing an unclosed loop (device report, 2026-10-17)
+
+final class LoopRoutingTests: XCTestCase {
+
+    /// A rectangular corridor loop, like a building with a central core. Nodes every 2 m, and the
+    /// walk comes back to where it began, so the loop IS closed.
+    private func loop(closed: Bool) -> (BuildingMap, [MapNode]) {
+        var nodes: [MapNode] = []
+        for i in 0..<10 { nodes.append(MapNode(kind: .corridor, position: SIMD3(Float(i) * 2, 0, 0))) }
+        for i in 1..<6 { nodes.append(MapNode(kind: .corridor, position: SIMD3(18, 0, Float(i) * -2))) }
+        for i in 1..<10 { nodes.append(MapNode(kind: .corridor, position: SIMD3(18 - Float(i) * 2, 0, -10))) }
+        // ...and back up to where we started, so the final node sits on the first one.
+        for i in 1...5 { nodes.append(MapNode(kind: .corridor, position: SIMD3(0, 0, -10 + Float(i) * 2))) }
+        var edges: [MapEdge] = []
+        for i in 0..<(nodes.count - 1) {
+            edges.append(MapEdge(from: nodes[i].id, to: nodes[i + 1].id,
+                                 distance: Geometry.horizontalDistance(nodes[i].position, nodes[i + 1].position)))
+        }
+        if closed {
+            edges.append(MapEdge(from: nodes[nodes.count - 1].id, to: nodes[0].id,
+                                 distance: Geometry.horizontalDistance(nodes[nodes.count - 1].position, nodes[0].position)))
+        }
+        return (BuildingMap(name: "core", nodes: nodes, edges: edges), nodes)
+    }
+
+    /// The reported bug: standing near one end of the loop, the single NEAREST node sat on the wrong
+    /// branch, so the route went all the way round instead of a few metres the other way.
+    func testRouteStartsFromTheBranchThatIsActuallyShorter() throws {
+        let (map, nodes) = loop(closed: true)
+        let graph = WaypointGraph(map: map)
+        let destination = nodes[nodes.count - 2] // just "behind" the start, the short way round
+
+        // The user stands next to the first node, i.e. a step away from BOTH branches.
+        let position = SIMD3<Float>(0.4, 0, -0.4)
+        let best = try XCTUnwrap(Router.bestRoute(in: graph, from: position, to: destination.id))
+        let naiveStart = try XCTUnwrap(graph.nearestNode(to: position))
+        let naive = try XCTUnwrap(Router.route(in: graph, from: naiveStart.id, to: destination.id))
+
+        XCTAssertLessThanOrEqual(Router.length(of: best), Router.length(of: naive))
+        XCTAssertLessThan(Router.length(of: best), 10, "a few metres the short way, not all the way round")
+    }
+
+    func testBestRouteStillWorksWhenOnlyOneWayExists() throws {
+        let (map, nodes) = loop(closed: false)
+        let graph = WaypointGraph(map: map)
+        let route = try XCTUnwrap(Router.bestRoute(in: graph, from: SIMD3(0.4, 0, -0.4), to: nodes[nodes.count - 2].id))
+        XCTAssertEqual(route.last?.id, nodes[nodes.count - 2].id)
+    }
+
+    func testRouteLengthIsTheWalkedLength() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -3))
+        let c = MapNode(kind: .corridor, position: SIMD3(4, 0, -3))
+        XCTAssertEqual(Router.length(of: [a, b, c]), 7, accuracy: 1e-4)
+        XCTAssertEqual(Router.length(of: [a]), 0)
+    }
+
+    // MARK: Off-route distance, which drives re-routing
+
+    func testDistanceFromRouteIsZeroOnItAndGrowsAsYouLeave() {
+        let a = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let b = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let map = BuildingMap(name: "t", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 10)])
+        let follower = RouteFollower(route: [a, b], graph: WaypointGraph(map: map))
+        XCTAssertEqual(follower.distanceFromRoute(position: SIMD3(0, 0, -5)), 0, accuracy: 1e-4)
+        XCTAssertEqual(follower.distanceFromRoute(position: SIMD3(6, 0, -5)), 6, accuracy: 1e-4)
+    }
+
+    // MARK: Map health notices an unclosed loop
+
+    func testAnUnclosedLoopIsReported() {
+        let (map, _) = loop(closed: false)
+        XCTAssertGreaterThan(MapHealth.unclosedRevisits(map), 0,
+                             "the walk ends next to where it began but nothing joins them")
+        XCTAssertTrue(MapHealth.check(map).contains { if case .unclosedLoop = $0 { return true } else { return false } })
+    }
+
+    func testAClosedLoopIsNotReported() {
+        let (map, _) = loop(closed: true)
+        XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
+    }
+
+    /// A straight corridor has no loops either, and that is perfectly fine - it must not be flagged.
+    func testAStraightCorridorIsNotFlagged() {
+        let nodes = (0..<20).map { MapNode(kind: .corridor, position: SIMD3(0, 0, Float($0) * -1.5)) }
+        var edges: [MapEdge] = []
+        for i in 0..<(nodes.count - 1) { edges.append(MapEdge(from: nodes[i].id, to: nodes[i + 1].id, distance: 1.5)) }
+        let map = BuildingMap(name: "straight", nodes: nodes, edges: edges)
+        XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
     }
 }

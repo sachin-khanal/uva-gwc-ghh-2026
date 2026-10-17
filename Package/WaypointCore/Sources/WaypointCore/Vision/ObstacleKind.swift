@@ -93,3 +93,23 @@ public enum ObstacleBand {
         return pointY >= floorY + minAboveFloor && pointY <= cameraY + maxAbovePhone
     }
 }
+
+/// Is the thing the depth sensor sees the thing the route is taking us THROUGH?
+///
+/// A door in front of the room you asked for is not an obstacle to avoid - it is how you get in, and
+/// you have to open it. Saying "Stop. You are about to walk into a door." leaves a blind user stranded
+/// outside their destination (reported on device 2026-10-17). Same for the stairs you were routed to.
+/// Anything else - a wall, a chair, a person - is still an obstacle and still gets the full warning.
+public enum RouteFeature {
+
+    public static func isWayThrough(obstacle: ObstacleKind?, target: NodeKind?) -> Bool {
+        guard let obstacle, let target else { return false }
+        switch (obstacle, target) {
+        // The door of the room you are going to, or a door you were routed to directly.
+        case (.door, .room), (.door, .door): return true
+        // The stairs you were routed to (a hazard, but an intended one).
+        case (.stairs, .stairs): return true
+        default: return false
+        }
+    }
+}

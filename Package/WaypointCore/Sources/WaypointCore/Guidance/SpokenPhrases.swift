@@ -79,12 +79,59 @@ public enum ObstacleSpeech {
     }
 
     /// CAUTION level: something is near but not yet at stop distance.
+    /// The thing ahead is on the route and has to be opened or climbed, not avoided. Caution, not
+    /// alarm, and it says what to DO - a blind user standing outside a closed door needs to know to
+    /// open it, not that something is in the way (device report 2026-10-17).
+    public static func wayThrough(_ r: ObstacleReport?, targetLabel: String?) -> String {
+        let place = targetLabel.flatMap { l -> String? in
+            let t = l.trimmingCharacters(in: .whitespaces)
+            return t.isEmpty ? nil : t
+        }
+        switch r?.kind {
+        case .stairs:
+            return "Stairs ahead. These are on your route - take them carefully."
+        case .door:
+            let which = place.map { "The door to \($0) is" } ?? "There is a door"
+            return "\(which) right ahead. You will need to open it to get in."
+        default:
+            let which = place.map { "to \($0) " } ?? ""
+            return "The way \(which)is right ahead."
+        }
+    }
+
     public static func caution(_ r: ObstacleReport?) -> String {
         guard let r else { return "Obstacle ahead." }
         return "Careful. \(capitalized(hedged(r))) \(sideText(r.side)), \(DistanceSpeech.phrase(meters: r.distanceMeters))."
     }
 
     private static func capitalized(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+}
+
+/// Turn cues with a real angle: "Turn right 30 degrees." rather than a bare "Turn right."
+/// A blind user cannot see how far to turn, and "turn right" alone is as easily 15 degrees as 90
+/// (device report 2026-10-17).
+public enum TurnSpeech {
+
+    /// Angles are rounded to this many degrees. Finer than this is false precision - neither the
+    /// heading estimate nor a person turning on the spot is accurate to one degree.
+    public static let stepDegrees: Float = 5
+
+    public static func rounded(degrees: Float) -> Int {
+        let step = stepDegrees
+        return max(Int(step), Int((degrees / step).rounded() * step))
+    }
+
+    /// nil when the cue is not a turn (arrival is announced elsewhere).
+    public static func text(kind: GuidanceInstruction.Kind, bearingRadians: Float) -> String? {
+        let degrees = abs(bearingRadians) * 180 / .pi
+        switch kind {
+        case .turnLeft:  return "Turn left \(rounded(degrees: degrees)) degrees."
+        case .turnRight: return "Turn right \(rounded(degrees: degrees)) degrees."
+        case .turnAround: return "Turn around."
+        case .continueStraight: return "Continue straight."
+        case .arrived: return nil
+        }
+    }
 }
 
 public enum ManeuverSpeech {
@@ -114,5 +161,44 @@ public enum ManeuverSpeech {
 
     public static func landmark(label: String, side: Side) -> String {
         "\(label) on your \(side == .left ? "left" : "right")."
+    }
+}
+
+/// What the user hears when they reach the destination.
+///
+/// Why this exists: at the destination the thing the depth sensor sees IS the door or room we were
+/// walking to, so the obstacle wording ("Stop. You are about to walk into a door.") was both alarming
+/// and wrong about what had happened - it hid the arrival (reported on device 2026-10-17).
+/// The phrasing is driven by the destination node's `NodeKind`, so it works for any kind of
+/// destination, not just doors.
+public enum ArrivalSpeech {
+
+    /// A door/stairs/elevator is a thing standing in front of you and worth naming; a room or a
+    /// corridor node is just the place itself, which `label` already names.
+    static func feature(_ kind: NodeKind?) -> String? {
+        switch kind {
+        case .door: return "door"
+        case .stairs: return "stairs"
+        case .elevator: return "elevator"
+        case .room, .corridor, .junction, nil: return nil
+        }
+    }
+
+    public static func text(kind: NodeKind?, label: String?) -> String {
+        let name = label?.trimmingCharacters(in: .whitespaces)
+        let place = (name?.isEmpty == false) ? name : nil
+
+        switch (feature(kind), place) {
+        case let (feature?, place?):
+            // "You have arrived at Room 204. The door is right in front of you."
+            let verb = (kind == .stairs) ? "are" : "is"
+            return "You have arrived at \(place). The \(feature) \(verb) right in front of you."
+        case let (feature?, nil):
+            return "You have arrived at the \(feature)."
+        case let (nil, place?):
+            return "You have arrived at \(place)."
+        case (nil, nil):
+            return "You have arrived."
+        }
     }
 }

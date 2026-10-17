@@ -24,7 +24,9 @@ final class LiveGuidanceService: GuidanceService {
     let supportsDebugControls = false
     var supportsObstacleInjection: Bool { simulate }
 
-    private let controller = NavigationController()
+    /// Not private: `NavDebugView` reads the live route and position from it (debug overlay only).
+    let controller = NavigationController()
+    var debugController: NavigationController? { controller }
     private let store: MapStore
     private let simulate: Bool
     private var destinationLabel = ""

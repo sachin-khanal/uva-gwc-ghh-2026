@@ -17,13 +17,28 @@ public final class RouteFollower {
     /// A waypoint counts as reached inside this horizontal radius (meters).
     public let arrivalRadius: Float
     /// Angles inside this are "straight ahead"; beyond ~135 degrees is "turn around".
+    @available(*, deprecated, message: "Cue classification moved to HeadingCue (hysteresis + debounce).")
     public static let straightThreshold: Float = 25 * .pi / 180
+    @available(*, deprecated, message: "Cue classification moved to HeadingCue.")
     public static let turnAroundThreshold: Float = 135 * .pi / 180
+
+    /// Standing in the doorway counts as being in the room.
+    public static let doorwayMargin: Float = 0.5
+
+    /// How far ahead along the route we aim. Steering at a point this far away instead of at the next
+    /// breadcrumb (~1.5 m) is what stops the cues reacting to every half-step sideways: it follows the
+    /// CORRIDOR rather than the exact line the volunteer walked.
+    public static let steeringLookaheadMeters: Float = 3.0
+
+    /// Stable cue classification (hysteresis + debounce).
+    private var cue = HeadingCue()
 
     /// Index into `route` of the node we are currently walking toward.
     public private(set) var targetIndex: Int = 0
     private let graph: WaypointGraph
 
+    /// Radius used to step THROUGH intermediate breadcrumbs. Arrival at the destination uses
+    /// `ArrivalRadius.meters(for:)` instead, so a room counts as reached from further away than a door.
     public init(route: [MapNode], graph: WaypointGraph, arrivalRadius: Float = 1.0) {
         precondition(!route.isEmpty, "RouteFollower needs a non-empty route")
         self.route = route
@@ -35,7 +50,26 @@ public final class RouteFollower {
     ///   - position: user position, MAP frame, meters.
     ///   - forward: direction the user (camera) faces, MAP frame; only x/z are used.
     public func update(position: SIMD3<Float>, forward: SIMD3<Float>) -> GuidanceInstruction {
-        // Skip every waypoint the user is already standing on.
+        // Inside the destination room? Then we are there, however we got in and whatever the follower
+        // thinks it is still heading toward. Without this, a target index that has not caught up means
+        // standing in the middle of the room never counts as arriving (device report 2026-10-17).
+        if let destination = route.last, let extent = destination.extent,
+           extent.contains(position, margin: Self.doorwayMargin) {
+            targetIndex = route.count - 1
+            return GuidanceInstruction(
+                kind: .arrived, bearingRadians: 0,
+                distanceMeters: Geometry.horizontalDistance(position, destination.position),
+                targetNodeId: destination.id, targetLabel: destination.label,
+                targetPosition: destination.position, hazard: nil, targetKind: destination.kind)
+        }
+
+        // Progress is measured by how far ALONG the route we are, not by touching each waypoint.
+        // Proximity alone was the bug behind "turn around... turn around... turn around": walk past a
+        // waypoint 1.5 m to one side and the index never advanced, so the follower kept aiming at a
+        // point behind the user. Simplified routes made it worse by spacing waypoints further apart.
+        targetIndex = max(targetIndex, projectedIndex(for: position))
+
+        // Still skip a waypoint we are literally standing on.
         while targetIndex < route.count - 1,
               Geometry.horizontalDistance(position, route[targetIndex].position) < arrivalRadius {
             targetIndex += 1
@@ -45,21 +79,30 @@ public final class RouteFollower {
         let distance = Geometry.horizontalDistance(position, target.position)
         let isLast = targetIndex == route.count - 1
 
-        if isLast && distance < arrivalRadius {
+        // "Arrived" depends on WHAT the destination is. If the scan worked out the room's floor area
+        // we use it literally - you have arrived when you are INSIDE the room, not when you are near
+        // the pin the volunteer dropped. Without an extent (older maps, or an open space) we fall
+        // back to a radius that depends on the kind of place.
+        let reached: Bool = {
+            if let extent = target.extent {
+                // A small margin so standing in the doorway counts as being in.
+                return extent.contains(position, margin: Self.doorwayMargin)
+            }
+            return distance < ArrivalRadius.meters(for: target.kind)
+        }()
+        if isLast && reached {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,
-                targetPosition: target.position, hazard: nil)
+                targetPosition: target.position, hazard: nil, targetKind: target.kind)
         }
         let upcoming = lookahead(from: position, distanceToTarget: distance)
 
-        let bearing = Geometry.signedBearing(forward: forward, toTarget: target.position - position)
-        let kind: GuidanceInstruction.Kind
-        switch abs(bearing) {
-        case ..<Self.straightThreshold: kind = .continueStraight
-        case Self.turnAroundThreshold...: kind = .turnAround
-        default: kind = bearing > 0 ? .turnRight : .turnLeft
-        }
+        // Steer at a point further along the route, not at the next breadcrumb, then stabilise the
+        // result. Both changes exist because the old code demanded the volunteer's exact line.
+        let aim = steeringPoint(from: position, distanceToTarget: distance)
+        let bearing = Geometry.signedBearing(forward: forward, toTarget: aim - position)
+        let kind = cue.update(bearing: bearing)
 
         var hazard: Hazard? = nil
         if targetIndex > 0 {
@@ -69,8 +112,69 @@ public final class RouteFollower {
         return GuidanceInstruction(
             kind: kind, bearingRadians: bearing, distanceMeters: distance,
             targetNodeId: target.id, targetLabel: target.label,
-            targetPosition: target.position, hazard: hazard,
-            upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id))
+            // The beacon is placed at the steering point too, so the sound leads along the corridor
+            // instead of jumping between breadcrumbs.
+            targetPosition: aim, hazard: hazard,
+            upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id),
+            targetKind: target.kind)
+    }
+
+    /// How many segments ahead we are willing to jump in one tick. A route that passes near itself
+    /// (a corridor you come back along) must not teleport progress to the far pass, so we only ever
+    /// look a little way ahead of where we already are.
+    public static let progressWindow = 4
+    /// Ignore the projection entirely if the nearest segment is further away than this: the user has
+    /// wandered off the route and the right answer is to guide them back, not to skip ahead.
+    public static let maxOffRouteMeters: Float = 8
+
+    /// The waypoint we should be heading to, judged by projecting the user onto the route polyline.
+    /// Never goes backwards (the caller takes `max` with the current index).
+    func projectedIndex(for position: SIMD3<Float>) -> Int {
+        guard route.count > 1 else { return targetIndex }
+        // The segment we are ON is the one ENDING at the current target, i.e. targetIndex - 1.
+        // Starting the search at targetIndex instead looks only at segments ahead, so the nearest of
+        // them always wins and progress jumps straight to the destination. (Caught by the end-to-end
+        // walk test, which started announcing "you will arrive" nine metres early.)
+        let first = max(0, targetIndex - 1)
+        let last = min(route.count - 2, targetIndex + Self.progressWindow)
+        guard first <= last else { return targetIndex }
+
+        var bestIndex = first
+        var bestDistance = Float.greatestFiniteMagnitude
+        for i in first...last {
+            let d = RouteSimplifier.perpendicularDistance(position,
+                                                          from: route[i].position,
+                                                          to: route[i + 1].position)
+            if d < bestDistance {
+                bestDistance = d
+                bestIndex = i
+            }
+        }
+        guard bestDistance <= Self.maxOffRouteMeters else { return targetIndex }
+        // We are on segment bestIndex -> bestIndex+1, so the point we are walking toward is its end.
+        return bestIndex + 1
+    }
+
+    /// How far the user is from the route polyline, floor plane. Used to decide when to re-route.
+    public func distanceFromRoute(position: SIMD3<Float>) -> Float {
+        guard route.count > 1 else {
+            return route.first.map { Geometry.horizontalDistance(position, $0.position) } ?? 0
+        }
+        return (0..<(route.count - 1)).map {
+            RouteSimplifier.perpendicularDistance(position, from: route[$0].position, to: route[$0 + 1].position)
+        }.min() ?? 0
+    }
+
+    /// A point `steeringLookaheadMeters` further along the route: the "carrot" the user walks toward.
+    /// Falls back to the last node when the route runs out, so the final approach aims at the destination.
+    func steeringPoint(from position: SIMD3<Float>, distanceToTarget: Float) -> SIMD3<Float> {
+        var along = distanceToTarget
+        var k = targetIndex
+        while k < route.count - 1, along < Self.steeringLookaheadMeters {
+            along += Geometry.horizontalDistance(route[k].position, route[k + 1].position)
+            k += 1
+        }
+        return route[k].position
     }
 
     // MARK: Look-ahead and landmarks
@@ -101,7 +205,8 @@ public final class RouteFollower {
             let outgoing = next.position - node.position
             let angle = Geometry.signedBearing(forward: incoming, toTarget: outgoing)
             if abs(angle) > Self.turnThreshold {
-                return Maneuver(kind: angle > 0 ? .turnRight : .turnLeft, distanceMeters: along, nodeId: node.id, label: node.label)
+                return Maneuver(kind: angle > 0 ? .turnRight : .turnLeft, distanceMeters: along,
+                                nodeId: node.id, label: node.label, angleRadians: angle)
             }
             along += Geometry.horizontalDistance(node.position, next.position)
             k += 1

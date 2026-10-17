@@ -68,6 +68,9 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **New UI flow logic** (added 2026-10-17, U3) | U3 | core `Flows/*` (ScanFlow, NavigateFlow, GuidanceState, RouteSummary, MapHealth, PlanLayout, SpokenText) | DONE (logic) · NOT YET RUN by `make test` | `FlowTests` |
 | **New UI services** (added 2026-10-17, U3) | U3 (live adapters reviewed by U1/U2) | `Waypoint/Services/*` (mock + observe-only live adapters, Announcer, settings) | SCAFFOLD · not compiled yet | – |
 | **New Scanner + Navigator screens** (added 2026-10-17, U3) | U3 (Navigator with U2) | `Waypoint/UI/DesignSystem/*`, `Waypoint/UI/Scanner/*`, `Waypoint/UI/Navigator/*`, `Waypoint/UI/SettingsView.swift`; switch in `RootView.swift` (default Classic) | SCAFFOLD · not compiled yet · UNVERIFIED ON DEVICE | – (see TESTING "Level 4") |
+| **New UI flow logic** (added 2026-10-17, U3) | U3 | core `Flows/*` (ScanFlow, NavigateFlow, GuidanceState, RouteSummary, MapHealth, PlanLayout, SpokenText) | DONE (logic) · ~~NOT YET RUN by `make test`~~ **Update 2026-10-17 (Claude):** now compiled and run (`FlowTests` in the 167-test suite) | `FlowTests` |
+| **New UI services** (added 2026-10-17, U3) | U3 (live adapters reviewed by U1/U2) | `Waypoint/Services/*` (mock + observe-only live adapters, Announcer, settings) | SCAFFOLD · ~~not compiled yet~~ **Update 2026-10-17 (Claude):** now compiled and run | – |
+| **New Scanner + Navigator screens** (added 2026-10-17, U3) | U3 (Navigator with U2) | `Waypoint/UI/DesignSystem/*`, `Waypoint/UI/Scanner/*`, `Waypoint/UI/Navigator/*`, `Waypoint/UI/SettingsView.swift`; switch in `RootView.swift` (default Classic) | SCAFFOLD · ~~not compiled yet~~ **Update 2026-10-17 (Claude):** now compiled and run · UNVERIFIED ON DEVICE | – (see TESTING "Level 4") |
 
 ## Interfaces between areas (the things that must not drift)
 

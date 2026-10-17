@@ -35,6 +35,7 @@ struct RootView: View {
                     } else {
                         Button { showSettings = true } label: { Image(systemName: "gearshape") }
                             .accessibilityLabel("Settings")
+                            .accessibilityIdentifier("toolbar.settings")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

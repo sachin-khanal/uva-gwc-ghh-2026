@@ -66,7 +66,7 @@ def segment(value, path):
 
 
 # Map format versions this tool understands (mirror of Swift `MapSchema`; specs in docs/MAP_FORMAT.md).
-CURRENT_SCHEMA = 2
+CURRENT_SCHEMA = 3
 OLDEST_SCHEMA = 1
 
 
@@ -112,6 +112,13 @@ def validate(document):
                 path + ": unknown node kind")
         if node.get("label") is not None:
             string(node["label"], path + ".label")
+        if node.get("extent") is not None:  # format 3, optional
+            extent = object_value(node["extent"], path + ".extent")
+            position(extent.get("center"), path + ".extent.center")
+            require(isinstance(extent.get("halfExtents"), list) and len(extent["halfExtents"]) == 2,
+                    path + ".extent.halfExtents: expected [x, z]")
+            for k in ("yaw", "areaSquareMeters"):
+                float32(extent.get(k), f"{path}.extent.{k}")
         string(node.get("createdBy"), path + ".createdBy")
         segment(node.get("segmentId"), path + ".segmentId")
         positions[node_id] = position(node.get("position"), path + ".position")

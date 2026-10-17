@@ -131,6 +131,304 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Delete recordings, from both interfaces   [tags: BUILD]
+Area: D (app shell) + U3 (UI). Branch `delete-recordings` off `navigation-overhaul`.
+Request: "add the ability to delete recordings."
+
+What already existed: `MapStore.delete(id:)` (core) and a Delete item in the NEW interface's scan library, hidden in a
+long-press context menu. What was missing: any delete at all in the CLASSIC screens, a visible control for sighted
+users, and cleanup of the per-map state that outlives a deleted map.
+Files edited:
+- `Waypoint/App/AppState.swift`: +`deleteMap(_:)` - the single delete path. Removes the map and its ARWorldMaps, then
+  clears `ui.recents.<mapId>` and `ui.pendingMapId` when it points at the deleted map. Without this, stale keys build up
+  and a map re-imported under the same id inherits someone else's recent destinations. Returns false on failure and
+  still reloads, so the list cannot show a map that is no longer on disk.
+- `Waypoint/UI/Scanner/ScanLibraryView.swift`: visible trash button (44x44 tap target) beside each card as well as the
+  context menu; delete routed through `AppState.deleteMap`; VoiceOver announcement on success AND failure (it only
+  announced success before, so a failed delete was silent).
+- `Waypoint/UI/NavigatorView.swift` (classic): swipe-to-delete on the Map rows, the same confirmation wording, a
+  VoiceOver rotor action (swiping is invisible to VoiceOver), and the selection falls back to another map when the
+  selected one is deleted, so the screen never points at a map that no longer exists.
+Tests added: `MapDeletionTests` (4) - deleting removes the ARWorldMap binaries too (they are the big files; leaving
+them would quietly fill the phone) and nothing with the map id survives on disk; deleting one map leaves the others
+and their world maps alone; deleting an unknown or already-deleted map is a harmless no-op (double tap, or a map
+removed on another screen); the same map id can be saved again afterwards.
+Deliberately NOT changed: delete stays LOCAL. Copies on other phones or in the cloud are untouched, which is what the
+confirmation text promises.
+Verified: `make test` -> **175 tests, 0 failures** (was 171); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE** - neither the swipe action nor the trash button has been tapped on a phone.
+Open: the sample map is re-seeded on next launch only when the store is EMPTY, so deleting every map brings the sample
+back. That is existing behaviour (`seedSampleMapIfNeeded`), not a regression, but it will look like a failed delete.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul`; decisions renumbered   [tags: DOCS, BUILD]
+Area: shared. Branch `navigation-overhaul` (all nine guidance/scan commits from this session), merged with the six
+commits that landed on `origin/main` in the meantime (docs enforcement + hook, map validator, canonical shared maps,
+scan extensions and merge rules, U3 integration).
+
+Swift merged cleanly - including `Model/MapBuilder.swift`, where their `attachExtension` and my loop closure both
+touch breadcrumb creation. They compose rather than clash: `attachExtension` joins a NEW scan to an existing map, and
+it calls the same `dropBreadcrumb` that now also closes loops, so an extension gets loop closure for free. Worth a
+second pair of eyes from whoever owns the extension work.
+Conflicts (3, all markdown, all "both sides appended"): `docs/DECISIONS.md`, `docs/MODULES.md`, `docs/TESTING.md`.
+**DECISION IDS RENUMBERED.** D-023 and D-024 were taken on `main` (canonical shared maps; docs enforcement) while this
+branch used the same two ids for other decisions. Theirs are already published, so MINE moved +2: the old D-023..D-029
+are now **D-025..D-031**, content unchanged. A numbering note records this at the top of the renumbered block. Every
+reference was updated with it - in `docs/WORKLOG.md`, `Waypoint/Guidance/SpeechGuide.swift`,
+`Waypoint/Services/Announcer.swift`, `FeedbackAndVisionTests.swift` and `AccessibilityGuidanceTests.swift` - and their
+D-023/D-024 references in `AGENTS.md` and `docs/WORKFLOW.md` were deliberately left alone.
+Also corrected two statements that the merge made false: MODULES still said the new UI flow logic was "NOT YET RUN by
+`make test`" and the screens "not compiled yet"; TESTING row 4.0 still said "the 50 existing tests still pass". Struck
+through with labelled Updates per rule 11, nothing deleted.
+Verified AFTER the merge: `make test` -> **171 tests, 0 failures** (167 from this branch + 4 of theirs);
+`make typecheck` OK (60 app files, 1 UI test file); `make check` -> BUILD SUCCEEDED.
+NOT verified: nothing was run on a phone in this block; everything already marked UNVERIFIED ON DEVICE stays so.
+Note: `core.hooksPath` is NOT set in this clone, so their pre-commit docs hook did not run here - this entry was
+written to satisfy AGENTS.md rule 12 by hand. Run `make hooks` once per clone to activate it.
+Open / handoff:
+1. Someone who owns the extension work should sanity-check `MapBuilder` now that `attachExtension` and loop closure
+   share `dropBreadcrumb`.
+2. This branch is NOT merged to `main`; under ROADMAP Revision 3 that is U1's call.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Route from the user's position; re-route when off it   [tags: BUILD, BUG]
+Area: B (Routing/Navigation). Branch `routing-start-and-reroute` off `main`. See D-031.
+
+Reported with screenshots: the route went the long way round the central core while the user walked the short way, and
+only "corrected" later. Causes: (1) the route started from the single nearest NODE, which on a loop can be on the wrong
+branch; (2) nothing ever re-routed, so the first decision stood for the whole session.
+Files edited (WaypointCore): `Routing/WaypointGraph.swift` (+`nearestNodes(to:limit:)`), `Routing/Router.swift`
+(+`bestRoute(in:from:to:)` choosing the start node by walk-in + route length, +`length(of:)`),
+`Routing/RouteFollower.swift` (+`distanceFromRoute(position:)`), `Flows/MapHealth.swift` (+`unclosedLoop(count:)` and
+`unclosedRevisits`, which counts REVISITS not cycles so a straight corridor is not flagged).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (`makeFollower` uses `bestRoute`; re-routes after
+1.5 s more than 5 m off the route, resets the planner and says "Recalculating.").
+Tests added: `LoopRoutingTests` (7) - the shorter branch is chosen from where the user stands, bestRoute still works
+when only one way exists, route length, off-route distance, an unclosed loop IS reported, a closed one is not, and a
+straight corridor is not flagged.
+Two of my own mistakes, both caught by tests: my first health check flagged any map without a cycle, which failed on
+the sample map (a straight corridor legitimately has none) - rewritten to look for unjoined revisits; and my loop
+fixture ended 2 m from the start, outside the revisit radius, so the test proved nothing until I closed it properly.
+Verified: `make test` -> **167 tests, 0 failures** (was 160); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Re-routing has never fired on a phone.
+Open / handoff:
+1. Re-routing only helps if the shorter way EXISTS in the graph. If the scan never joined the loop, no amount of
+   re-routing finds it - hence the new review-screen warning. Rescan walking back over your own path.
+2. Still not done: the CarPlay-style Navigator layout.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Route progress by projection; corner cues; AR path overlay   [tags: BUILD, BUG]
+Area: B (Routing/Navigation) + U3 (UI). Branch `follower-progress-and-overlay` off `main` (6c892a1). See D-030.
+
+THE BUG (both reported symptoms, one cause): `RouteFollower.targetIndex` advanced only on coming within 1 m of a
+waypoint. After D-028 made waypoints sparse, walking past one slightly off to the side never advanced it, so the
+follower aimed behind the user ("turn around", repeatedly) AND arrival was never evaluated, so standing inside the
+room did nothing.
+Files edited (WaypointCore): `Routing/RouteFollower.swift` (progress by nearest route SEGMENT in a windowed, monotonic
+search; arrival by RoomExtent containment regardless of index; `projectedIndex`), `Routing/GuidanceInstruction.swift`
+(+`Maneuver.angleRadians`), `Guidance/FeedbackPlanner.swift` (corner cues from route geometry at 1.2 m; heading cue
+stays silent while a corner is within 4 m; `turnInProgress` guard).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (+`routeWorldPositions`, rebuilt only when the
+route or map->world transform changes), `Waypoint/UI/Navigator/NavDebugView.swift` (AR route overlay: floor markers +
+ribbon), `Waypoint/UI/Scanner/ScanReviewView.swift` (room boundary list + "rooms sized" stat).
+Tests added: `FollowerProgressTests` (5) - walking past a waypoint off to one side still progresses and does not say
+turn around, progress never rewinds, far off-route does not jump ahead, inside the room is arrival even with a lagging
+index, outside is not.
+Debugging note: I got this wrong twice before getting it right, and the tests found both. (a) My first projection
+window started at the segment AHEAD of the user, so progress jumped straight to the destination and the walk announced
+"you will arrive" nine metres early. (b) I then assumed the duplicate turn cue came from the heading cue firing after
+the corner; instrumenting it showed the opposite - the heading cue fired FIRST at 51 degrees, the corner second at the
+route's real 90. The fix is for the heading cue to defer to an upcoming corner, not the other way round.
+Verified: `make test` -> **160 tests, 0 failures** (was 155); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** The AR overlay has never been rendered. New constants to tune on a phone:
+progressWindow 4 segments, maxOffRouteMeters 8, cornerDistanceMeters 1.2, cornerSuppressionMeters 4.
+Open / handoff:
+1. NOT done: the CarPlay-style multi-card Navigator layout. The debug overlay was extended instead; the guiding screen
+   itself is unchanged.
+2. Room extents still only exist for rooms tagged after D-029, so a rescan is needed to see boundaries at all.
+3. Still open: off-route re-routing (U2.5) - we now DETECT >8 m off route but only decline to skip ahead; we do not
+   recompute the route.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Rooms have a floor area, from the mesh's wall faces   [tags: BUILD, CONTRACT CHANGE]
+Area: A (maps/scan) + B (arrival). Branch `room-extents` off `main` (4e278e2). Reasoning in D-029.
+
+CONTRACT CHANGE: `MapNode.extent: RoomExtent?`; `BuildingMap.schemaVersion` 1 -> 2. Optional field, so schema-1 maps
+decode unchanged (there is a test that decodes hand-written schema-1 JSON). `Samples/rice-hall-sample.json` left as is.
+Files created (WaypointCore): `Scan/RoomExtractor.swift` (occupancy grid + flood fill + rectangle fit; returns nil for
+unenclosed space).
+Files edited (WaypointCore): `Model/MapTypes.swift` (+`RoomExtent` with `contains`), `Model/BuildingMap.swift`
+(schemaVersion 2), `Model/MapBuilder.swift` (`addPOI(..., extent:)`), `Routing/RouteFollower.swift` (arrival is
+containment when an extent exists, 0.5 m doorway margin, else the old radius).
+Files edited (app): `Waypoint/Scan/MeshSampler.swift` (+`wallPoints`: first code in the app to READ
+`ARMeshAnchor.geometry.classification`), `Waypoint/Capture/CaptureController.swift` (computes the extent when a room is
+tagged; logs the area or why it could not), `Waypoint/UI/DesignSystem/PlanView.swift` (draws room rectangles, so the
+debug overlay shows what the scan actually understood).
+Tests added: `RoomExtractorTests` (10) - finds a rectangular room and its area, inside/outside containment, arrival by
+containment from the far end of the room (not the pin), fallback when there is no extent, open space and corridors
+yield nil, standing in a wall is refused, a sub-cell doorway does not leak, JSON round trip, and schema-1 decode.
+Verified: `make test` -> **155 tests, 0 failures** (was 145); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** No real mesh has been through `wallPoints`. The parameters most likely to need
+tuning on a phone: the 0.4-1.8 m height band, faceStride 3, grid resolution 0.15 m, search radius 12 m.
+Open / handoff:
+1. Extents are computed when a room is TAGGED, so only rooms tagged after this change have one. Rescan.
+2. Objects (tables, chairs) are still not segmented - only wall and door faces are read. If object boundaries matter,
+   that is a further change.
+3. L-shaped rooms are covered by their bounding rectangle; `areaSquareMeters` shows the real enclosed area.
+4. Classification must be ON (default per D-020). With it off, `wallPoints` is empty and extents are nil.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Route simplification + sighted debug overlay   [tags: BUILD]
+Area: B (Routing/Navigation) + U3 (UI). Branch `route-simplify-and-debug` off `main` (cdd8331).
+Trigger: Rice Hall walk - "weird turns: straight, turn right, turn around, then straight" where the route was
+"straight then left"; and "the blind user tryout should show the camera and the pathfinding being calculated".
+
+Diagnosis: A* is correct. The GRAPH is a trail of the volunteer's footsteps, so the optimal path over it still
+contains their detours. See D-028.
+Files created: `Routing/RouteSimplifier.swift` (detour removal + thinning, with a protected-node rule),
+`Waypoint/UI/Navigator/NavDebugView.swift` (camera + plan + raw status).
+Files edited: `Routing/Router.swift` (`simplify:` parameter, default true; passes hazard-edge endpoints as protected),
+`Waypoint/Navigation/NavigationController.swift` (+debug telemetry: activeMap, routeNodeIds, mapPosition,
+headingRadians), `Waypoint/UI/DesignSystem/PlanView.swift` (user position/heading arrow; route drawn as its own
+polyline - highlighting edges no longer works once straight runs are collapsed), `Waypoint/Services/GuidanceService.swift`
+(+`debugController`, nil by default), `LiveGuidanceService.swift` (exposes its controller), `ServiceMode.swift`
+(+`ui.debugOverlay`), `SettingsView.swift` (toggle), `GuidingView.swift` (shows the overlay),
+`NavigatorModel.swift` (passes the controller through).
+Tests added: `RouteSimplifierTests` (8) - there-and-back removed, straight run collapses to its endpoints, a real
+corner survives, the simplified path stays within tolerance of every walked point, tagged/protected nodes are never
+removed, a detour PAST something tagged is not collapsed, short routes untouched, and segment-vs-infinite-line distance.
+A test caught a real safety bug I introduced: the first version of thinning removed a stairs node and its hazard
+warning disappeared. Fixed with the protected-node rule, then covered directly.
+Three existing tests were updated because the behaviour deliberately changed: `testRouteToRoom204` now pins RAW A*
+(`simplify: false`) and a new test pins the simplified walk; the FlowTests route summary expects the collapsed node
+list; my own start-gate test asserts the starting node rather than a node count.
+Verified: `make test` -> **145 tests, 0 failures** (was 136); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has seen the overlay or walked a simplified route. 1.2 m shortcut
+radius and 0.6 m tolerance are guesses.
+Open / handoff:
+1. NOT addressed: the mesh is one blob rather than separated walls/objects, so there is still no notion of being
+   "inside a room" - the app drives you to the exact tagged point. This needs room geometry derived from the
+   classified mesh and is a bigger change; see the reply to the user, nothing was built for it.
+2. Loop closure (D-027) still only applies to maps scanned after that change - old maps remain chains.
+3. Still open: off-route re-routing (U2.5).
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Natural path following, loop closure, doors as doors, turn angles   [tags: BUILD]
+Area: B (Navigation/Feedback) + A (MapBuilder). Branch `guidance-path-and-graph` off `main` (73b189c).
+Trigger: six findings from walking Rice Hall. Full reasoning in D-027.
+
+Files created (WaypointCore): `Routing/HeadingCue.swift` (turn classification with hysteresis + debounce; also holds
+`ArrivalRadius`).
+Files edited (WaypointCore):
+- `Model/MapBuilder.swift` - LOOP CLOSURE: a new breadcrumb also links to an older node the volunteer walked back to
+  (revisitRadius 1.0 m, minChainSeparation 4). This is the fix for "it made me walk around the whole room": the graph
+  was a chain, so A* had no short way across a central core.
+- `Routing/RouteFollower.swift` - steers at a point 3 m further along the route (`steeringPoint`) instead of the next
+  breadcrumb; cue classification delegated to `HeadingCue`; arrival radius now depends on the destination's kind; the
+  beacon is placed at the steering point. The two old threshold constants are kept but deprecated.
+- `Vision/ObstacleKind.swift` - `RouteFeature.isWayThrough`.
+- `Guidance/SpokenPhrases.swift` - `ObstacleSpeech.wayThrough` (says to OPEN the door), `TurnSpeech` (angles rounded to 5 degrees).
+- `Guidance/FeedbackPlanner.swift` - way-through handling (caution + keep guiding, instead of stop + silence);
+  turn cues use TurnSpeech; `directionCooldownSeconds` = 1.5 s with the held cue re-tried rather than dropped.
+Tests added: `NaturalGuidanceTests` (16) - wobble never produces a turn, a real turn must persist, hysteresis, first cue
+immediate, steering aims past the next breadcrumb, room vs door arrival distance, a walked loop is closed, parallel
+corridors are NOT joined through the wall, doors say "open it" while guidance continues, a person still stops you,
+angle rounding, and that directions are spaced out but not lost.
+Two tests I wrote FAILED first and found real problems: (1) the follower only evaluates arrival once it has stepped
+through to the last node, so the test had to walk the route rather than teleport; (2) my first "parallel corridors"
+assertion was wrong - the edge joining the end of one corridor to the start of the next is a legitimate CHAIN edge the
+volunteer walked. Rewritten to assert the graph stays a pure chain. Also tightened revisitRadius 1.2 -> 1.0 m.
+Three existing tests asserted the old wording ("Turn left.") and now match a prefix, since the angle is TurnSpeech's job.
+Verified: `make test` -> **136 tests, 0 failures** (was 120); `make typecheck` OK (59 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Every threshold is a guess: 3 m lookahead, 45/22 degree deadband, 3-tick
+debounce, 1.0 m revisit radius, 1.5 s direction cooldown, arrival radii 2.5/1.2/1.5/1.0 m. They want one real walk.
+Open / handoff:
+1. Loop closure only helps maps scanned AFTER this change - existing saved maps are still chains. Rescan Rice Hall.
+2. A room has no extent in the model (a MapNode is a point), so "inside the room" is approximated by a 2.5 m radius.
+   Real room bounding boxes would be a shared-model change.
+3. Still open: the mesh-detail question, and off-route re-routing (U2.5).
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — One voice: single synthesizer; merged main into the UI branch   [tags: BUILD]
+Area: B (Guidance) + U3 (UI services). Branch `app-ui-workflows`.
+Trigger: "sometimes multiple voice lines speak at the same time, especially when reaching the destination", heard while
+testing the new UI.
+
+Merge first: `git merge main` into `app-ui-workflows`, bringing 4e90396 (E2E framework), 7fbcb76 (obstacle
+identification + speech guidance) and 2d7aca7 (arrival / start-gate fixes). ONE conflicted file, `Waypoint/UI/RootView.swift`,
+two hunks, both resolved by keeping BOTH sides (the UI branch's Settings gear and new-interface auto-open, plus main's
+accessibility identifiers and the `-autoE2E` self-test task). Nothing was dropped. -> `make test` 112 passed.
+
+Cause of the overlap: `SpeechGuide` and `Announcer` each owned an `AVSpeechSynthesizer`. Each one's anti-overlap logic
+only applied to its own instance, so they could never prevent each other; at arrival both spoke. With VoiceOver on it was
+worse - Announcer posted a VoiceOver announcement while SpeechGuide spoke aloud.
+Files created: `Waypoint/Guidance/Speaker.swift` (the app's only synthesizer), `Package/WaypointCore/Sources/WaypointCore/Guidance/SpeechGate.swift`
+(the rules: interrupt on `.high`, drop `.normal` while busy, drop identical text inside 3 s - pure logic so it is testable).
+Files edited: `Waypoint/Guidance/SpeechGuide.swift` (now a thin forwarder; same API, so `NavigationController` is untouched),
+`Waypoint/Services/Announcer.swift` (forwards to Speaker; no longer posts a VoiceOver announcement for `say` - see the
+trade-off in D-026), `docs/DECISIONS.md` (+D-026).
+Tests added: `SpeechGateTests` (8) - interrupt vs drop, repeat window, different text never suppressed, empty text,
+reset, and that a DROPPED line does not reserve the repeat window.
+Verified: `make test` -> **120 tests, 0 failures**; `make typecheck` OK (59 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED. `grep "AVSpeechSynthesizer()"` now matches exactly ONE line in the whole repo (Speaker.swift).
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has heard it. The thing to listen for is arrival with the new UI in
+Live mode: one voice, one arrival sentence, no second line on top.
+Open / handoff:
+1. Test on a phone, with and without VoiceOver.
+2. Still open: mesh detail question (see the previous entry); off-route re-routing (U2.5).
+3. My account-auth work is still in `stash@{0}`; its ADR claims D-019 and needs renumbering to the next free id.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Arrival vs obstacle, route start race, speech clipping   [tags: BUILD, CONTRACT CHANGE]
+Area: B (Navigation/Feedback) + shared core. Branch `guidance-arrival-and-start` off `main` (7fbcb76).
+Trigger: three issues found testing on the iPhone 15 Pro.
+
+CONTRACT CHANGE: `GuidanceInstruction` gains `targetKind: NodeKind?` (optional, defaulted last in the initializer, so
+every existing call site and the on-disk map JSON are unaffected; `BuildingMap.schemaVersion` NOT bumped - no JSON change).
+`RouteFollower` fills it from the target node.
+
+Files created (WaypointCore): `Routing/StartGate.swift` (pure logic: N consecutive ticks within maxJump before the
+first route may be computed).
+Files edited (WaypointCore): `Routing/GuidanceInstruction.swift` (+targetKind), `Routing/RouteFollower.swift` (sets it on
+both the arrival and the normal instruction), `Guidance/SpokenPhrases.swift` (+`ArrivalSpeech`, phrasing driven by
+NodeKind, plural agreement for stairs), `Guidance/FeedbackPlanner.swift` (new step 1b: arrival is handled before
+obstacles and returns; the old `.arrived` case in step 4b is now unreachable and says so).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (StartGate gates follower creation + reset in
+`begin`; `perform` coalesces a tick's `.speak` actions into one utterance at the highest priority).
+Tests added: `ArrivalAndStartGateTests` in RoutingTests - arrival wording per NodeKind, arrival announced at STOP range,
+said once not per tick, obstacle warnings unchanged while walking, gate waits out a jumping pose, lost tracking restarts
+the count, non-finite rejected, and a routing test showing the converging pose picks the scan-origin node (4-node route)
+while the settled pose picks the right one (2-node route).
+Verified: `make test` -> **91 tests, 0 failures** (was 81); `make typecheck` OK (22 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has heard the new arrival wording or confirmed the gate fixes the
+walk-back-to-the-scan-origin behaviour on a phone. `StartGate` defaults (10 ticks, 0.35 m) are a guess and want tuning
+in a real corridor - at ARKit's ~60 Hz that is ~0.17 s, at the simulator's 10 Hz it is 1 s.
+Open / handoff:
+1. Re-test the original two reports on a phone: arrive at a labelled door, and start navigation from a spot far from
+   where the scan began.
+2. Still open, NOT in this branch: the third report (mesh detail / "polygon calcs") - no mesh is stored anywhere and
+   ARKit's reconstruction resolution is not tunable, so the question back to the team is which symptom was actually
+   seen (overlay density, frame rate/heat, or a reported size).
+3. Still open: the dual-synthesizer overlap on `app-ui-workflows` (Announcer + SpeechGuide), and off-route re-routing
+   (U2.5), which would also recover from a bad start node rather than only preventing one.
+4. My earlier account-auth work is still in `stash@{0}` and its ADR must be renumbered (it claims D-019, which is taken).
+
+---
+
 ## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
 Area: shared (integration check requested by U1 before committing)
 Branches: ~~`origin/U3` = no own commits (old pointer, 3 behind main).~~ **Update 2026-10-17 (Claude):** `origin/U3` now holds 3 commits (map validator, canonical maps, scan extensions) that were fast-forwarded into `main` (0fc02d5). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,

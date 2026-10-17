@@ -21,7 +21,12 @@ Example file per version: `docs/map-format/map-v1.json`, `docs/map-format/map-v2
 - The server (`canonical_buildings.map_json`) stores whatever JSON it is given; readers migrate on load, so rows written before format 2 stay valid.
 - Limits (all versions): ≤ 5 000 nodes, ≤ 20 000 edges, ≤ 50 MB per world map, segment ids `[A-Za-z0-9_-]{1,64}`, finite positions, unique node ids, every edge joins two existing different nodes, edge `distance` within max(0.5 m, 25 %) of the straight-line distance of its nodes.
 
-## Format 2 (current)
+## Format 3 (current)
+
+**Update 2026-10-17 (Claude):** format 3 = format 2 plus the OPTIONAL per-node key `extent` (room floor area derived from the scan mesh, added on branch `navigation-overhaul`):
+`"extent": { "center": [x,y,z], "halfExtents": [halfWidthX, halfDepthZ], "yaw": radians, "areaSquareMeters": float }` (`y` of `center` is floor level). Maps without `extent` stay valid; guidance then falls back to a fixed arrival radius. Example: `docs/map-format/map-v3.json`. `schemaVersion` must be 1...3. Older apps ignore `extent`.
+
+## ~~Format 2 (current)~~ Format 2 (readable; was current until format 3)
 
 ```json
 {
@@ -37,7 +42,7 @@ Example file per version: `docs/map-format/map-v1.json`, `docs/map-format/map-v2
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `schemaVersion` | integer | yes on write (2); optional on read (missing = 1) | must be ≥ 1 and ≤ 2 |
+| `schemaVersion` | integer | yes on write; optional on read (missing = 1) | must be ≥ 1 and ≤ the app's current format (3). ~~(2)~~ |
 | `id` | UUID string | yes | identity of the building; one UUID = one shared building |
 | `name` | string | yes | display name |
 | `version` | integer | yes | content revision, starts at 1 |

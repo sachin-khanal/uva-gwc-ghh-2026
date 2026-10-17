@@ -114,7 +114,9 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(summary.totalDistance, 10.5, accuracy: 0.001)
         XCTAssertEqual(summary.turnCount, 1)
         XCTAssertFalse(summary.hasStairs)
-        XCTAssertEqual(summary.nodeIds, [id("A1"), id("A2"), id("A3"), id("A4"), id("B1")])
+        // A2/A3 are plain breadcrumbs on a straight run and are collapsed by RouteSimplifier, so the
+        // summary describes the walk ("straight, then right") rather than every breadcrumb.
+        XCTAssertEqual(summary.nodeIds, [id("A1"), id("A4"), id("B1")])
         XCTAssertEqual(summary.spokenSummary, "Room 204. About 11 metres, 1 turn, no stairs.")
         XCTAssertEqual(summary.shortSummary, "About 11 m · 1 turn · no stairs")
     }

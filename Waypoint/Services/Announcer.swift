@@ -1,12 +1,16 @@
 //
 // File:     Waypoint/Services/Announcer.swift
 // Owner:    U3 (UI flows)
-// Purpose:  The one place the new UI talks to the user (docs/UI_PLAN.md §7.1):
-//             * VoiceOver ON  -> `AccessibilityNotification.Announcement` (VoiceOver reads it in its own voice
-//                                and queues it with whatever it is already reading).
-//             * VoiceOver OFF -> the phone speaks with AVSpeechSynthesizer when "Spoken prompts" is on, so a
-//                                blindfolded tester who does not use VoiceOver still hears every step.
-//           `say`    = state changes ("Position found") - spoken in both cases.
+// Purpose:  The one place the new UI talks to the user (docs/UI_PLAN.md §7.1). Everything audible goes
+//           through `Speaker`, the app's SINGLE voice (D-026, 2026-10-17): this class used to own its
+//           own AVSpeechSynthesizer and talked over guidance speech at arrival, in a second voice.
+//             * `say`    = state changes ("Position found"). Spoken aloud whether or not VoiceOver is
+//                          running. It is deliberately NOT posted as a VoiceOver announcement any
+//                          more: that was a second stream on top of the guidance voice.
+//             * `prompt` = screen introductions ("Where to?"). Only when VoiceOver is OFF, because
+//                          with VoiceOver on the focused heading is read automatically.
+//             * `voiceOverOnly` = sighted-scanner chatter. Still a VoiceOver announcement, never aloud.
+//           "Spoken prompts" (a sighted-user preference) does not silence `say` while VoiceOver runs.
 //           `prompt` = screen introductions ("Where to?") - only when VoiceOver is OFF, because with VoiceOver
 //                      on the focused heading is read automatically and a prompt would be heard twice.
 //           Guidance instructions in Live/Simulated mode are NOT sent here; SpeechGuide speaks them.
@@ -19,8 +23,6 @@ import UIKit
 
 enum Announcer {
 
-    private static let synthesizer = AVSpeechSynthesizer()
-
     static var spokenPromptsEnabled: Bool {
         UserDefaults.standard.object(forKey: UIPrefs.spokenPrompts) as? Bool ?? true
     }
@@ -30,11 +32,10 @@ enum Announcer {
     /// A state change the user must hear. `interrupt` cuts off the phone's own voice (VoiceOver queues).
     static func say(_ text: String, interrupt: Bool = false) {
         guard !text.isEmpty else { return }
-        if isVoiceOverRunning {
-            AccessibilityNotification.Announcement(text).post()
-        } else if spokenPromptsEnabled {
-            speak(text, interrupt: interrupt)
-        }
+        // Spoken prompts off is a sighted-user preference; a VoiceOver user still needs state changes,
+        // so with VoiceOver running we speak regardless of that switch.
+        guard spokenPromptsEnabled || isVoiceOverRunning else { return }
+        speak(text, interrupt: interrupt)
     }
 
     /// A screen introduction; silent when VoiceOver is on (it reads the focused heading instead).
@@ -50,15 +51,11 @@ enum Announcer {
     }
 
     static func stop() {
-        synthesizer.stopSpeaking(at: .immediate)
+        Speaker.shared.stop()
     }
 
     private static func speak(_ text: String, interrupt: Bool) {
-        if interrupt { synthesizer.stopSpeaking(at: .immediate) }
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        synthesizer.speak(utterance)
+        Speaker.shared.say(text, priority: interrupt ? .high : .normal)
     }
 }
 

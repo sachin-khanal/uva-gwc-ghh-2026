@@ -235,7 +235,9 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         actions.compactMap { if case .speak(let t, _) = $0 { return t }; return nil }
     }
 
-    private func turn(_ d: Float, _ id: UUID) -> Maneuver { Maneuver(kind: .turnRight, distanceMeters: d, nodeId: id) }
+    private func turn(_ d: Float, _ id: UUID) -> Maneuver {
+        Maneuver(kind: .turnRight, distanceMeters: d, nodeId: id, angleRadians: 85 * .pi / 180)
+    }
 
     // ---- posture
 
@@ -255,7 +257,8 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertEqual(spoken(back), ["Phone position is good."], "only the confirmation on the recovery tick")
         let next = p.plan(instruction: instruction(.turnRight), obstacle: .clear, trackingOK: true,
                           posture: PostureUpdate(reading: ok.reading, issue: nil, announcement: nil, recovered: false))
-        XCTAssertTrue(next.contains(.speak("Turn right.", priority: .high)), "guidance resumes with the current instruction on the next tick")
+        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn right") } else { return false } },
+                      "guidance resumes with the current instruction on the next tick")
     }
 
     func testObstacleWarningsStillWorkWhilePostureIsWrong() {
@@ -313,8 +316,12 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         for d: Float in [14, 12, 9.6, 8, 6, 4.8, 3.5, 1.9, 1.4, 0.9, 0.4] {
             said += spoken(p.plan(instruction: instruction(upcoming: turn(d, turnNode)), obstacle: .clear, trackingOK: true))
         }
+        // 10/5/2 m warnings, then the turn ITSELF at the corner with the route's real angle, then the
+        // new leg. The corner cue was added after a walk where easing into a corner meant the live
+        // bearing never tripped the heading cue and a real turn went unannounced (D-030).
         XCTAssertEqual(said, ["Walk straight about 14 meters, then turn right.",
-                              "In 10 meters, turn right.", "In 5 meters, turn right.", "In 2 meters, turn right."])
+                              "In 10 meters, turn right.", "In 5 meters, turn right.", "In 2 meters, turn right.",
+                              "Turn right 85 degrees.", "Continue straight."])
     }
 
     func testFirstSeenCloseDoesNotBurstOldWarnings() {

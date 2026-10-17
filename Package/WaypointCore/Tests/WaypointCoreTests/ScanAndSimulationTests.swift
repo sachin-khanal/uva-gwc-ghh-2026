@@ -135,7 +135,7 @@ final class ScanAndSimulationTests: XCTestCase {
 
         XCTAssertEqual(spoken.last, "You have arrived at Room 204.")
         XCTAssertEqual(spoken.filter { $0.hasPrefix("You have arrived") }.count, 1, "arrival announced exactly once")
-        XCTAssertTrue(spoken.contains("Turn right."), "the last leg into Room 204 is a right turn")
+        XCTAssertTrue(spoken.contains { $0.hasPrefix("Turn right") }, "the last leg into Room 204 is a right turn")
         XCTAssertTrue(haptics.contains(.turnRight))
         XCTAssertEqual(haptics.last, .arrived)
         XCTAssertGreaterThan(beaconSamples, 20, "the beacon follows the walker the whole way")
@@ -226,5 +226,133 @@ final class FastBoxFitTests: XCTestCase {
         let t1 = Date(); _ = OrientedBox.fitBest(points: cloud); let fast = Date().timeIntervalSince(t1)
         print("box fit, 300k points: brute force \(Int(slow * 1000)) ms, hull \(Int(fast * 1000)) ms")
         XCTAssertLessThan(fast, slow, "hull fit should beat brute force")
+    }
+}
+
+// MARK: - Room extents: knowing you are INSIDE a room (device report, 2026-10-17)
+
+final class RoomExtractorTests: XCTestCase {
+
+    /// Wall points around a rectangular room, with an optional gap for a doorway.
+    private func walls(width: Float, depth: Float, origin: SIMD2<Float> = .zero,
+                       doorGap: ClosedRange<Float>? = nil, step: Float = 0.05) -> [SIMD2<Float>] {
+        var points: [SIMD2<Float>] = []
+        var x = origin.x
+        while x <= origin.x + width {
+            points.append(SIMD2(x, origin.y))
+            points.append(SIMD2(x, origin.y + depth))
+            x += step
+        }
+        var z = origin.y
+        while z <= origin.y + depth {
+            if let gap = doorGap, gap.contains(z) { z += step; continue } // doorway in the left wall
+            points.append(SIMD2(origin.x, z))
+            points.append(SIMD2(origin.x + width, z))
+            z += step
+        }
+        return points
+    }
+
+    func testFindsARectangularRoomAndItsArea() throws {
+        let result = try XCTUnwrap(RoomExtractor.extract(
+            seed: SIMD3(2, 0, 2), wallPoints: walls(width: 4, depth: 5)))
+        XCTAssertEqual(result.extent.halfExtents.x, 2, accuracy: 0.25)
+        XCTAssertEqual(result.extent.halfExtents.y, 2.5, accuracy: 0.25)
+        XCTAssertEqual(result.areaSquareMeters, 20, accuracy: 3, "4 x 5 m of floor")
+        XCTAssertEqual(result.extent.center.x, 2, accuracy: 0.3)
+        XCTAssertEqual(result.extent.center.z, 2.5, accuracy: 0.3)
+    }
+
+    func testStandingInsideCountsAsInsideAndOutsideDoesNot() throws {
+        let result = try XCTUnwrap(RoomExtractor.extract(
+            seed: SIMD3(2, 0, 2), wallPoints: walls(width: 4, depth: 5)))
+        let extent = result.extent
+        XCTAssertTrue(extent.contains(SIMD3(2, 0, 2.5)), "the middle of the room")
+        XCTAssertTrue(extent.contains(SIMD3(0.4, 0, 0.4)), "a corner, still inside")
+        XCTAssertFalse(extent.contains(SIMD3(2, 0, 9)), "well down the corridor outside")
+        XCTAssertFalse(extent.contains(SIMD3(-3, 0, 2.5)))
+    }
+
+    /// The whole point: arrival is now containment, so you are "there" anywhere in the room, and the
+    /// far corner counts just as much as the spot the volunteer happened to stand on.
+    func testArrivalUsesTheRoomExtentNotTheDistanceToThePin() throws {
+        let corridor = MapNode(kind: .corridor, position: SIMD3(2, 0, -4))
+        let extracted = try XCTUnwrap(RoomExtractor.extract(seed: SIMD3(2, 0, 2),
+                                                            wallPoints: walls(width: 4, depth: 5)))
+        // The pin sits at one end of the room; the user walks in at the other.
+        let room = MapNode(kind: .room, label: "Room 204", position: SIMD3(2, 0, 4.5),
+                           extent: extracted.extent)
+        let map = BuildingMap(name: "t", nodes: [corridor, room],
+                              edges: [MapEdge(from: corridor.id, to: room.id, distance: 8.5)])
+        let follower = RouteFollower(route: [corridor, room], graph: WaypointGraph(map: map))
+
+        _ = follower.update(position: corridor.position, forward: SIMD3(0, 0, 1))
+        let justInside = follower.update(position: SIMD3(2, 0, 0.6), forward: SIMD3(0, 0, 1))
+        XCTAssertEqual(justInside.kind, .arrived,
+                       "inside the room counts, even though the pin is ~4 m further on")
+    }
+
+    func testWithoutAnExtentArrivalFallsBackToTheRadius() {
+        let corridor = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let room = MapNode(kind: .room, label: "Room 204", position: SIMD3(0, 0, -10)) // no extent
+        let map = BuildingMap(name: "t", nodes: [corridor, room],
+                              edges: [MapEdge(from: corridor.id, to: room.id, distance: 10)])
+        let follower = RouteFollower(route: [corridor, room], graph: WaypointGraph(map: map))
+        _ = follower.update(position: corridor.position, forward: SIMD3(0, 0, -1))
+        XCTAssertEqual(follower.update(position: SIMD3(0, 0, -8), forward: SIMD3(0, 0, -1)).kind, .arrived,
+                       "2 m away, inside the 2.5 m room radius - schema-1 maps still work")
+    }
+
+    /// Refusing to answer is better than inventing a room: an open space has no enclosing walls.
+    func testOpenSpaceYieldsNoRoom() {
+        XCTAssertNil(RoomExtractor.extract(seed: SIMD3(0, 0, 0), wallPoints: []),
+                     "nothing around us at all")
+        // Three walls: the fill escapes through the open side.
+        var threeWalls = walls(width: 4, depth: 5)
+        threeWalls.removeAll { $0.y > 4.9 }
+        XCTAssertNil(RoomExtractor.extract(seed: SIMD3(2, 0, 2), wallPoints: threeWalls, maxRadius: 6))
+    }
+
+    func testCorridorIsNotMistakenForARoom() {
+        // Two long parallel walls, open at both ends.
+        var points: [SIMD2<Float>] = []
+        var x: Float = -20
+        while x <= 20 { points.append(SIMD2(x, 0)); points.append(SIMD2(x, 2)); x += 0.05 }
+        XCTAssertNil(RoomExtractor.extract(seed: SIMD3(0, 0, 1), wallPoints: points, maxRadius: 10))
+    }
+
+    func testStandingInAWallIsRefused() {
+        XCTAssertNil(RoomExtractor.extract(seed: SIMD3(0, 0, 0),
+                                           wallPoints: walls(width: 4, depth: 5, origin: SIMD2(0, 0))))
+    }
+
+    /// A doorway narrower than the grid must not leak the fill into the corridor beyond.
+    func testASmallDoorwayDoesNotLeak() throws {
+        // Room with a 0.1 m gap - below the 0.15 m cell size, so it stays sealed.
+        let result = try XCTUnwrap(RoomExtractor.extract(
+            seed: SIMD3(2, 0, 2), wallPoints: walls(width: 4, depth: 5, doorGap: 2.0...2.1)))
+        XCTAssertLessThan(result.areaSquareMeters, 25, "still just this room, not the floor beyond")
+    }
+
+    func testExtentSurvivesJSONRoundTrip() throws {
+        let extent = RoomExtent(center: SIMD3(1, 0, 2), halfExtents: SIMD2(2, 3), yaw: 0.4,
+                                areaSquareMeters: 21.5)
+        let node = MapNode(kind: .room, label: "Room 204", position: SIMD3(1, 0, 2), extent: extent)
+        let map = BuildingMap(name: "t", nodes: [node], edges: [])
+        let decoded = try JSONDecoder().decode(BuildingMap.self, from: try map.jsonData())
+        XCTAssertEqual(decoded.nodes.first?.extent, extent)
+    }
+
+    /// Schema-1 maps (no `extent` key at all) must still decode.
+    func testOldMapsWithoutExtentsStillDecode() throws {
+        let json = """
+        {"id":"5A3E0000-0000-4000-8000-0000000000C1","name":"old","version":1,
+         "nodes":[{"id":"5A3E0000-0000-4000-8000-0000000000C2","kind":"room","label":"Room 204",
+                   "position":[1,0,2],"segmentId":"seg1","createdBy":"x"}],
+         "edges":[]}
+        """
+        let map = try JSONDecoder().decode(BuildingMap.self, from: Data(json.utf8))
+        XCTAssertNil(map.nodes.first?.extent)
+        XCTAssertEqual(map.nodes.first?.label, "Room 204")
     }
 }

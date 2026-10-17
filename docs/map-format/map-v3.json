@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 3,
+  "id": "5A3E0000-0000-4000-8000-000000000001",
+  "name": "SAMPLE - Fake Rice Hall corridor (hand-written, no real scan)",
+  "version": 1,
+  "marker": {
+    "name": "waypoint-marker-start",
+    "widthMeters": 0.2,
+    "position": [
+      0,
+      1.2,
+      0.1
+    ],
+    "yaw": 0
+  },
+  "nodes": [
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000A1",
+      "kind": "corridor",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000A2",
+      "kind": "corridor",
+      "position": [
+        0,
+        0,
+        -3
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000A3",
+      "kind": "corridor",
+      "position": [
+        0,
+        0,
+        -6
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000A4",
+      "kind": "corridor",
+      "position": [
+        0,
+        0,
+        -9
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000A5",
+      "kind": "corridor",
+      "position": [
+        0,
+        0,
+        -12
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000B1",
+      "kind": "room",
+      "label": "Room 204",
+      "position": [
+        1.5,
+        0,
+        -9
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample",
+      "extent": {
+        "center": [
+          2.5,
+          0,
+          -9
+        ],
+        "halfExtents": [
+          1.5,
+          2
+        ],
+        "yaw": 0,
+        "areaSquareMeters": 10.5
+      }
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000B2",
+      "kind": "room",
+      "label": "Room 206",
+      "position": [
+        1.5,
+        0,
+        -12
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000B3",
+      "kind": "stairs",
+      "label": "Stairs up",
+      "position": [
+        0,
+        0,
+        -15
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    },
+    {
+      "id": "5A3E0000-0000-4000-8000-0000000000B4",
+      "kind": "door",
+      "label": "Door to lobby",
+      "position": [
+        -1.5,
+        0,
+        0
+      ],
+      "segmentId": "seg1",
+      "createdBy": "sample"
+    }
+  ],
+  "edges": [
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A1",
+      "to": "5A3E0000-0000-4000-8000-0000000000A2",
+      "distance": 3
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A2",
+      "to": "5A3E0000-0000-4000-8000-0000000000A3",
+      "distance": 3
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A3",
+      "to": "5A3E0000-0000-4000-8000-0000000000A4",
+      "distance": 3
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A4",
+      "to": "5A3E0000-0000-4000-8000-0000000000A5",
+      "distance": 3
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A4",
+      "to": "5A3E0000-0000-4000-8000-0000000000B1",
+      "distance": 1.5
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A5",
+      "to": "5A3E0000-0000-4000-8000-0000000000B2",
+      "distance": 1.5
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A5",
+      "to": "5A3E0000-0000-4000-8000-0000000000B3",
+      "distance": 3,
+      "hazard": "stairs"
+    },
+    {
+      "from": "5A3E0000-0000-4000-8000-0000000000A1",
+      "to": "5A3E0000-0000-4000-8000-0000000000B4",
+      "distance": 1.5,
+      "hazard": "doorThreshold"
+    }
+  ]
+}

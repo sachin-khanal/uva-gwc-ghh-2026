@@ -52,6 +52,50 @@ public enum Hazard: String, Codable, Sendable {
     case doorThreshold
 }
 
+/// The floor area a room occupies, as a gravity-aligned rectangle (yaw only).
+///
+/// Why it exists: a `MapNode` is a single POINT, so "arrive at Room 204" could only ever mean "get
+/// within N metres of the spot the volunteer was standing when they tagged it". A blind user walking
+/// into a room needs the app to know they are INSIDE it, not near a pin (device report 2026-10-17).
+/// Derived from the LiDAR mesh's wall faces by `RoomExtractor`; nil for rooms scanned before this
+/// existed, or when the space is open and no enclosure was found, in which case guidance falls back
+/// to `ArrivalRadius`.
+///
+/// A rectangle, not a polygon: it is what the volunteer sees as the scan box, it survives JSON
+/// readably, and "is this point inside" stays trivial. Rooms that are not rectangles are covered by
+/// their bounding rectangle, which may include a little space outside - `areaSquareMeters` records
+/// the ACTUAL enclosed floor area so the difference is visible.
+public struct RoomExtent: Codable, Hashable, Sendable {
+    /// Centre of the rectangle in the map frame. `y` is floor level.
+    public var center: SIMD3<Float>
+    /// Half width along the rectangle's own x and z axes, metres.
+    public var halfExtents: SIMD2<Float>
+    /// Rotation about the vertical axis, radians.
+    public var yaw: Float
+    /// Floor area actually enclosed by walls, which is <= the rectangle's area.
+    public var areaSquareMeters: Float
+
+    public init(center: SIMD3<Float>, halfExtents: SIMD2<Float>, yaw: Float, areaSquareMeters: Float) {
+        self.center = center
+        self.halfExtents = halfExtents
+        self.yaw = yaw
+        self.areaSquareMeters = areaSquareMeters
+    }
+
+    /// Is `point` inside the room? `margin` widens the rectangle, e.g. to count a doorway as "in".
+    public func contains(_ point: SIMD3<Float>, margin: Float = 0) -> Bool {
+        let d = point - center
+        // Rotate into the rectangle's own frame (yaw about +y).
+        let c = cos(-yaw), s = sin(-yaw)
+        let x = d.x * c + d.z * s
+        let z = -d.x * s + d.z * c
+        return abs(x) <= halfExtents.x + margin && abs(z) <= halfExtents.y + margin
+    }
+
+    /// Longest straight line you could walk inside, used to sanity-check a suspicious extraction.
+    public var diagonalMeters: Float { simd_length(halfExtents) * 2 }
+}
+
 /// One point of interest or breadcrumb on the map.
 public struct MapNode: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
@@ -64,6 +108,9 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
     public var segmentId: String
     /// Which device created it ("iPhone-ab12"). Used when several people extend one map.
     public var createdBy: String
+    /// For a `.room`, the floor area it occupies, when the scan could work it out. See `RoomExtent`.
+    /// Optional and defaulted, so maps written before schema 2 decode unchanged.
+    public var extent: RoomExtent?
 
     public init(
         id: UUID = UUID(),
@@ -71,7 +118,8 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
         label: String? = nil,
         position: SIMD3<Float>,
         segmentId: String = "seg1",
-        createdBy: String = "unknown"
+        createdBy: String = "unknown",
+        extent: RoomExtent? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -79,6 +127,7 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
         self.position = position
         self.segmentId = segmentId
         self.createdBy = createdBy
+        self.extent = extent
     }
 }
 

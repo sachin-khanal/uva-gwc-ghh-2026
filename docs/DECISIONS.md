@@ -148,3 +148,167 @@ Recorded retroactively by Claude from the Codex/U3 WORKLOG entries; the decision
 **Decision:** a commit that changes code must also add a new `docs/WORKLOG.md` entry (AGENTS.md rules 1 and 12). Enforced in three layers: (1) `scripts/githooks/pre-commit` -> `scripts/docs-sync.sh check`, activated per clone by `core.hooksPath` (`make hooks`, `make setup`, or automatically at Claude Code session start via `.claude/settings.json`); (2) `.github/workflows/docs-check.yml` re-checks pull requests and pushes to main, because local hooks can be skipped; (3) `make doctor` warns when the hook is missing.
 **Why not auto-write the docs:** a hook cannot know what was verified on a device; invented text would be worse than none. So it blocks the omission, scaffolds the entry (`docs-sync.sh stub`, pre-filled with branch/author/changed files) and refuses leftover `<FILL: ...>` placeholders. It only ever appends to markdown, so rule 11 holds. Rule-11 rewrites, missing file headers, un-listed new files and `Model/*` edits without `CONTRACT CHANGE` are warnings, not blocks (typo fixes are legal).
 **Limits (honest):** git hooks are not cloned, so each developer must install once (documented in AGENTS.md); agents that do not read `.claude/` (e.g. Codex) rely on AGENTS.md + the git hook; a determined `--no-verify` is only caught by CI. Docs-only commits are never blocked. No `make test` in the hook (needs a Mac, too slow).
+
+> **Numbering note (2026-10-17):** the decisions below were written on a branch while D-023 and
+> D-024 were taken on `main` for other decisions. They were renumbered +2 on merge (the old
+> D-023..D-029 are now D-025..D-031); the content is unchanged.
+## D-025 — Arrival outranks obstacle warnings, and the first route waits for the pose to settle (2026-10-17)
+Both from testing on a phone (WORKLOG entry below this one).
+1. **Arrival.** The destination is usually a thing you can walk into - a door - so the depth sensor sees it at STOP range
+and `FeedbackPlanner` spoke "Stop. You are about to walk into a door." and `return`ed, which meant the arrival was never
+announced at all. Arrival is now handled BEFORE obstacles: it is said once, the beacon is muted, and obstacle chatter is
+suppressed from then on. Wording comes from the destination node's `NodeKind` (`ArrivalSpeech`), so it is general -
+"You have arrived at Room 204. The door is right in front of you." / "...The stairs are right in front of you." /
+"You have arrived at Room 204." for a plain room. This needed a **CONTRACT CHANGE**: `GuidanceInstruction.targetKind`
+(optional, defaulted, so the JSON map format and every existing caller are unaffected).
+2. **Start of the route.** `NavigationController` built its `RouteFollower` from the FIRST tick with tracking OK. Just
+after relocalization the pose is still converging and often reads near the session origin - where the VOLUNTEER began
+scanning - so the route was computed from there and walked the user back to the start of the scan before heading to the
+destination. A new `StartGate` (pure logic, tested) requires N consecutive ticks within 0.35 m of each other before the
+route may be computed. It is a race, which is why it was only seen once.
+3. **Speech clipping.** One tick can emit several `.speak` actions and every `.high` one stops the synthesizer, so
+earlier lines were cut off mid-word. `NavigationController.perform` now joins a tick's lines into one utterance at the
+highest priority present. (This is NOT the separate dual-synthesizer problem on `app-ui-workflows`, where `Announcer`
+and `SpeechGuide` own different `AVSpeechSynthesizer`s and genuinely talk over each other; that one is still open.)
+**Status:** accepted; 91 tests pass. Arrival wording and the gate are UNVERIFIED ON DEVICE.
+
+## D-026 — One voice: a single AVSpeechSynthesizer for the whole app (2026-10-17)
+Reported on device: two voices speaking at once, worst at arrival. Cause: `SpeechGuide` (guidance) and `Announcer`
+(the new UI) each owned an `AVSpeechSynthesizer`, and neither could see the other - SpeechGuide's "don't pile up"
+check (`synthesizer.isSpeaking`) and Announcer's `stopSpeaking` each only applied to their own. At arrival both fired.
+Fix: `Waypoint/Guidance/Speaker.swift` owns the only synthesizer in the app; `SpeechGuide` and `Announcer` keep their
+APIs but forward to it. The decision rules (interrupt on `.high`, drop `.normal` while busy, drop identical text inside
+a 3 s window) moved to `SpeechGate` in WaypointCore, where they are unit-tested - AVFoundation never runs in `make test`.
+Deliberate trade-off: with VoiceOver running, `Announcer.say` no longer posts an `AccessibilityNotification.Announcement`.
+That was a SECOND audio stream on top of the guidance voice. State changes are now spoken aloud in the app's voice in
+both cases. VoiceOver still reads focused elements in its own voice (we do not control that), and sighted-scanner
+chatter still goes to VoiceOver only via `Announcer.voiceOverOnly`. If a real VoiceOver user tests this and prefers
+their own voice for state changes, the alternative is to route Announcer through VoiceOver ONLY while no guidance is
+running - more code, revisit if someone asks for it.
+Related but separate: a single tick emitting several `.speak` lines used to clip itself; that was fixed in D-025 by
+coalescing them in `NavigationController.perform`.
+**Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
+
+## D-027 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
+Six findings from walking Rice Hall. All of them came from the same root idea being wrong: the app treated the
+breadcrumb chain as the path to follow, rather than as a description of where it is possible to walk.
+1. **Steering.** The follower classified the raw bearing to the NEXT breadcrumb (~1.5 m away) every tick with a single
+25-degree threshold, so half a step sideways produced "go left, go right, turn around". It now aims at a point
+`steeringLookaheadMeters` (3 m) further along the route - the corridor, not the footsteps - and classifies with
+`HeadingCue`: a 45-degree deadband to START a turn, 22 to leave it (hysteresis), and a 3-tick debounce. The FIRST cue
+is never debounced, so someone facing the wrong way is told immediately. The audio beacon is placed at the same
+steering point, so the sound leads along the corridor instead of jumping between breadcrumbs.
+2. **Loop closure.** `MapBuilder` linked each breadcrumb only to the previous one, so the map was a CHAIN, never a
+graph. In a building with a central core the two ends of a loop are metres apart in space but dozens of nodes apart in
+the graph, and A* sent the user the long way round the whole core. A new breadcrumb is now also linked to any older one
+within `revisitRadius` (1.0 m) and at least `minChainSeparation` nodes back. **Safety:** we only join nodes the
+volunteer PHYSICALLY STOOD AT, never by proximity alone - two corridors either side of a thin wall are close in space,
+and joining them would route a blind user into the wall. There is a test for exactly that.
+3. **Doors are the way IN.** A door in front of the room you asked for was announced as "Stop. You are about to walk
+into a door.", leaving a blind user stranded outside their destination. `RouteFeature.isWayThrough` recognises when the
+thing ahead IS what the route is taking us through (door -> room, door -> door, stairs -> stairs); it then gets caution
+wording that says what to do ("The door to Room 204 is right ahead. You will need to open it to get in.") and guidance
+CONTINUES instead of stopping dead. A wall, a chair or a person is still a full stop.
+4. **Arrival depends on the kind of destination.** One fixed 1 m radius for everything. Now `ArrivalRadius`: a room
+2.5 m (you are inside it), a door 1.2 m (you stand in front of it), stairs/elevator 1.5 m, otherwise 1 m. NOTE: a
+`MapNode` is a single point, so a room has no true extent; the radius is a stand-in for its bounding box. Giving rooms
+real extents would be a change to the shared model.
+5. **Turn cues carry an angle.** "Turn right" is as easily 15 degrees as 90 to someone who cannot see. Now
+"Turn right 45 degrees.", rounded to 5 degrees - finer is false precision given the heading estimate and a person
+turning on the spot.
+6. **One direction at a time.** `directionCooldownSeconds` (1.5 s) between direction cues. A held-back cue is NOT
+dropped: `lastKey` is left alone so it is announced on a later tick. Obstacles and lost tracking are never delayed.
+**Status:** accepted; 136 tests pass. All six are **UNVERIFIED ON DEVICE** - every threshold here (3 m lookahead,
+45/22 degrees, 3 ticks, 1.0 m revisit, 1.5 s cooldown, the arrival radii) is a considered guess that wants a real walk.
+
+## D-028 — A* result is simplified before it is walked; sighted debug overlay (2026-10-17)
+Report from Rice Hall: "it keeps making me do weird turns - I had to walk straight then turn left, but it made me walk
+straight, turn right, turn around, then walk straight. Isn't the pathfinding supposed to be doing it normally?"
+**A* was never wrong.** It returns the optimal path over the graph, but the graph is a trail of where the VOLUNTEER
+walked, including every detour and every time they stepped back to tag something. Optimal-on-that-graph still contains
+their U-turns. The missing piece was a step between "shortest path on the trail" and "a path a person would walk".
+`RouteSimplifier` (run by `Router.route` by default; pass `simplify: false` for the raw path) does two passes:
+detour removal (if the path returns within 1.2 m of somewhere it has already been, the round trip in between is
+dropped) and thinning (a node goes if leaving it out moves the path less than 0.6 m, so a straight run of breadcrumbs
+becomes one leg and the user hears one instruction instead of six).
+**Safety:** both passes stay inside the walked path - thinning never moves the route more than the tolerance, well
+under a corridor's width, and detour removal only collapses a return to a place the volunteer stood. We never cut a
+corner we have no evidence is walkable. Nodes that MEAN something are never removed: anything tagged, anything
+labelled, and both endpoints of a hazard edge (passed in by `Router`). An earlier version of this change thinned a
+stairs node away and the hazard warning vanished with it - caught by an existing test, and now covered directly.
+Consequence for drawing: `PlanView` can no longer show the route by highlighting map edges, because consecutive route
+nodes often have no direct edge after simplification. It draws the route as its own polyline.
+**Debug overlay:** `NavDebugView` (Settings > "Show debug overlay while guiding", default OFF) shows the camera the
+session is tracking with, the floor plan with the computed route and the user's position/heading, and the raw status.
+It is for the sighted escort, never the blind user, and it reads `NavigationController` directly through
+`GuidanceService.debugController` because `GuidanceSnapshot` deliberately carries no geometry.
+**Status:** accepted; 145 tests pass. UNVERIFIED ON DEVICE; 1.2 m and 0.6 m are guesses that want a real walk.
+
+## D-029 — Rooms have a floor AREA, derived from the mesh's wall faces (2026-10-17)   [CONTRACT CHANGE]
+Report: "it's one cohesive mesh rather than actual wall and object boundaries... it doesn't really detect whether I'm
+in a room, it tries to get me to the exact spot I labelled something." The team called this critical.
+The information was already being captured - D-020 made per-face classification on-by-default precisely so it would not
+be lost - but nothing read it. ARKit hands us one continuous reconstruction with no notion of rooms.
+`RoomExtractor` (WaypointCore, pure, tested) builds an occupancy grid on the floor plane from WALL and DOOR faces,
+flood-fills from where the volunteer stood, and fits a gravity-aligned rectangle to what it filled. If the fill escapes
+to the edge of the search area the space is not enclosed - a corridor, an open-plan floor - and it returns **nil**
+rather than invent a room. Refusing to answer matters more than guessing: a wrong room boundary tells a blind user they
+have arrived when they are still in the corridor.
+`MeshSampler.wallPoints` reads `ARMeshAnchor.geometry.classification` (first use of it in the app), keeping faces
+classified wall or door between knee and head height, where a wall is reliably a wall.
+**CONTRACT CHANGE:** `MapNode.extent: RoomExtent?` and `BuildingMap.schemaVersion` 1 -> 2. The field is optional, so
+schema-1 maps decode unchanged and simply have no extents; `schemaVersion` is declarative (nothing validates it on
+load), so nothing rejects an older map. A test decodes a hand-written schema-1 map to prove it.
+Arrival now means CONTAINMENT when an extent exists: you have arrived when you are inside the room, anywhere in it,
+with a 0.5 m margin so a doorway counts. Without an extent it falls back to `ArrivalRadius` (D-027).
+Honest limits: a rectangle, not a polygon (an L-shaped room is covered by its bounding rectangle, and
+`areaSquareMeters` records the real enclosed area so the difference is visible); an OPEN door leaks the fill into the
+corridor, bounded by the search radius and usually caught by the escape test; and this finds the room you are standing
+in, it is not a floor-plan reconstruction of the building. Object boundaries (tables, chairs) are still not segmented -
+only walls and doors are read.
+**Status:** accepted; 155 tests pass. **UNVERIFIED ON DEVICE** - no real mesh has been through `wallPoints` yet, which
+is the part most likely to need tuning (height band, face stride, grid resolution).
+
+## D-030 — Progress is measured ALONG the route; turns are announced from the route's geometry (2026-10-17)
+From a Rice Hall walk: "it tells me to turn around, after a few steps it tells me to turn around again, on and on",
+and separately "when I go to the room myself it doesn't realise I'm inside - but on one test it did".
+**One bug caused both.** `RouteFollower.targetIndex` only advanced when the user came within 1 m of each route
+waypoint. Route simplification (D-028) spaced waypoints further apart, so walking a corridor 1.5 m to one side never
+"reached" one: the follower kept aiming at a point BEHIND the user -> "turn around" -> they comply, come within 1 m,
+it advances, the next target is behind them again. The same stuck index meant arrival was never evaluated (it is only
+checked when the current target IS the destination), so standing in the room did nothing - unless the walk happened to
+touch every waypoint, which is why it worked once.
+Fixes: (1) progress is now the nearest SEGMENT of the route polyline, searched in a small window around the current
+index so a route that passes near itself cannot teleport progress, never moving backwards, and ignored entirely when
+more than 8 m off route; (2) being inside the destination's `RoomExtent` means arrived, whatever the index thinks.
+**Turn cues then had to move too.** With a 3 m steering lookahead the user eases into a corner, so the live bearing
+never swings far enough to trip `HeadingCue` and a real turn went unannounced (the end-to-end walk test caught it).
+Turns now come from the ROUTE's geometry: `Maneuver.angleRadians` carries the corner's real angle, the planner
+announces it at `cornerDistanceMeters` (1.2 m, matching the countdown's existing "too close to warn" cut-off), and the
+heading cue stays silent about a turn while a real corner is within 4 m, so one corner produces one cue. The heading
+cue's job is now only staying on course. Resulting sequence on the sample route: "in 9 m / 5 m / 2 m, turn right",
+then "Turn right 90 degrees." at the corner, then arrival.
+Also: the debug overlay draws the route over the CAMERA in AR (markers on the floor, a ribbon between them) as well as
+on the plan, and the scan review screen lists each room's measured boundary so a bad extraction is visible on review
+rather than during a walk.
+**Status:** accepted; 160 tests pass. UNVERIFIED ON DEVICE.
+
+## D-031 — Route from where you STAND, and re-route when you are not on it (2026-10-17)
+From a Rice Hall walk around the central core: "it makes me go the long way even though there is clearly a shorter way;
+it only corrects it when getting close enough to the path after walking down."
+Two causes, both in how the route was chosen rather than in A*:
+1. **The start node.** `makeFollower` routed from `graph.nearestNode(to:)` - the single closest breadcrumb. On a loop
+corridor the closest node can sit on the WRONG branch: a metre away, but facing the long way round. `Router.bestRoute`
+now tries the 8 nearest nodes and keeps the one with the smallest total of "walk to that node" + "route from it", so
+the branch that is genuinely shorter from where the user is standing wins.
+2. **Nothing ever re-routed.** The follower was built once per session and kept whatever it first decided, so walking a
+different (often shorter) way than the volunteer scanned left the app insisting on its original path forever. The
+controller now measures the distance from the route polyline each tick and, after 1.5 s consistently more than 5 m off,
+rebuilds the route from the current position and says "Recalculating." The thresholds are deliberately slack: normal
+corridor drift and a single bad pose sample must not trigger it.
+Also added a map-health warning, `unclosedLoop`: the scan passes back through a place it has already been without the
+two visits being joined, which is exactly the condition that makes A* take the long way round. It counts REVISITS
+rather than cycles, because a straight corridor has no cycles either and that is perfectly fine - flagging it would be
+noise. Shown on the review screen so the problem is visible when the map is made, not during a walk.
+**Status:** accepted; 167 tests pass. UNVERIFIED ON DEVICE. Thresholds to tune: 8 start candidates, 5 m off-route,
+1.5 s dwell, and MapHealth's 1.5 m / 10-node revisit test.

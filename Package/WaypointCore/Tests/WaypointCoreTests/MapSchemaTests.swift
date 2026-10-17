@@ -24,8 +24,16 @@ final class MapSchemaTests: XCTestCase {
 
     func testFormat2FixtureDecodes() throws {
         let map = try BuildingMap.from(jsonData: try fixture("map-v2.json"))
-        XCTAssertEqual(map.schemaVersion, 2)
+        XCTAssertEqual(map.schemaVersion, MapSchema.current) // migrated in memory
         XCTAssertEqual(map.edges.count, 8)
+        XCTAssertTrue(map.nodes.allSatisfy { $0.extent == nil })
+    }
+
+    func testFormat3FixtureCarriesRoomExtent() throws {
+        let map = try BuildingMap.from(jsonData: try fixture("map-v3.json"))
+        XCTAssertEqual(map.schemaVersion, 3)
+        XCTAssertEqual(map.nodes.compactMap(\.extent).count, 1)
+        XCTAssertEqual(try BuildingMap.from(jsonData: map.jsonData()), map) // extent round-trips
     }
 
     func testV1AndV2FixturesDecodeToTheSameMap() throws {

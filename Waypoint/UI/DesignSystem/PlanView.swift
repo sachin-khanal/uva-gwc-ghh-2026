@@ -16,14 +16,26 @@ struct PlanView: View {
     let map: BuildingMap
     /// Node ids of a route to highlight, start first.
     var route: [UUID] = []
+    /// Where the user is now, MAP frame. Drawn as a heading arrow. nil = not localized / not navigating.
+    var userPosition: SIMD3<Float>?
+    /// Which way they face: radians, 0 = -z, positive toward +x.
+    var userHeading: Float?
     var dark = false
+
+    /// Stable id for the synthetic node used to project `userPosition` through the same transform
+    /// as the map's nodes.
+    private static let userPointId = UUID(uuidString: "00000000-0000-4000-8000-00000000FFFF")!
 
     @State private var scale: CGFloat = 1
     @GestureState private var pinch: CGFloat = 1
 
     var body: some View {
         GeometryReader { geo in
-            let points = PlanLayout.project(map.nodes, width: Float(geo.size.width), height: Float(geo.size.height), padding: 32)
+            // The user's position is projected through the SAME transform by being laid out with the nodes.
+            let laidOut = map.nodes + (userPosition.map {
+                [MapNode(id: Self.userPointId, kind: .corridor, position: $0)]
+            } ?? [])
+            let points = PlanLayout.project(laidOut, width: Float(geo.size.width), height: Float(geo.size.height), padding: 32)
             Canvas { context, _ in
                 draw(in: context, points: points)
             }
@@ -45,6 +57,47 @@ struct PlanView: View {
         .accessibilityAddTraits(.isImage)
     }
 
+    /// A triangle at the user's position pointing where they face. Map +x is right on screen and map
+    /// -z is up, which is how PlanLayout projects, so heading 0 points up.
+    private func drawUser(in context: GraphicsContext, points: [UUID: PlanPoint],
+                          cg: (PlanPoint) -> CGPoint) {
+        guard let p = points[Self.userPointId] else { return }
+        let c = cg(p)
+        let r: CGFloat = 9
+        guard let heading = userHeading else {
+            context.fill(Path(ellipseIn: CGRect(x: c.x - r / 2, y: c.y - r / 2, width: r, height: r)),
+                         with: .color(.green))
+            return
+        }
+        let angle = CGFloat(heading)
+        func point(_ offsetAngle: CGFloat, _ radius: CGFloat) -> CGPoint {
+            CGPoint(x: c.x + sin(angle + offsetAngle) * radius,
+                    y: c.y - cos(angle + offsetAngle) * radius)
+        }
+        var arrow = Path()
+        arrow.move(to: point(0, r))
+        arrow.addLine(to: point(2.5, r * 0.8))
+        arrow.addLine(to: point(-2.5, r * 0.8))
+        arrow.closeSubpath()
+        context.fill(arrow, with: .color(.green))
+    }
+
+    /// Points-per-metre of the current projection, measured from two nodes that are far apart.
+    /// PlanLayout fits the map to the view, so the scale is only known after projecting.
+    private func metresToPoints(_ points: [UUID: PlanPoint]) -> CGFloat {
+        guard let a = map.nodes.first, let pa = points[a.id] else { return 1 }
+        var best: CGFloat = 1
+        for node in map.nodes.dropFirst() {
+            guard let pb = points[node.id] else { continue }
+            let metres = Geometry.horizontalDistance(a.position, node.position)
+            guard metres > 1 else { continue }
+            let onScreen = hypot(CGFloat(pb.x - pa.x), CGFloat(pb.y - pa.y))
+            best = onScreen / CGFloat(metres)
+            break
+        }
+        return best
+    }
+
     private var accessibilitySummary: String {
         let names = map.destinations.compactMap(\.label)
         if names.isEmpty { return "\(map.nodes.count) path points, no labelled places" }
@@ -57,7 +110,54 @@ struct PlanView: View {
 
     private func draw(in context: GraphicsContext, points: [UUID: PlanPoint]) {
         func cg(_ p: PlanPoint) -> CGPoint { CGPoint(x: CGFloat(p.x), y: CGFloat(p.y)) }
+        defer { drawUser(in: context, points: points, cg: cg) }
         let onRoute = Set(route)
+
+        // Room floor areas (RoomExtent), so you can see what the scan actually understood as a room
+        // rather than guessing from a pin. Drawn first, under everything else.
+        for node in map.nodes {
+            guard let extent = node.extent else { continue }
+            let corners: [SIMD3<Float>] = [
+                SIMD3(-extent.halfExtents.x, 0, -extent.halfExtents.y),
+                SIMD3(extent.halfExtents.x, 0, -extent.halfExtents.y),
+                SIMD3(extent.halfExtents.x, 0, extent.halfExtents.y),
+                SIMD3(-extent.halfExtents.x, 0, extent.halfExtents.y),
+            ].map { local in
+                let c = cos(extent.yaw), sn = sin(extent.yaw)
+                return SIMD3(extent.center.x + local.x * c + local.z * sn, 0,
+                             extent.center.z - local.x * sn + local.z * c)
+            }
+            let projected = corners.compactMap { corner -> CGPoint? in
+                points[node.id].map { anchor in
+                    // Same scale as the layout: measure the corner relative to the node it belongs to.
+                    let dx = corner.x - node.position.x
+                    let dz = corner.z - node.position.z
+                    return CGPoint(x: CGFloat(anchor.x) + CGFloat(dx) * metresToPoints(points),
+                                   y: CGFloat(anchor.y) + CGFloat(dz) * metresToPoints(points))
+                }
+            }
+            guard projected.count == 4 else { continue }
+            var rect = Path()
+            rect.move(to: projected[0])
+            for corner in projected.dropFirst() { rect.addLine(to: corner) }
+            rect.closeSubpath()
+            context.fill(rect, with: .color(accent.opacity(0.12)))
+            context.stroke(rect, with: .color(accent.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+        }
+
+        // The route is drawn as its OWN polyline through the route nodes. It cannot be drawn by
+        // highlighting map edges any more: RouteSimplifier collapses straight runs, so consecutive
+        // route nodes often have no direct edge between them.
+        if route.count > 1 {
+            var line = Path()
+            var started = false
+            for id in route {
+                guard let p = points[id] else { continue }
+                if started { line.addLine(to: cg(p)) } else { line.move(to: cg(p)); started = true }
+            }
+            context.stroke(line, with: .color(accent),
+                           style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+        }
 
         for edge in map.edges {
             guard let a = points[edge.from], let b = points[edge.to] else { continue }

@@ -55,6 +55,21 @@ final class NavigationController: ObservableObject {
     /// Current phone-position problem in words, or "" when fine.
     @Published private(set) var postureText = ""
 
+    // MARK: Debug telemetry (for the on-screen debug overlay; see NavDebugView)
+    /// The map being navigated, so the overlay can draw the floor plan.
+    @Published private(set) var activeMap: BuildingMap?
+    /// The computed route, start first. Empty until the route exists.
+    @Published private(set) var routeNodeIds: [UUID] = []
+    /// Where we think the user is, in the MAP frame. nil until relocalized.
+    @Published private(set) var mapPosition: SIMD3<Float>?
+    /// Which way they face in the map frame: radians, 0 = -z, positive = toward +x.
+    @Published private(set) var headingRadians: Float?
+    /// The route's waypoints in ARKit WORLD coordinates, for drawing over the camera. Empty until the
+    /// route exists and we are localized. Recomputed only when the route or the map->world transform
+    /// changes, because this feeds a RealityKit scene rebuild.
+    @Published private(set) var routeWorldPositions: [SIMD3<Float>] = []
+    private var lastRouteWorldKey: String = ""
+
     // MARK: Collaborators
     private let relocalizer = Relocalizer()
     private let audio = SpatialAudioGuide()
@@ -70,7 +85,6 @@ final class NavigationController: ObservableObject {
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
     private var lastReroute: TimeInterval = -100
-    private var lastMapPosition: SIMD3<Float> = .zero
     /// A stray further than this from the route polyline triggers a re-route (metres).
     private let offRouteThreshold: Float = 6
     private var simulatedTime: TimeInterval = 0
@@ -80,6 +94,14 @@ final class NavigationController: ObservableObject {
     private var graph: WaypointGraph?
     private var destination: MapNode?
     private var follower: RouteFollower?
+    /// Holds the first route back until the relocalized pose has settled (see StartGate).
+    private var startGate = StartGate()
+    /// Consecutive ticks spent far from the route; drives re-routing.
+    private var offRouteTicks = 0
+    /// How far off the route counts as "off route". Wider than a corridor, so normal drift is ignored.
+    private static let rerouteMeters: Float = 5
+    /// ~1.5 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
+    private static let rerouteTicks = 15
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -119,6 +141,7 @@ final class NavigationController: ObservableObject {
             return
         }
         follower = RouteFollower(route: route, graph: graph)
+        routeNodeIds = route.map(\.id)
         var facing: SIMD3<Float>?
         if startFacingAway, route.count > 1 { facing = route[0].position - route[1].position }
         simulator = PoseSimulator(route: route, startFacing: facing)
@@ -157,8 +180,16 @@ final class NavigationController: ObservableObject {
         if let routePlanner { routePlanner.update(graph: newGraph) } else { routePlanner = RoutePlanner(graph: newGraph) }
         routePlanner?.clearAllBlockages()
         blockage.reset()
+        activeMap = map
+        routeNodeIds = []
+        mapPosition = nil
+        headingRadians = nil
         self.destination = destination
         follower = nil
+        offRouteTicks = 0
+        routeWorldPositions = []
+        lastRouteWorldKey = ""
+        startGate.reset()
         planner.reset()
         obstacles.reset()
         postureMonitor.reset()
@@ -240,10 +271,40 @@ final class NavigationController: ObservableObject {
             if isSimulating { mapPosition.y = 0 }
             let mapForward = Geometry.transformDirection(worldToMap, Geometry.cameraForward(of: camera))
 
-            lastMapPosition = mapPosition
-            if follower == nil { follower = makeFollower(from: mapPosition, graph: graph, destination: destination) }
-            if !isSimulating, let f = follower {
-                adaptRoute(follower: f, mapPosition: mapPosition, level: level, time: time)
+            // Do NOT route from the first pose that arrives: just after relocalization it is still
+            // converging and often sits near the session origin, i.e. where the scan STARTED. Routing
+            // from there walks the user back to the beginning of the scan first (device report
+            // 2026-10-17). Wait for the pose to hold still, then route from where they really are.
+            if follower == nil, startGate.update(position: mapPosition, trackingOK: trackingOK) {
+                follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
+                routeNodeIds = follower?.route.map(\.id) ?? []
+            }
+            self.mapPosition = mapPosition
+            headingRadians = atan2(mapForward.x, -mapForward.z)
+            updateRouteWorldPositions(mapToWorld: mapToWorld)
+            // Re-route when the user is genuinely somewhere else. The route used to be computed once
+            // and kept for the whole session, so walking a different (often shorter) way than the one
+            // the volunteer scanned left the app insisting on its original path (device report
+            // 2026-10-17).
+            if let current = follower, current.distanceFromRoute(position: mapPosition) > Self.rerouteMeters {
+                offRouteTicks += 1
+                if offRouteTicks >= Self.rerouteTicks {
+                    offRouteTicks = 0
+                    if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
+                        follower = rebuilt
+                        routeNodeIds = rebuilt.route.map(\.id)
+                        lastRouteWorldKey = ""
+                        planner.reset()
+                        speech.say("Recalculating.", priority: .high)
+                        Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
+                    }
+                }
+            } else {
+                offRouteTicks = 0
+            }
+            // Our addition (feature/route-memory): a path that stays blocked (STOP for several seconds) is detoured for a while.
+            if !isSimulating, let current = follower {
+                detourIfBlocked(follower: current, mapPosition: mapPosition, level: level, time: time)
             }
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
@@ -269,13 +330,29 @@ final class NavigationController: ObservableObject {
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 
+    /// Route waypoints in world space for the AR overlay. Cheap guard: only rebuild when the route or
+    /// the transform actually changed, since the tick runs 10x a second and this drives a scene rebuild.
+    private func updateRouteWorldPositions(mapToWorld: simd_float4x4) {
+        guard let follower else {
+            if !routeWorldPositions.isEmpty { routeWorldPositions = [] }
+            return
+        }
+        let t = mapToWorld.columns.3
+        let key = "\(follower.route.count)-\(routeNodeIds.first?.uuidString ?? "")-" +
+            String(format: "%.2f,%.2f,%.2f", t.x, t.y, t.z)
+        guard key != lastRouteWorldKey else { return }
+        lastRouteWorldKey = key
+        routeWorldPositions = follower.route.map { Geometry.transformPoint(mapToWorld, $0.position) }
+    }
+
     private func makeFollower(from position: SIMD3<Float>, graph: WaypointGraph, destination: MapNode) -> RouteFollower? {
-        guard let start = graph.nearestNode(to: position),
-              let route = routePlanner?.plan(from: start.id, to: destination.id)?.nodes else {
+        // From where the user STANDS, not from whichever node is nearest: on a loop the nearest node can be on the wrong branch and send them
+        // the long way round. RoutePlanner tries several nearby starts and reuses remembered shortest routes (re-validated every time).
+        guard let route = routePlanner?.plan(fromPosition: position, to: destination.id)?.nodes else {
             Log.nav.error("no route to destination")
             return nil
         }
-        Log.nav.info("route has \(route.count) nodes")
+        Log.nav.info("route has \(route.count) nodes, \(String(format: "%.1f", Router.length(of: route))) m")
         return RouteFollower(route: route, graph: graph)
     }
 
@@ -287,36 +364,29 @@ final class NavigationController: ObservableObject {
 
     // MARK: Live route adaptation (REAL mode)
 
-    /// Re-route when the user is far off the route or the way ahead stays blocked. Rate-limited so it cannot thrash.
-    private func adaptRoute(follower: RouteFollower, mapPosition: SIMD3<Float>, level: ObstacleLevel, time: TimeInterval) {
+    /// The way ahead has been blocked (obstacle at STOP) for several seconds: avoid that leg for a while and walk another way if there is one.
+    /// Off-route recovery is separate (distanceFromRoute in `tick`). Rate-limited so it cannot thrash.
+    private func detourIfBlocked(follower: RouteFollower, mapPosition: SIMD3<Float>, level: ObstacleLevel, time: TimeInterval) {
         guard let graph, let destination, let routePlanner, time - lastReroute > 5 else { return }
-        let blockedNow = blockage.update(level: level, time: time)
-        let strayed = RoutePlanner.offRouteDistance(position: mapPosition, route: follower.route) > offRouteThreshold
-        guard blockedNow || strayed, let here = graph.nearestNode(to: mapPosition) else { return }
-
-        let target = follower.route[follower.targetIndex]
-        var plan: PlannedRoute?
-        if blockedNow, follower.targetIndex > 0 {
-            let previous = follower.route[follower.targetIndex - 1]
-            plan = routePlanner.detour(around: (previous.id, target.id), from: here.id, to: destination.id, now: Date())
-        } else {
-            plan = routePlanner.plan(from: here.id, to: destination.id)
-        }
+        guard blockage.update(level: level, time: time), follower.targetIndex > 0,
+              let here = graph.nearestNode(to: mapPosition) else { return }
+        let previous = follower.route[follower.targetIndex - 1], target = follower.route[follower.targetIndex]
         lastReroute = time
-        guard let plan, plan.nodes.map(\.id) != follower.route.map(\.id) else { return }
+        guard let plan = routePlanner.detour(around: (previous.id, target.id), from: here.id, to: destination.id, now: Date()),
+              plan.nodes.map(\.id) != follower.route.map(\.id) else { return }
         self.follower = RouteFollower(route: plan.nodes, graph: graph)
-        let words = blockedNow ? "Path blocked. Taking another way." : "Finding a new route."
-        setIfChanged(\.lastSpoken, words)
-        recentSpeech = Array((recentSpeech + [words]).suffix(6))
-        speech.say(words, priority: .high)
-        Log.nav.info("re-routed (\(blockedNow ? "blocked" : "off route")): \(plan.nodes.count) nodes, \(String(format: "%.1f", plan.totalDistance)) m")
+        routeNodeIds = plan.nodes.map(\.id)
+        lastRouteWorldKey = ""
+        planner.reset()
+        speech.say("Path blocked. Taking another way.", priority: .high)
+        Log.nav.info("detour around blockage: \(plan.nodes.count) waypoints, \(String(format: "%.1f", plan.totalDistance)) m")
     }
 
     /// A sign was read. DELIBERATELY LOG-ONLY for now: a sign can be legible from far down a hall, so acting on a disagreement could
     /// teleport the route. Field data (`sign ... disagrees` lines) should decide whether `.relocate` may re-anchor (TODO B).
     private func handleSign(_ number: String) {
         guard let routePlanner, !isSimulating else { return }
-        switch routePlanner.interpretSign(number, userPosition: lastMapPosition) {
+        switch routePlanner.interpretSign(number, userPosition: mapPosition ?? .zero) {
         case .consistent(let id): Log.nav.info("sign \(number) confirms position near node \(id)")
         case .relocate(let id): Log.nav.info("sign \(number) disagrees with believed position; it belongs to node \(id) (not acting)")
         case .ambiguous: Log.nav.info("sign \(number) matches several places")
@@ -327,12 +397,26 @@ final class NavigationController: ObservableObject {
     /// Executes FeedbackPlanner output. Beacon positions arrive in the MAP frame and are converted
     /// to the camera-local frame here because that is what the audio engine expects.
     private func perform(_ actions: [FeedbackAction], camera: simd_float4x4, mapToWorld: simd_float4x4) {
+        // One tick can produce several `.speak` actions (e.g. arrival + a hazard). Saying them one by
+        // one made each `.high` line cut off the one before it mid-word, because SpeechGuide stops the
+        // synthesizer for every high-priority utterance. Join them into a single sentence instead, at
+        // the highest priority present, so nothing is clipped and nothing overlaps.
+        let spoken = actions.compactMap { action -> (String, SpeechPriority)? in
+            if case .speak(let text, let priority) = action { return (text, priority) }
+            return nil
+        }
+        if !spoken.isEmpty {
+            let text = spoken.map(\.0).joined(separator: " ")
+            let priority: SpeechPriority = spoken.contains { $0.1 == .high } ? .high : .normal
+            setIfChanged(\.lastSpoken, text)
+            recentSpeech = Array((recentSpeech + [text]).suffix(6))
+            speech.say(text, priority: priority)
+        }
+
         for action in actions {
             switch action {
-            case .speak(let text, let priority):
-                setIfChanged(\.lastSpoken, text)
-                recentSpeech = Array((recentSpeech + [text]).suffix(6))
-                speech.say(text, priority: priority)
+            case .speak:
+                break // already said, coalesced above
             case .haptic(let cue):
                 Log.guidance.info("haptic: \(cue)")
                 haptics.play(cue)

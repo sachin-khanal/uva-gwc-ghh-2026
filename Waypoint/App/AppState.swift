@@ -59,6 +59,32 @@ final class AppState: ObservableObject {
         Log.app.info("loaded \(self.maps.count) map(s)")
     }
 
+    /// Deletes a recording: the map JSON, its ARWorldMap files, and the per-map UI state that would
+    /// otherwise outlive it (recent destinations, and a pending "try it in Navigate" hand-off).
+    ///
+    /// Deliberately NOT touched: copies on other phones or in the cloud. Deleting here is local only,
+    /// which is what the confirmation text promises.
+    /// - Returns: true when the map is gone from disk.
+    @discardableResult
+    func deleteMap(_ map: BuildingMap) -> Bool {
+        do {
+            try store.delete(id: map.id)
+        } catch {
+            Log.app.error("delete failed for \(map.name): \(error.localizedDescription)")
+            reloadMaps()
+            return false
+        }
+        // Stale per-map keys would otherwise accumulate, and a map re-imported under the same id
+        // would resurrect someone else's recent destinations.
+        UserDefaults.standard.removeObject(forKey: UIPrefs.recentsKey(mapId: map.id))
+        if UserDefaults.standard.string(forKey: UIPrefs.pendingMapId) == map.id.uuidString {
+            UserDefaults.standard.removeObject(forKey: UIPrefs.pendingMapId)
+        }
+        Log.app.info("deleted map \(map.name)")
+        reloadMaps()
+        return true
+    }
+
     /// Copies the bundled sample map into the store once (only when the store is empty).
     private func seedSampleMapIfNeeded() {
         guard (try? store.listMaps().isEmpty) == true,
