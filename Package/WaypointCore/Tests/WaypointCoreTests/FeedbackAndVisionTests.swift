@@ -124,3 +124,61 @@ final class FeedbackAndVisionTests: XCTestCase {
         XCTAssertTrue(f.ingest(["204"]).isEmpty)
     }
 }
+
+// MARK: - SpeechGate: the rules behind the app's single voice (D-024)
+
+final class SpeechGateTests: XCTestCase {
+
+    func testHighPriorityInterruptsWhatIsBeingSaid() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Stop. Wall ahead.", priority: .high, isSpeaking: true, now: 1), .interrupt)
+    }
+
+    func testHighPrioritySpeaksWhenNothingIsBeingSaid() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "You have arrived.", priority: .high, isSpeaking: false, now: 1), .speak)
+    }
+
+    /// A stale direction spoken late is worse than silence, so normal lines are dropped, not queued.
+    func testNormalPriorityIsDroppedWhileSomethingIsStillBeingSaid() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: true, now: 1), .drop)
+        XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: false, now: 2), .speak)
+    }
+
+    func testIdenticalTextIsDroppedInsideTheRepeatWindow() {
+        var gate = SpeechGate(repeatWindow: 3)
+        XCTAssertEqual(gate.decide(text: "Turn left.", priority: .high, isSpeaking: false, now: 10), .speak)
+        XCTAssertEqual(gate.decide(text: "Turn left.", priority: .high, isSpeaking: false, now: 12), .drop)
+        XCTAssertEqual(gate.decide(text: "Turn left.", priority: .high, isSpeaking: false, now: 13.5), .speak)
+    }
+
+    /// Different text must never be suppressed by the repeat window - that would hide a real warning.
+    func testDifferentTextIsNotSuppressed() {
+        var gate = SpeechGate(repeatWindow: 3)
+        XCTAssertEqual(gate.decide(text: "Turn left.", priority: .high, isSpeaking: false, now: 10), .speak)
+        XCTAssertEqual(gate.decide(text: "Stop. Stairs directly ahead.", priority: .high, isSpeaking: true, now: 10.1), .interrupt)
+    }
+
+    func testEmptyTextIsNeverSpoken() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "", priority: .high, isSpeaking: false, now: 1), .drop)
+        XCTAssertEqual(gate.decide(text: "   \n", priority: .high, isSpeaking: false, now: 1), .drop)
+    }
+
+    func testResetForgetsTheLastLine() {
+        var gate = SpeechGate(repeatWindow: 3)
+        XCTAssertEqual(gate.decide(text: "Position found.", priority: .normal, isSpeaking: false, now: 1), .speak)
+        XCTAssertEqual(gate.decide(text: "Position found.", priority: .normal, isSpeaking: false, now: 2), .drop)
+        gate.reset()
+        XCTAssertEqual(gate.decide(text: "Position found.", priority: .normal, isSpeaking: false, now: 2), .speak,
+                       "a new navigation session may say it again")
+    }
+
+    /// A dropped line must not reserve the repeat window, or the next attempt is wrongly silenced.
+    func testADroppedLineDoesNotBlockTheNextAttempt() {
+        var gate = SpeechGate(repeatWindow: 3)
+        XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: true, now: 1), .drop)
+        XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: false, now: 1.1), .speak)
+    }
+}

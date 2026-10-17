@@ -19,6 +19,37 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — One voice: single synthesizer; merged main into the UI branch   [tags: BUILD]
+Area: B (Guidance) + U3 (UI services). Branch `app-ui-workflows`.
+Trigger: "sometimes multiple voice lines speak at the same time, especially when reaching the destination", heard while
+testing the new UI.
+
+Merge first: `git merge main` into `app-ui-workflows`, bringing 4e90396 (E2E framework), 7fbcb76 (obstacle
+identification + speech guidance) and 2d7aca7 (arrival / start-gate fixes). ONE conflicted file, `Waypoint/UI/RootView.swift`,
+two hunks, both resolved by keeping BOTH sides (the UI branch's Settings gear and new-interface auto-open, plus main's
+accessibility identifiers and the `-autoE2E` self-test task). Nothing was dropped. -> `make test` 112 passed.
+
+Cause of the overlap: `SpeechGuide` and `Announcer` each owned an `AVSpeechSynthesizer`. Each one's anti-overlap logic
+only applied to its own instance, so they could never prevent each other; at arrival both spoke. With VoiceOver on it was
+worse - Announcer posted a VoiceOver announcement while SpeechGuide spoke aloud.
+Files created: `Waypoint/Guidance/Speaker.swift` (the app's only synthesizer), `Package/WaypointCore/Sources/WaypointCore/Guidance/SpeechGate.swift`
+(the rules: interrupt on `.high`, drop `.normal` while busy, drop identical text inside 3 s - pure logic so it is testable).
+Files edited: `Waypoint/Guidance/SpeechGuide.swift` (now a thin forwarder; same API, so `NavigationController` is untouched),
+`Waypoint/Services/Announcer.swift` (forwards to Speaker; no longer posts a VoiceOver announcement for `say` - see the
+trade-off in D-024), `docs/DECISIONS.md` (+D-024).
+Tests added: `SpeechGateTests` (8) - interrupt vs drop, repeat window, different text never suppressed, empty text,
+reset, and that a DROPPED line does not reserve the repeat window.
+Verified: `make test` -> **120 tests, 0 failures**; `make typecheck` OK (59 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED. `grep "AVSpeechSynthesizer()"` now matches exactly ONE line in the whole repo (Speaker.swift).
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has heard it. The thing to listen for is arrival with the new UI in
+Live mode: one voice, one arrival sentence, no second line on top.
+Open / handoff:
+1. Test on a phone, with and without VoiceOver.
+2. Still open: mesh detail question (see the previous entry); off-route re-routing (U2.5).
+3. My account-auth work is still in `stash@{0}`; its ADR claims D-019 and needs renumbering to the next free id.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Arrival vs obstacle, route start race, speech clipping   [tags: BUILD, CONTRACT CHANGE]
 Area: B (Navigation/Feedback) + shared core. Branch `guidance-arrival-and-start` off `main` (7fbcb76).
 Trigger: three issues found testing on the iPhone 15 Pro.

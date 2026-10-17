@@ -155,3 +155,20 @@ earlier lines were cut off mid-word. `NavigationController.perform` now joins a 
 highest priority present. (This is NOT the separate dual-synthesizer problem on `app-ui-workflows`, where `Announcer`
 and `SpeechGuide` own different `AVSpeechSynthesizer`s and genuinely talk over each other; that one is still open.)
 **Status:** accepted; 91 tests pass. Arrival wording and the gate are UNVERIFIED ON DEVICE.
+
+## D-024 — One voice: a single AVSpeechSynthesizer for the whole app (2026-10-17)
+Reported on device: two voices speaking at once, worst at arrival. Cause: `SpeechGuide` (guidance) and `Announcer`
+(the new UI) each owned an `AVSpeechSynthesizer`, and neither could see the other - SpeechGuide's "don't pile up"
+check (`synthesizer.isSpeaking`) and Announcer's `stopSpeaking` each only applied to their own. At arrival both fired.
+Fix: `Waypoint/Guidance/Speaker.swift` owns the only synthesizer in the app; `SpeechGuide` and `Announcer` keep their
+APIs but forward to it. The decision rules (interrupt on `.high`, drop `.normal` while busy, drop identical text inside
+a 3 s window) moved to `SpeechGate` in WaypointCore, where they are unit-tested - AVFoundation never runs in `make test`.
+Deliberate trade-off: with VoiceOver running, `Announcer.say` no longer posts an `AccessibilityNotification.Announcement`.
+That was a SECOND audio stream on top of the guidance voice. State changes are now spoken aloud in the app's voice in
+both cases. VoiceOver still reads focused elements in its own voice (we do not control that), and sighted-scanner
+chatter still goes to VoiceOver only via `Announcer.voiceOverOnly`. If a real VoiceOver user tests this and prefers
+their own voice for state changes, the alternative is to route Announcer through VoiceOver ONLY while no guidance is
+running - more code, revisit if someone asks for it.
+Related but separate: a single tick emitting several `.speak` lines used to clip itself; that was fixed in D-023 by
+coalescing them in `NavigationController.perform`.
+**Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
