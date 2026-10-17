@@ -81,6 +81,9 @@ final class NavigationController: ObservableObject {
     private let identifier = ObstacleIdentifier()
     private let signReader = SignReader()
     private var routePlanner: RoutePlanner?
+    /// What the sensors say about the surroundings right now (room on each side, how close ahead). Feeds warnings and the opening briefing.
+    private var sceneContext: SceneContext?
+    private var openingQueued = false
     /// Where to save remembered routes (real mode only; simulation does not persist).
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
@@ -200,7 +203,10 @@ final class NavigationController: ObservableObject {
         postureText = ""
 
         do { try audio.start() } catch { Log.guidance.error("audio start failed: \(error.localizedDescription)") }
-        speech.say("Navigating to \(destination.label ?? "destination"). Walk slowly and look around.", priority: .normal)
+        openingQueued = false
+        sceneContext = nil
+        // Short on purpose: the full "where you are / what is around / how to go" briefing follows as soon as the position has settled.
+        speech.say("Navigating to \(destination.label ?? "your destination").", priority: .normal)
     }
 
     /// PERFORMANCE: assigning an @Published property re-renders the SwiftUI screen even when the value is unchanged, and the loop runs 10x per second.
@@ -228,6 +234,7 @@ final class NavigationController: ObservableObject {
                 report = ObstacleReport(kind: known.report.kind, side: hit.side, distanceMeters: hit.depth, confidence: known.report.confidence)
             }
         }
+        sceneContext = ObstacleDetector.sideClearances(in: frame, ahead: hit?.depth)
         if trackingOK { signReader.process(frame) }
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
              nearestDepth: hit?.depth, report: report, time: frame.timestamp)
@@ -248,6 +255,8 @@ final class NavigationController: ObservableObject {
                                               pitchDegrees: simulatedPosture.pitchDegrees, rollDegrees: simulatedPosture.rollDegrees)
         simulatedTime += tickInterval
         let report = simulatedObstacle ? ObstacleReport(kind: simulatedObstacleKind, side: .ahead, distanceMeters: 0.5, confidence: 1) : nil
+        // Pretend the depth sensor sees a wall on the right and open space on the left, so the "way out" hint can be heard in simulation.
+        sceneContext = simulatedObstacle ? SceneContext(leftClearance: 2.5, rightClearance: 0.4, aheadClearance: 0.5) : nil
         tick(camera: camera, mapToWorld: matrix_identity_float4x4, trackingOK: true,
              nearestDepth: simulatedObstacle ? 0.5 : nil, report: report, time: simulatedTime)
         if sim.isFinished, follower != nil, instructionText.hasPrefix("arrived") {
@@ -278,6 +287,15 @@ final class NavigationController: ObservableObject {
             if follower == nil, startGate.update(position: mapPosition, trackingOK: trackingOK) {
                 follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
                 routeNodeIds = follower?.route.map(\.id) ?? []
+            }
+            if !openingQueued, let f = follower {
+                // Once per navigation: where you are, what is around, how to get there (kept short; see StartBriefing).
+                openingQueued = true
+                let first = f.update(position: mapPosition, forward: mapForward)
+                if first.kind != .arrived {
+                    planner.queueBriefing(StartBriefing.text(position: mapPosition, forward: mapForward, graph: graph, route: f.route,
+                                                             destination: destination, context: sceneContext, firstManeuver: first.upcoming))
+                }
             }
             self.mapPosition = mapPosition
             headingRadians = atan2(mapForward.x, -mapForward.z)
@@ -326,7 +344,7 @@ final class NavigationController: ObservableObject {
         }
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
-                                   posture: posture, report: report, time: time)
+                                   posture: posture, report: report, time: time, context: sceneContext)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 
@@ -387,7 +405,15 @@ final class NavigationController: ObservableObject {
     private func handleSign(_ number: String) {
         guard let routePlanner, !isSimulating else { return }
         switch routePlanner.interpretSign(number, userPosition: mapPosition ?? .zero) {
-        case .consistent(let id): Log.nav.info("sign \(number) confirms position near node \(id)")
+        case .consistent(let id):
+            Log.nav.info("sign \(number) confirms position near node \(id)")
+            // Contextual awareness from the camera: tell the user what the sign says, once. Silent after arrival (the planner is latched).
+            if instructionText.hasPrefix("arrived") { return }
+            let isDestination = destination?.id == id
+            let text = SignSpeech.text(read: number, isDestination: isDestination)
+            setIfChanged(\.lastSpoken, text)
+            recentSpeech = Array((recentSpeech + [text]).suffix(6))
+            speech.say(text, priority: .normal)
         case .relocate(let id): Log.nav.info("sign \(number) disagrees with believed position; it belongs to node \(id) (not acting)")
         case .ambiguous: Log.nav.info("sign \(number) matches several places")
         case .unknown: Log.nav.info("sign \(number) is not in this map")

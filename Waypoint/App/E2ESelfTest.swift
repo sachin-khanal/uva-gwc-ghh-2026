@@ -47,6 +47,9 @@ enum E2ESelfTest {
         info("haptics", "\(CHHapticEngine.capabilitiesForHardware().supportsHaptics)")
         let hasVoice = AVSpeechSynthesisVoice(language: "en-US") != nil
         check("speech.voice.enUS", hasVoice, hasVoice ? "" : "no en-US voice installed")
+        let siri = AVSpeechSynthesisVoice.speechVoices().filter { $0.identifier.lowercased().contains("siri") || $0.name.lowercased().contains("siri") }
+        info("speech.siriVoices", "\(siri.count) installed: \(siri.prefix(4).map { "\($0.name) [\($0.language)]" })  (none = download one in Settings > Accessibility > Spoken Content > Voices)")
+        info("speech.voice.chosen", Speaker.voice.map { "\($0.name) [\($0.language), quality \($0.quality.rawValue)]" } ?? "system default")
         let languages = (try? VNRecognizeTextRequest().supportedRecognitionLanguages()) ?? []
         check("vision.textRecognition", !languages.isEmpty, "languages=\(languages.prefix(3))")
         do {

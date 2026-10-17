@@ -33,6 +33,18 @@ final class Speaker {
 
     private init() {}
 
+    /// The voice to speak with: the Siri voice for the phone's language when one is installed (Settings > Accessibility > Spoken Content >
+    /// Voices > Siri), else the best installed voice, else the system default. Rule in `VoicePicker` (unit-tested); chosen once.
+    static let voice: AVSpeechSynthesisVoice? = {
+        let language = AVSpeechSynthesisVoice.currentLanguageCode()
+        let candidates = AVSpeechSynthesisVoice.speechVoices().map {
+            VoiceCandidate(identifier: $0.identifier, name: $0.name, language: $0.language, quality: $0.quality.rawValue)
+        }
+        let id = VoicePicker.choose(from: candidates, language: language)
+        Log.guidance.info("voice: \(id ?? "system default") for \(language)")
+        return id.flatMap { AVSpeechSynthesisVoice(identifier: $0) }
+    }()
+
     /// Monotonic clock: unaffected by the wall clock changing mid-demo.
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
@@ -47,7 +59,7 @@ final class Speaker {
         }
 
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.voice = Self.voice // nil = the system's default voice for the phone's language
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         synthesizer.speak(utterance)
         Log.guidance.info("say: \(text)")

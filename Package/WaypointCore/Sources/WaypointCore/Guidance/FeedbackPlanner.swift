@@ -74,6 +74,17 @@ public struct FeedbackPlanner {
     /// (device report 2026-10-17). Safety messages (obstacles, lost tracking) are never delayed.
     public static let directionCooldownSeconds: TimeInterval = 1.5
 
+    /// Within this distance of the FINAL destination, alarms about plain architecture (wall / door / window) are not spoken: at a room's
+    /// entrance those ARE the destination, and the arrival message is about to say so. Chairs, people etc. still warn.
+    public static let destinationQuietMeters: Float = 3.0
+    /// "Narrow space" is announced at most this often.
+    public static let narrowRepeatSeconds: TimeInterval = 20
+
+    /// Once the destination is reached the planner says nothing else (no lost-tracking, obstacle or posture chatter) until `reset()`.
+    private var hasArrived = false
+    private var pendingBriefing: String?
+    private var narrowActive = false
+    private var lastNarrowSpeech: TimeInterval?
     private var lastKey: String?
     private var lastHazardTarget: UUID?
     private var lastObstacle: ObstacleLevel = .clear
@@ -94,6 +105,10 @@ public struct FeedbackPlanner {
 
     /// Forget what was announced (call when a new navigation starts).
     public mutating func reset() {
+        hasArrived = false
+        pendingBriefing = nil
+        narrowActive = false
+        lastNarrowSpeech = nil
         lastKey = nil
         lastHazardTarget = nil
         lastObstacle = .clear
@@ -108,15 +123,25 @@ public struct FeedbackPlanner {
         turnInProgress = nil
     }
 
+    /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
+    /// first time guidance runs. Built by `StartBriefing`. Cleared by `reset()`, so a re-route does not repeat it.
+    public mutating func queueBriefing(_ text: String) { pendingBriefing = text }
+
     public mutating func plan(
         instruction: GuidanceInstruction?,
         obstacle: ObstacleLevel,
         trackingOK: Bool,
         posture: PostureUpdate? = nil,
         report: ObstacleReport? = nil,
-        time: TimeInterval? = nil
+        time: TimeInterval? = nil,
+        context: SceneContext? = nil
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
+
+        // 0. Arrived earlier: stay quiet. Losing tracking or seeing the door at the destination must not produce warnings after "You have arrived".
+        if hasArrived {
+            return [.beacon(nil)]
+        }
 
         // 1. Lost tracking: say it once, silence the beacon, issue nothing else.
         guard trackingOK else {
@@ -141,6 +166,7 @@ public struct FeedbackPlanner {
         // 2026-10-17). Once arrived there is nothing left to steer, so we say it once, mute the beacon
         // and stay quiet.
         if let i = instruction, i.kind == .arrived {
+            hasArrived = true
             if lastKey != i.kind.rawValue {
                 lastKey = i.kind.rawValue
                 actions.append(.speak(ArrivalSpeech.text(kind: i.targetKind, label: i.targetLabel), priority: .high))
@@ -157,11 +183,17 @@ public struct FeedbackPlanner {
         // Is the thing ahead the way IN rather than something to avoid? (door of the target room,
         // the stairs we routed to). If so it gets instructions, not an alarm, and guidance continues.
         let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
+        // The last few metres: a wall/door/window in front is the room we are walking into, not a danger. Say nothing; the arrival message follows.
+        let atDestination: Bool = {
+            guard let u = instruction?.upcoming, u.kind == .arrive, u.distanceMeters <= Self.destinationQuietMeters,
+                  let kind = report?.kind else { return false }
+            return kind == .wall || kind == .door || kind == .window
+        }()
         let levelChanged = obstacle != lastObstacle
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
         let repeatDue = obstacle == .stop && !levelChanged && !kindChanged
             && time != nil && lastObstacleSpeech != nil && (time! - lastObstacleSpeech!) >= Self.stopRepeatSeconds
-        if obstacle != .clear, levelChanged || kindChanged || repeatDue {
+        if obstacle != .clear, levelChanged || kindChanged || repeatDue, !atDestination {
             if wayThrough {
                 actions.append(.speak(ObstacleSpeech.wayThrough(report, targetLabel: instruction?.targetLabel),
                                       priority: .high))
@@ -169,10 +201,10 @@ public struct FeedbackPlanner {
             } else {
                 switch obstacle {
                 case .stop:
-                    actions.append(.speak(ObstacleSpeech.stop(report), priority: .high))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, context), priority: .high))
                     if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
                 case .caution:
-                    actions.append(.speak(ObstacleSpeech.caution(report), priority: .high))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, context), priority: .high))
                     if levelChanged { actions.append(.haptic(.obstacleCaution)) }
                 case .clear:
                     break
@@ -184,9 +216,21 @@ public struct FeedbackPlanner {
         lastObstacle = obstacle
         // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
         // the beacon and stops everything else.
-        if obstacle == .stop, !wayThrough {
+        if obstacle == .stop, !wayThrough, !atDestination {
             actions.append(.beacon(nil))
             return actions
+        }
+
+        // 2b. Narrow space (from the side clearances): say it once, then only now and then.
+        if let c = context, c.isNarrow {
+            let due = lastNarrowSpeech.map { (time ?? 0) - $0 >= Self.narrowRepeatSeconds } ?? true
+            if !narrowActive, due {
+                actions.append(.speak("Narrow space. Go slowly.", priority: .normal))
+                lastNarrowSpeech = time ?? lastNarrowSpeech
+            }
+            narrowActive = true
+        } else if context != nil {
+            narrowActive = false
         }
 
         // 3. Phone posture: tell the user, and stop guiding from a heading we cannot trust.
@@ -219,7 +263,12 @@ public struct FeedbackPlanner {
         // 4a. Route briefing, once: how far to the first turn/stairs/destination. Replaces the first "Continue straight."
         if !briefed, i.kind != .arrived {
             briefed = true
-            if let text = ManeuverSpeech.briefing(distanceToFirstManeuver: i.upcoming) {
+            if let opening = pendingBriefing {
+                // The full opening (where you are, what is around, how to go). High priority so the "Navigating to ..." line cannot swallow it.
+                pendingBriefing = nil
+                actions.append(.speak(opening, priority: .high))
+                if i.kind == .continueStraight { lastKey = i.kind.rawValue }
+            } else if let text = ManeuverSpeech.briefing(distanceToFirstManeuver: i.upcoming) {
                 actions.append(.speak(text, priority: .normal))
                 if i.kind == .continueStraight { lastKey = i.kind.rawValue }
             }
@@ -319,6 +368,12 @@ public struct FeedbackPlanner {
 
         actions.append(.beacon(i.kind == .arrived ? nil : i.targetPosition))
         return actions
+    }
+
+    /// Appends the way-out hint from the surroundings, if there is one.
+    static func withHint(_ sentence: String, _ report: ObstacleReport?, _ context: SceneContext?) -> String {
+        guard let hint = SceneAdvice.hint(for: report, context: context) else { return sentence }
+        return sentence + " " + hint
     }
 
     static func hazardText(_ h: Hazard) -> String {
