@@ -13,7 +13,9 @@ import Foundation
 public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
 
     /// Bump when the JSON shape changes incompatibly, and note it in docs/WORKLOG.md.
-    public static let schemaVersion = 1
+    /// 2 (2026-10-17): `MapNode.extent` added. The field is optional, so schema-1 maps still decode;
+    /// they simply have no room extents and fall back to `ArrivalRadius`.
+    public static let schemaVersion = 2
 
     public var id: UUID
     /// Display name, e.g. "Rice Hall, floor 1".

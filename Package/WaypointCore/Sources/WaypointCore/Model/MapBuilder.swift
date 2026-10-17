@@ -75,11 +75,14 @@ public final class MapBuilder {
     /// Adds a tagged point of interest attached to the last breadcrumb (or standalone if the
     /// volunteer tags before walking anywhere). It does NOT become the new breadcrumb anchor, so
     /// the corridor chain stays continuous.
+    /// - Parameter extent: for a `.room`, the floor area the scan worked out (see `RoomExtractor`).
+    ///   nil keeps the old behaviour: guidance falls back to an arrival radius around the point.
     @discardableResult
-    public func addPOI(kind: NodeKind, label: String?, position: SIMD3<Float>) -> MapNode {
+    public func addPOI(kind: NodeKind, label: String?, position: SIMD3<Float>,
+                       extent: RoomExtent? = nil) -> MapNode {
         let node = MapNode(
             kind: kind, label: label, position: position,
-            segmentId: segmentId, createdBy: deviceName)
+            segmentId: segmentId, createdBy: deviceName, extent: extent)
         map.nodes.append(node)
         if let anchor = lastBreadcrumb {
             let hazard: Hazard? = (kind == .stairs) ? .stairs : nil

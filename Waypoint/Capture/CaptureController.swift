@@ -124,10 +124,42 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         var fwd = Geometry.cameraForward(of: t)
         fwd.y = 0
         let ahead = simd_length(fwd) > 1e-3 ? simd_normalize(fwd) : SIMD3<Float>(0, 0, -1)
-        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead)
+        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead,
+                                  extent: kind == .room ? roomExtent(standingAt: pos) : nil)
         nodeCount = builder.map.nodes.count
-        Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")")
+        let area = node.extent.map { String(format: " (%.0f m2)", $0.areaSquareMeters) } ?? ""
+        Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")\(area)")
     }
+
+    /// Works out the floor area of the room the volunteer is standing in, from the WALL faces of the
+    /// live mesh (RoomExtractor). nil when the space is not enclosed, when classification is off, or
+    /// on a phone that cannot classify - guidance then falls back to a plain arrival radius.
+    /// Runs on the main thread at the moment of a tap, on a bounded slice of the mesh, so the cost is
+    /// a one-off rather than per frame.
+    private func roomExtent(standingAt position: SIMD3<Float>) -> RoomExtent? {
+        guard let frame = session.currentFrame else { return nil }
+        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+        guard !anchors.isEmpty else { return nil }
+
+        let points = MeshSampler.wallPoints(anchors: anchors, seed: position,
+                                            radius: RoomExtractor.defaultMaxRadius)
+        guard !points.isEmpty else {
+            Log.capture.info("room extent: no classified wall faces nearby (classification off?)")
+            return nil
+        }
+        guard let result = RoomExtractor.extract(seed: position, wallPoints: points, floorY: position.y - eyeHeight) else {
+            Log.capture.info("room extent: no enclosing walls found; falling back to a radius")
+            return nil
+        }
+        Log.capture.info(String(format: "room extent: %.1f x %.1f m, %.0f m2 enclosed",
+                                result.extent.halfExtents.x * 2, result.extent.halfExtents.y * 2,
+                                result.areaSquareMeters))
+        return result.extent
+    }
+
+    /// Rough height of the camera above the floor while someone walks holding a phone. Used only to
+    /// put the room's extent at floor level rather than at chest level.
+    private let eyeHeight: Float = 1.4
 
     /// Grows (+) or shrinks (-) the scan box on every side, clamped to 0...2 m. Applies immediately.
     func adjustBoxMargin(by delta: Float) {

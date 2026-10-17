@@ -19,6 +19,36 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Rooms have a floor area, from the mesh's wall faces   [tags: BUILD, CONTRACT CHANGE]
+Area: A (maps/scan) + B (arrival). Branch `room-extents` off `main` (4e278e2). Reasoning in D-027.
+
+CONTRACT CHANGE: `MapNode.extent: RoomExtent?`; `BuildingMap.schemaVersion` 1 -> 2. Optional field, so schema-1 maps
+decode unchanged (there is a test that decodes hand-written schema-1 JSON). `Samples/rice-hall-sample.json` left as is.
+Files created (WaypointCore): `Scan/RoomExtractor.swift` (occupancy grid + flood fill + rectangle fit; returns nil for
+unenclosed space).
+Files edited (WaypointCore): `Model/MapTypes.swift` (+`RoomExtent` with `contains`), `Model/BuildingMap.swift`
+(schemaVersion 2), `Model/MapBuilder.swift` (`addPOI(..., extent:)`), `Routing/RouteFollower.swift` (arrival is
+containment when an extent exists, 0.5 m doorway margin, else the old radius).
+Files edited (app): `Waypoint/Scan/MeshSampler.swift` (+`wallPoints`: first code in the app to READ
+`ARMeshAnchor.geometry.classification`), `Waypoint/Capture/CaptureController.swift` (computes the extent when a room is
+tagged; logs the area or why it could not), `Waypoint/UI/DesignSystem/PlanView.swift` (draws room rectangles, so the
+debug overlay shows what the scan actually understood).
+Tests added: `RoomExtractorTests` (10) - finds a rectangular room and its area, inside/outside containment, arrival by
+containment from the far end of the room (not the pin), fallback when there is no extent, open space and corridors
+yield nil, standing in a wall is refused, a sub-cell doorway does not leak, JSON round trip, and schema-1 decode.
+Verified: `make test` -> **155 tests, 0 failures** (was 145); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** No real mesh has been through `wallPoints`. The parameters most likely to need
+tuning on a phone: the 0.4-1.8 m height band, faceStride 3, grid resolution 0.15 m, search radius 12 m.
+Open / handoff:
+1. Extents are computed when a room is TAGGED, so only rooms tagged after this change have one. Rescan.
+2. Objects (tables, chairs) are still not segmented - only wall and door faces are read. If object boundaries matter,
+   that is a further change.
+3. L-shaped rooms are covered by their bounding rectangle; `areaSquareMeters` shows the real enclosed area.
+4. Classification must be ON (default per D-020). With it off, `wallPoints` is empty and extents are nil.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Route simplification + sighted debug overlay   [tags: BUILD]
 Area: B (Routing/Navigation) + U3 (UI). Branch `route-simplify-and-debug` off `main` (cdd8331).
 Trigger: Rice Hall walk - "weird turns: straight, turn right, turn around, then straight" where the route was

@@ -227,3 +227,28 @@ session is tracking with, the floor plan with the computed route and the user's 
 It is for the sighted escort, never the blind user, and it reads `NavigationController` directly through
 `GuidanceService.debugController` because `GuidanceSnapshot` deliberately carries no geometry.
 **Status:** accepted; 145 tests pass. UNVERIFIED ON DEVICE; 1.2 m and 0.6 m are guesses that want a real walk.
+
+## D-027 — Rooms have a floor AREA, derived from the mesh's wall faces (2026-10-17)   [CONTRACT CHANGE]
+Report: "it's one cohesive mesh rather than actual wall and object boundaries... it doesn't really detect whether I'm
+in a room, it tries to get me to the exact spot I labelled something." The team called this critical.
+The information was already being captured - D-020 made per-face classification on-by-default precisely so it would not
+be lost - but nothing read it. ARKit hands us one continuous reconstruction with no notion of rooms.
+`RoomExtractor` (WaypointCore, pure, tested) builds an occupancy grid on the floor plane from WALL and DOOR faces,
+flood-fills from where the volunteer stood, and fits a gravity-aligned rectangle to what it filled. If the fill escapes
+to the edge of the search area the space is not enclosed - a corridor, an open-plan floor - and it returns **nil**
+rather than invent a room. Refusing to answer matters more than guessing: a wrong room boundary tells a blind user they
+have arrived when they are still in the corridor.
+`MeshSampler.wallPoints` reads `ARMeshAnchor.geometry.classification` (first use of it in the app), keeping faces
+classified wall or door between knee and head height, where a wall is reliably a wall.
+**CONTRACT CHANGE:** `MapNode.extent: RoomExtent?` and `BuildingMap.schemaVersion` 1 -> 2. The field is optional, so
+schema-1 maps decode unchanged and simply have no extents; `schemaVersion` is declarative (nothing validates it on
+load), so nothing rejects an older map. A test decodes a hand-written schema-1 map to prove it.
+Arrival now means CONTAINMENT when an extent exists: you have arrived when you are inside the room, anywhere in it,
+with a 0.5 m margin so a doorway counts. Without an extent it falls back to `ArrivalRadius` (D-025).
+Honest limits: a rectangle, not a polygon (an L-shaped room is covered by its bounding rectangle, and
+`areaSquareMeters` records the real enclosed area so the difference is visible); an OPEN door leaks the fill into the
+corridor, bounded by the search radius and usually caught by the escape test; and this finds the room you are standing
+in, it is not a floor-plan reconstruction of the building. Object boundaries (tables, chairs) are still not segmented -
+only walls and doors are read.
+**Status:** accepted; 155 tests pass. **UNVERIFIED ON DEVICE** - no real mesh has been through `wallPoints` yet, which
+is the part most likely to need tuning (height band, face stride, grid resolution).

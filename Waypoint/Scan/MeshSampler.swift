@@ -62,3 +62,74 @@ enum MeshSampler {
         return result
     }
 }
+
+extension MeshSampler {
+
+    /// Points lying on WALL (and door) surfaces near `seed`, projected to the floor plane.
+    /// Feeds `RoomExtractor`, which turns them into the room's floor area.
+    ///
+    /// Only faces ARKit classified as wall or door are used: a floor or ceiling face would block every
+    /// cell of the occupancy grid and no room would ever be found. Faces are sampled at `faceStride`
+    /// because a room's walls run to tens of thousands of triangles and the grid only needs enough
+    /// points to leave no gap wider than a grid cell.
+    ///
+    /// `heightBand` keeps points between knee and head height above the floor, where a wall is a wall;
+    /// near the floor the classifier confuses skirting with floor, and near the ceiling with ceiling.
+    ///
+    /// Returns an empty array when the scan has no classification (classification off, or a device
+    /// that cannot do it), which `RoomExtractor` then correctly reports as "no room found".
+    static func wallPoints(
+        anchors: [ARMeshAnchor],
+        seed: SIMD3<Float>,
+        radius: Float,
+        heightBand: ClosedRange<Float> = 0.4...1.8,
+        faceStride: Int = 3
+    ) -> [SIMD2<Float>] {
+        var points: [SIMD2<Float>] = []
+        let radiusSquared = radius * radius
+
+        for anchor in anchors {
+            let geometry = anchor.geometry
+            guard let classification = geometry.classification else { continue }
+
+            let faces = geometry.faces
+            let vertices = geometry.vertices
+            guard faces.indexCountPerPrimitive == 3, vertices.count > 0 else { continue }
+
+            let classBase = classification.buffer.contents().advanced(by: classification.offset)
+            let faceBase = faces.buffer.contents()
+            let vertexBase = vertices.buffer.contents().advanced(by: vertices.offset)
+            let m = anchor.transform
+
+            for face in stride(from: 0, to: faces.count, by: max(1, faceStride)) {
+                let raw = classBase.advanced(by: face * classification.stride)
+                    .assumingMemoryBound(to: UInt8.self).pointee
+                let kind = ARMeshClassification(rawValue: Int(raw))
+                guard kind == .wall || kind == .door else { continue }
+
+                for corner in 0..<3 {
+                    let indexOffset = (face * 3 + corner) * faces.bytesPerIndex
+                    // ARKit uses 32-bit indices for scene reconstruction; anything else we skip.
+                    guard faces.bytesPerIndex == 4 else { continue }
+                    let vertexIndex = Int(faceBase.advanced(by: indexOffset)
+                        .assumingMemoryBound(to: UInt32.self).pointee)
+                    guard vertexIndex < vertices.count else { continue }
+
+                    let f = vertexBase.advanced(by: vertexIndex * vertices.stride)
+                        .assumingMemoryBound(to: Float.self)
+                    let x = f[0], y = f[1], z = f[2]
+                    let wx = m.columns.0.x * x + m.columns.1.x * y + m.columns.2.x * z + m.columns.3.x
+                    let wy = m.columns.0.y * x + m.columns.1.y * y + m.columns.2.y * z + m.columns.3.y
+                    let wz = m.columns.0.z * x + m.columns.1.z * y + m.columns.2.z * z + m.columns.3.z
+
+                    let height = wy - seed.y
+                    guard heightBand.contains(height) else { continue }
+                    let dx = wx - seed.x, dz = wz - seed.z
+                    guard dx * dx + dz * dz <= radiusSquared else { continue }
+                    points.append(SIMD2<Float>(wx, wz))
+                }
+            }
+        }
+        return points
+    }
+}

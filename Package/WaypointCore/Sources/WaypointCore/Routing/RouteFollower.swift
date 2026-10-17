@@ -22,6 +22,9 @@ public final class RouteFollower {
     @available(*, deprecated, message: "Cue classification moved to HeadingCue.")
     public static let turnAroundThreshold: Float = 135 * .pi / 180
 
+    /// Standing in the doorway counts as being in the room.
+    public static let doorwayMargin: Float = 0.5
+
     /// How far ahead along the route we aim. Steering at a point this far away instead of at the next
     /// breadcrumb (~1.5 m) is what stops the cues reacting to every half-step sideways: it follows the
     /// CORRIDOR rather than the exact line the volunteer walked.
@@ -57,9 +60,18 @@ public final class RouteFollower {
         let distance = Geometry.horizontalDistance(position, target.position)
         let isLast = targetIndex == route.count - 1
 
-        // "Arrived" depends on WHAT the destination is: you stand in front of a door, but you are
-        // inside a room (device report 2026-10-17).
-        if isLast && distance < ArrivalRadius.meters(for: target.kind) {
+        // "Arrived" depends on WHAT the destination is. If the scan worked out the room's floor area
+        // we use it literally - you have arrived when you are INSIDE the room, not when you are near
+        // the pin the volunteer dropped. Without an extent (older maps, or an open space) we fall
+        // back to a radius that depends on the kind of place.
+        let reached: Bool = {
+            if let extent = target.extent {
+                // A small margin so standing in the doorway counts as being in.
+                return extent.contains(position, margin: Self.doorwayMargin)
+            }
+            return distance < ArrivalRadius.meters(for: target.kind)
+        }()
+        if isLast && reached {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,

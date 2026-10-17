@@ -82,6 +82,22 @@ struct PlanView: View {
         context.fill(arrow, with: .color(.green))
     }
 
+    /// Points-per-metre of the current projection, measured from two nodes that are far apart.
+    /// PlanLayout fits the map to the view, so the scale is only known after projecting.
+    private func metresToPoints(_ points: [UUID: PlanPoint]) -> CGFloat {
+        guard let a = map.nodes.first, let pa = points[a.id] else { return 1 }
+        var best: CGFloat = 1
+        for node in map.nodes.dropFirst() {
+            guard let pb = points[node.id] else { continue }
+            let metres = Geometry.horizontalDistance(a.position, node.position)
+            guard metres > 1 else { continue }
+            let onScreen = hypot(CGFloat(pb.x - pa.x), CGFloat(pb.y - pa.y))
+            best = onScreen / CGFloat(metres)
+            break
+        }
+        return best
+    }
+
     private var accessibilitySummary: String {
         let names = map.destinations.compactMap(\.label)
         if names.isEmpty { return "\(map.nodes.count) path points, no labelled places" }
@@ -96,6 +112,38 @@ struct PlanView: View {
         func cg(_ p: PlanPoint) -> CGPoint { CGPoint(x: CGFloat(p.x), y: CGFloat(p.y)) }
         defer { drawUser(in: context, points: points, cg: cg) }
         let onRoute = Set(route)
+
+        // Room floor areas (RoomExtent), so you can see what the scan actually understood as a room
+        // rather than guessing from a pin. Drawn first, under everything else.
+        for node in map.nodes {
+            guard let extent = node.extent else { continue }
+            let corners: [SIMD3<Float>] = [
+                SIMD3(-extent.halfExtents.x, 0, -extent.halfExtents.y),
+                SIMD3(extent.halfExtents.x, 0, -extent.halfExtents.y),
+                SIMD3(extent.halfExtents.x, 0, extent.halfExtents.y),
+                SIMD3(-extent.halfExtents.x, 0, extent.halfExtents.y),
+            ].map { local in
+                let c = cos(extent.yaw), sn = sin(extent.yaw)
+                return SIMD3(extent.center.x + local.x * c + local.z * sn, 0,
+                             extent.center.z - local.x * sn + local.z * c)
+            }
+            let projected = corners.compactMap { corner -> CGPoint? in
+                points[node.id].map { anchor in
+                    // Same scale as the layout: measure the corner relative to the node it belongs to.
+                    let dx = corner.x - node.position.x
+                    let dz = corner.z - node.position.z
+                    return CGPoint(x: CGFloat(anchor.x) + CGFloat(dx) * metresToPoints(points),
+                                   y: CGFloat(anchor.y) + CGFloat(dz) * metresToPoints(points))
+                }
+            }
+            guard projected.count == 4 else { continue }
+            var rect = Path()
+            rect.move(to: projected[0])
+            for corner in projected.dropFirst() { rect.addLine(to: corner) }
+            rect.closeSubpath()
+            context.fill(rect, with: .color(accent.opacity(0.12)))
+            context.stroke(rect, with: .color(accent.opacity(0.5)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+        }
 
         // The route is drawn as its OWN polyline through the route nodes. It cannot be drawn by
         // highlighting map edges any more: RouteSimplifier collapses straight runs, so consecutive
