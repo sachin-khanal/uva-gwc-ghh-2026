@@ -22,7 +22,7 @@ final class FeedbackAndVisionTests: XCTestCase {
         var p = FeedbackPlanner()
         let first = p.plan(instruction: instruction(.turnLeft), obstacle: .clear, trackingOK: true)
         XCTAssertTrue(first.contains(.haptic(.turnLeft)))
-        XCTAssertTrue(first.contains(.speak("Turn left.", priority: .normal)))
+        XCTAssertTrue(first.contains(.speak("Turn left.", priority: .high)))
         XCTAssertTrue(first.contains(.beacon([0, 0, -3])))
         let second = p.plan(instruction: instruction(.turnLeft), obstacle: .clear, trackingOK: true)
         XCTAssertEqual(second, [.beacon([0, 0, -3])]) // no repeated speech or haptic
@@ -51,13 +51,45 @@ final class FeedbackAndVisionTests: XCTestCase {
     func testArrivalAndHazardText() {
         var p = FeedbackPlanner()
         let arrived = p.plan(instruction: instruction(.arrived, label: "Room 204"), obstacle: .clear, trackingOK: true)
-        XCTAssertTrue(arrived.contains(.speak("You have arrived at Room 204.", priority: .normal)))
+        XCTAssertTrue(arrived.contains(.speak("You have arrived at Room 204.", priority: .high)))
         XCTAssertTrue(arrived.contains(.haptic(.arrived)))
         XCTAssertEqual(arrived.last, .beacon(nil))
 
         var q = FeedbackPlanner()
         let stairs = q.plan(instruction: instruction(.continueStraight, hazard: .stairs), obstacle: .clear, trackingOK: true)
-        XCTAssertTrue(stairs.contains(.speak("Stairs ahead.", priority: .normal)))
+        XCTAssertTrue(stairs.contains(.speak("Stairs ahead.", priority: .high)))
+    }
+
+    func testStraightIsNotRepeatedWhenTheTargetWaypointAdvances() {
+        var p = FeedbackPlanner()
+        var straightSpeech = 0
+        for _ in 0..<20 { // 20 consecutive breadcrumbs, all "straight ahead", each a NEW target node
+            let actions = p.plan(instruction: instruction(.continueStraight, target: UUID()), obstacle: .clear, trackingOK: true)
+            straightSpeech += actions.filter { $0 == .speak("Continue straight.", priority: .normal) }.count
+        }
+        XCTAssertEqual(straightSpeech, 1, "found by the on-phone E2E test: it used to be spoken at every waypoint")
+    }
+
+    func testTurnsAreAnnouncedAgainAfterAStraightStretch() {
+        var p = FeedbackPlanner()
+        var turns = 0
+        for kind in [GuidanceInstruction.Kind.turnRight, .continueStraight, .continueStraight, .turnRight, .turnRight, .continueStraight, .turnLeft] {
+            let actions = p.plan(instruction: instruction(kind, target: UUID()), obstacle: .clear, trackingOK: true)
+            turns += actions.filter { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn") }; return false }.count
+        }
+        XCTAssertEqual(turns, 3, "right, right (after straight), left - the repeated right at the next waypoint is not repeated")
+    }
+
+    func testHazardAnnouncedOncePerHazardousTarget() {
+        var p = FeedbackPlanner()
+        let stairs = UUID()
+        var count = 0
+        for target in [UUID(), stairs, stairs, stairs, UUID(), stairs] {
+            let hazard: Hazard? = (target == stairs) ? .stairs : nil
+            let actions = p.plan(instruction: instruction(.continueStraight, hazard: hazard, target: target), obstacle: .clear, trackingOK: true)
+            count += actions.filter { $0 == .speak("Stairs ahead.", priority: .high) }.count
+        }
+        XCTAssertEqual(count, 2, "once when first approaching the stairs, once more after the hazard cleared and returned")
     }
 
     // MARK: ObstacleClassifier

@@ -142,3 +142,144 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(p.z, 3, accuracy: 1e-4)
     }
 }
+
+// MARK: - Arrival wording and the start gate (device reports, 2026-10-17)
+
+final class ArrivalAndStartGateTests: XCTestCase {
+
+    // MARK: ArrivalSpeech - general over NodeKind, not special-cased to doors
+
+    func testArrivalNamesThePlaceAndTheThingInFrontOfYou() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .door, label: "Room 204"),
+                       "You have arrived at Room 204. The door is right in front of you.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .elevator, label: "North wing"),
+                       "You have arrived at North wing. The elevator is right in front of you.")
+        // "stairs" is plural: the verb has to agree or it reads as broken English.
+        XCTAssertEqual(ArrivalSpeech.text(kind: .stairs, label: "Level 2"),
+                       "You have arrived at Level 2. The stairs are right in front of you.")
+    }
+
+    func testArrivalWithoutALabelNamesTheFeature() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .door, label: nil), "You have arrived at the door.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .stairs, label: "  "), "You have arrived at the stairs.")
+    }
+
+    /// A room/corridor node is the place itself, so the label already says everything.
+    func testArrivalAtAPlaceDoesNotInventAFeature() {
+        XCTAssertEqual(ArrivalSpeech.text(kind: .room, label: "Room 204"), "You have arrived at Room 204.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .junction, label: "Lobby"), "You have arrived at Lobby.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: nil, label: nil), "You have arrived.")
+        XCTAssertEqual(ArrivalSpeech.text(kind: .room, label: nil), "You have arrived.")
+    }
+
+    // MARK: Arrival outranks the obstacle warning
+
+    private func arrivedInstruction(kind: NodeKind, label: String?) -> GuidanceInstruction {
+        GuidanceInstruction(kind: .arrived, bearingRadians: 0, distanceMeters: 0.4,
+                            targetNodeId: UUID(), targetLabel: label,
+                            targetPosition: .zero, hazard: nil, targetKind: kind)
+    }
+
+    private func spokenText(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    /// The bug: the door you walked to is within STOP range, so the obstacle branch spoke
+    /// "Stop. You are about to walk into a door." and returned before arrival was ever announced.
+    func testArrivalIsAnnouncedEvenWhenTheDestinationIsAtStopRange() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(
+            instruction: arrivedInstruction(kind: .door, label: "Room 204"),
+            obstacle: .stop, trackingOK: true,
+            report: ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.4, confidence: 0.9),
+            time: 1)
+
+        let said = spokenText(actions)
+        XCTAssertEqual(said, ["You have arrived at Room 204. The door is right in front of you."])
+        XCTAssertFalse(said.contains { $0.contains("walk into") }, "the destination must not be described as an obstacle")
+        XCTAssertTrue(actions.contains { if case .haptic(.arrived) = $0 { return true } else { return false } })
+        XCTAssertTrue(actions.contains { if case .beacon(nil) = $0 { return true } else { return false } },
+                      "the beacon is muted once there is nothing left to steer toward")
+    }
+
+    func testArrivalIsSaidOnceNotOnEveryTick() {
+        var planner = FeedbackPlanner()
+        let i = arrivedInstruction(kind: .room, label: "Room 204")
+        let first = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 1)
+        let second = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 2)
+        let third = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, time: 9)
+
+        XCTAssertEqual(spokenText(first), ["You have arrived at Room 204."])
+        XCTAssertTrue(spokenText(second).isEmpty, "no repeat")
+        XCTAssertTrue(spokenText(third).isEmpty, "and no repeat once the stop-repeat timer would have fired")
+    }
+
+    /// Before arrival the obstacle warning must still work exactly as it did.
+    func testObstacleWarningIsUnchangedWhileStillWalking() {
+        var planner = FeedbackPlanner()
+        let walking = GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 8,
+                                          targetNodeId: UUID(), targetLabel: nil, targetPosition: .zero,
+                                          hazard: nil, targetKind: .corridor)
+        let actions = planner.plan(instruction: walking, obstacle: .stop, trackingOK: true,
+                                   report: ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9),
+                                   time: 1)
+        XCTAssertTrue(spokenText(actions).contains { $0.hasPrefix("Stop.") })
+    }
+
+    // MARK: StartGate
+
+    func testGateWaitsForThePoseToStopJumping() {
+        var gate = StartGate(requiredStableTicks: 3, maxJumpMeters: 0.35)
+        // Relocalization converging: large jumps, so the gate never opens.
+        XCTAssertFalse(gate.update(position: SIMD3(0, 0, 0), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(4, 0, 0), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(0.5, 0, -3), trackingOK: true))
+        // Settled: three consecutive small moves.
+        XCTAssertFalse(gate.update(position: SIMD3(9, 0, -9), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(9.1, 0, -9), trackingOK: true))
+        XCTAssertTrue(gate.update(position: SIMD3(9.2, 0, -9), trackingOK: true))
+    }
+
+    func testLostTrackingRestartsTheCount() {
+        var gate = StartGate(requiredStableTicks: 2, maxJumpMeters: 0.35)
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: true))
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: false), "tracking lost")
+        XCTAssertFalse(gate.update(position: SIMD3(1, 0, 1), trackingOK: true), "count starts again")
+        XCTAssertTrue(gate.update(position: SIMD3(1.05, 0, 1), trackingOK: true))
+    }
+
+    func testGateRejectsNonFinitePositions() {
+        var gate = StartGate(requiredStableTicks: 1, maxJumpMeters: 0.35)
+        XCTAssertFalse(gate.update(position: SIMD3(.nan, 0, 0), trackingOK: true))
+        XCTAssertTrue(gate.update(position: SIMD3(1, 0, 1), trackingOK: true))
+    }
+
+    /// The point of the gate: routing from the FIRST pose picks the node nearest the scan origin,
+    /// routing from the SETTLED pose picks the node the user is actually standing on.
+    func testGateChangesWhichNodeTheRouteStartsFrom() throws {
+        let origin = MapNode(kind: .corridor, position: SIMD3(0, 0, 0))
+        let middle = MapNode(kind: .corridor, position: SIMD3(0, 0, -5))
+        let far = MapNode(kind: .corridor, position: SIMD3(0, 0, -10))
+        let room = MapNode(kind: .room, label: "Room 204", position: SIMD3(2, 0, -10))
+        let map = BuildingMap(name: "t", nodes: [origin, middle, far, room], edges: [
+            MapEdge(from: origin.id, to: middle.id, distance: 5),
+            MapEdge(from: middle.id, to: far.id, distance: 5),
+            MapEdge(from: far.id, to: room.id, distance: 2),
+        ])
+        let graph = WaypointGraph(map: map)
+
+        // The user really stands next to `far`, but the first converging pose reads as the origin.
+        let converging = SIMD3<Float>(0.1, 0, -0.2)
+        let settled = SIMD3<Float>(0.1, 0, -9.8)
+
+        let fromConverging = try XCTUnwrap(graph.nearestNode(to: converging))
+        let fromSettled = try XCTUnwrap(graph.nearestNode(to: settled))
+        XCTAssertEqual(fromConverging.id, origin.id, "this is the wrong start that the gate prevents")
+        XCTAssertEqual(fromSettled.id, far.id)
+
+        let badRoute = try XCTUnwrap(Router.route(in: graph, from: fromConverging.id, to: room.id))
+        let goodRoute = try XCTUnwrap(Router.route(in: graph, from: fromSettled.id, to: room.id))
+        XCTAssertEqual(badRoute.count, 4, "walks back to the start of the scan first")
+        XCTAssertEqual(goodRoute.count, 2, "goes straight to the destination")
+    }
+}

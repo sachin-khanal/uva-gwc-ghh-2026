@@ -70,6 +70,9 @@ final class HapticsGuide {
             return [0, 0.12, 0.24].map { tap(at: $0, intensity: 0.5, sharpness: 0.3) }
         case .obstacleStop:
             return [buzz(at: 0, duration: 0.7, intensity: 1)]
+        case .holdPhoneUpright:
+            // Three firm, quick, sharp taps: "fix how you are holding the phone" (distinct from the 1-tap left / 2-tap right turn cues).
+            return [0, 0.12, 0.24].map { tap(at: $0, intensity: 1, sharpness: 0.9) }
         case .arrived:
             return [tap(at: 0, intensity: 0.8, sharpness: 0.5),
                     buzz(at: 0.2, duration: 0.4, intensity: 0.6),

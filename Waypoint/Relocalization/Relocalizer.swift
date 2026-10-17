@@ -61,6 +61,10 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
         }
+        // A labelled LiDAR mesh lets `ObstacleIdentifier` say "wall / door / table / chair" for what is in the way. Only on LiDAR phones.
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+            config.sceneReconstruction = .meshWithClassification
+        }
 
         // Primary path: saved world map for the first segment that has one.
         usingWorldMap = false

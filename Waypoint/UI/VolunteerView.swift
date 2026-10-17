@@ -16,6 +16,7 @@ struct VolunteerView: View {
     @EnvironmentObject var app: AppState
     @State private var controller: CaptureController?
     @State private var mapName = "Rice Hall, floor 1"
+    @State private var recordLabels = CaptureController.launchFlag("scanClassification", default: true)
 
     var body: some View {
         Group {
@@ -23,16 +24,30 @@ struct VolunteerView: View {
                 ScanningView(controller: controller, app: app)
             } else {
                 Form {
-                    Section("Building") { TextField("Map name", text: $mapName) }
+                    Section("Building") { TextField("Map name", text: $mapName).accessibilityIdentifier("scan.name") }
+                    Section {
+                        Toggle("Record surface labels (walls, floor, doors)", isOn: $recordLabels)
+                            .accessibilityIdentifier("scan.labels")
+                    } footer: {
+                        Text("Recommended for any scan you will keep: labels cannot be added to a scan afterwards. Turn off only for quick tests if scanning lags.")
+                    }
                     Button("Start scanning") {
                         let c = CaptureController(store: app.store, deviceName: app.deviceName)
                         controller = c
-                        c.start(mapName: mapName)
+                        c.start(mapName: mapName, recordSurfaceLabels: recordLabels)
                     }
+                    .accessibilityIdentifier("scan.start")
                 }
             }
         }
         .onDisappear { controller?.stop() }
+        .onAppear {
+            // `-autoScan YES` (see LaunchCommand): start scanning with no taps; stats are logged once per second.
+            guard app.launchCommand == .scan, controller == nil else { return }
+            let c = CaptureController(store: app.store, deviceName: app.deviceName)
+            controller = c
+            c.start(mapName: mapName)
+        }
     }
 }
 
@@ -43,7 +58,7 @@ private struct ScanningView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            LiveScanView(session: controller.session, box: controller.scanBox)
+            LiveScanView(session: controller.session, box: controller.scanBox, showMesh: controller.showMeshOverlay)
                 .ignoresSafeArea()
 
             VStack(spacing: 10) {
@@ -59,11 +74,11 @@ private struct ScanningView: View {
 
     private var hud: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(controller.trackingSummary).font(.headline)
-            Text("Mapping: \(Self.name(controller.mappingStatus))  ·  Nodes: \(controller.nodeCount)")
-            Text("Mesh: \(controller.triangleCount.formatted()) triangles")
+            Text(controller.trackingSummary).font(.headline).accessibilityIdentifier("hud.tracking")
+            Text("Mapping: \(Self.name(controller.mappingStatus))  ·  Nodes: \(controller.nodeCount)").accessibilityIdentifier("hud.mapping")
+            Text("Mesh: \(controller.triangleCount.formatted()) triangles").accessibilityIdentifier("hud.mesh")
             if let box = controller.scanBox {
-                Text(String(format: "Box: %.1f × %.1f × %.1f m", box.size.x, box.size.y, box.size.z))
+                Text(String(format: "Box: %.1f × %.1f × %.1f m", box.size.x, box.size.y, box.size.z)).accessibilityIdentifier("hud.box")
             } else {
                 Text("Walk slowly and sweep the camera to start building the mesh")
                     .foregroundStyle(.secondary)
@@ -91,9 +106,14 @@ private struct ScanningView: View {
                             poiLabel = ""
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityIdentifier("scan.tag.\(kind.rawValue)")
                     }
                 }
             }
+
+            Toggle("Mesh overlay (turn off if laggy; mapping continues)", isOn: $controller.showMeshOverlay)
+                .font(.footnote)
+                .accessibilityIdentifier("scan.overlay")
 
             HStack {
                 Text("Box margin \(String(format: "%.1f", controller.boxMargin)) m")
@@ -109,6 +129,7 @@ private struct ScanningView: View {
                 Button("Save map") { controller.save() }
                     .buttonStyle(.borderedProminent)
                     .disabled(controller.mappingStatus != .mapped)
+                    .accessibilityIdentifier("scan.save")
                 if let saved = controller.savedMap {
                     Text("Saved \(saved.nodes.count) nodes")
                         .foregroundStyle(.green)

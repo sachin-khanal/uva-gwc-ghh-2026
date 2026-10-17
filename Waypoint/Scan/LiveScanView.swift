@@ -20,18 +20,25 @@ struct LiveScanView: UIViewRepresentable {
 
     let session: ARSession
     let box: OrientedBox?
+    /// false = no mesh overlay (cheapest). Mapping continues either way. Defaults to true so older call sites `LiveScanView(session:box:)`
+    /// (e.g. the new Scanner flow on branch app-ui-workflows) still compile.
+    var showMesh: Bool = true
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
         view.automaticallyConfigureSession = false
         view.session = session
-        view.debugOptions = [.showSceneUnderstanding]
-        view.renderOptions.insert(.disableMotionBlur)
+        view.debugOptions = showMesh ? [.showSceneUnderstanding] : []
+        // PERFORMANCE: switch off RealityKit post-processing we never use (none of it affects the captured map or mesh data).
+        view.renderOptions.insert([.disableMotionBlur, .disableDepthOfField, .disableHDR, .disableCameraGrain,
+                                   .disablePersonOcclusion, .disableAREnvironmentLighting, .disableGroundingShadows])
         view.scene.addAnchor(context.coordinator.root)
         return view
     }
 
     func updateUIView(_ view: ARView, context: Context) {
+        let wanted: ARView.DebugOptions = showMesh ? [.showSceneUnderstanding] : []
+        if view.debugOptions != wanted { view.debugOptions = wanted }
         context.coordinator.show(box)
     }
 

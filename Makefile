@@ -42,7 +42,7 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 # Lets xcodebuild create/refresh the free provisioning profile and register the phone.
 SIGN_FLAGS := -allowProvisioningUpdates -allowProvisioningDeviceRegistration
 
-.PHONY: help setup doctor team-id gen test typecheck check build install launch run logs devices open clean clean-all
+.PHONY: help setup doctor team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
 
 help: ## Show this help
 	@echo "Waypoint make targets:"; echo
@@ -91,6 +91,36 @@ launch: ## Launch the installed app and stream its console to this terminal (DEV
 	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID)
 
 run: build install launch ## Build, install and launch on your phone (DEVICE=...)
+
+ROOM ?= Room 204
+EXTRA ?=
+
+selftest-sim: ## HEADLESS on-phone test: run the simulated walk to ROOM (default "Room 204"), print every cue, exit PASS/FAIL (DEVICE=...). Phone must be unlocked; you will hear it.
+	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoSimulate "$(ROOM)"
+
+selftest-e2e: ## HEADLESS end-to-end self-test on the phone: capabilities, storage, Keychain, synthetic scan -> save -> reload -> share -> simulated walk, cloud (if configured). Prints PASS/FAIL per check (DEVICE=...)
+	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoE2E YES
+
+selftest-scan: ## HEADLESS scan monitor: app starts scanning by itself and prints tracking/mesh/box stats once per second (DEVICE=...). Walk with the phone; Ctrl-C to stop.
+	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoScan YES $(EXTRA)
+
+UITEST_RESULT := $(BUILD_ROOT)/uitest.xcresult
+UITEST_SHOTS  := $(BUILD_ROOT)/uitest-screens
+ONLY ?=
+
+uitest: gen ## Run the UI tests ON THE PHONE (taps + screenshots), then export screenshots (DEVICE=...; ONLY=testName for one). Phone unlocked; Settings > Developer > Enable UI Automation
+	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
+	rm -rf "$(UITEST_RESULT)"
+	-$(XCODEBUILD) $(SIGN_FLAGS) -resultBundlePath "$(UITEST_RESULT)" $(if $(ONLY),-only-testing:WaypointUITests/WaypointUITests/$(ONLY)) test 2>&1 | grep -E "Test Case|error:|Executed|TEST (SUCCEEDED|FAILED)|\*\* " | tail -40
+	@$(MAKE) --no-print-directory uitest-shots
+
+uitest-shots: ## Export the screenshots + notes from the last `make uitest` into $(UITEST_SHOTS)
+	rm -rf "$(UITEST_SHOTS)" && mkdir -p "$(UITEST_SHOTS)"
+	xcrun xcresulttool export attachments --path "$(UITEST_RESULT)" --output-path "$(UITEST_SHOTS)"
+	@echo "Screenshots/notes in: $(UITEST_SHOTS)"; ls "$(UITEST_SHOTS)" | head -30
 
 logs: ## Stream the phone's logs for this app only (DEVICE=...). Ctrl-C to stop.
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }

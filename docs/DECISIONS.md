@@ -111,3 +111,47 @@ suffix is per developer (`WAYPOINT_DEV_SUFFIX` in `Config/Local.xcconfig`) so fr
 (`WAYPOINT_BUNDLE_PREFIX` in `Config/Base.xcconfig`) read by `project.yml`, the Makefile and `scripts/doctor.sh`. The Swift logger subsystem and Keychain
 service name use the same prefix as constants. Changed before anyone had installed the app, so no migration is needed. If the repo ever moves to another
 GitHub account, change the prefix in `Config/Base.xcconfig`, `project.yml` (`bundleIdPrefix`), `Log.swift` and `CloudModels.swift`. **Status:** accepted.
+
+## D-020 — Performance changes must be lossless; measure before and after (2026-10-17)
+U1 reported lag in the live scan view. Rule adopted: an optimisation may remove work that produces nothing we store or use, move work off the main thread, or replace an algorithm with an
+EXACT equivalent; it may not shrink or degrade the saved map, the ARWorldMap, or the mesh data. Applied: (1) exact box fit via convex hull (equality with the brute-force fit is a unit test on 60 random clouds), reading
+ALL vertices instead of every 6th, on a background queue, never overlapping; (2) HUD properties only publish real changes (was ~60 SwiftUI re-renders/s for nothing); (3) plane detection off (no code uses plane anchors; relocalization uses
+feature points, not planes); (4) ~~per-face classification off by default (nothing reads it yet) - NOT lossless for the future colouring/door-suggestion features, which must switch it on with `-scanClassification YES` or a UI setting;~~ **Update 2026-10-17 (team decision "keep lossless"):** classification is **ON by default** for scans we keep, because a scan recorded without it can never get wall/floor/door labels afterwards (information lost at capture time is lost for good). It is switchable per scan on the start screen ("Record surface labels", id `scan.labels`) or with `-scanClassification NO` for quick tests and lag A/B runs;
+(5) unused RealityKit post-processing disabled; (6) mesh overlay is a switch (`-scanOverlay NO` or the toggle on the scan screen) - mapping and saved data are identical with it off, only the on-screen drawing changes.
+Not done because NOT lossless: lower camera resolution/frame rate (could hurt tracking and relocalization), decimating or dropping mesh anchors, lowering mesh refresh. Also: day-to-day `make run` builds **Debug** (unoptimised Swift is often many times slower in tight loops);
+use `CONFIG=Release make run` for any performance judgement. **Status:** accepted; the real-world effect is UNMEASURED until someone runs it on a phone in a real room (see docs/TESTING.md, "Measuring scan performance").
+
+## D-021 — Lossless-first policy for scanning; the lossy vector layer is NOT being built now (2026-10-17)
+Decision (U1): keep everything lossless. In practice: (a) capture records the maximum we can use later (surface classification on by default; world map and graph unchanged); (b) every performance change must be exact or remove work whose output nothing consumes (D-020);
+(c) the visual overlay stays ON by default (the volunteer needs to see coverage holes), with a switch for lag or demos; (d) the proposed "vector map" layer (planes + object boxes replacing triangles) is lossy by design and is **parked**: revisit only after gate G3 and only as an ADDITIONAL derived layer, never replacing raw capture data.
+Reversibility rule of thumb: anything dropped at CAPTURE time is gone forever (classification, mesh detail); anything dropped at DISPLAY or at EXPORT time can be redone from the capture. So be generous at capture, thrifty at display. **Status:** accepted.
+
+## D-022 — Accessibility-first guidance: posture coach, named obstacles, distance-aware instructions (2026-10-17)
+Requirement from U1: this app is for visually impaired people, so (1) the phone must be held correctly and the user told when it is not; (2) instructions must be explicit and granular, and obstacles named by type.
+Design: **Posture** - `PostureMonitor` (WaypointCore) reads pitch/roll from the camera pose; hysteresis (warn at 30 deg, clear below 20), dwell (0.8 s bad / 0.5 s good), repeat every 8 s, one "Phone position is good" on recovery; while wrong, route cues and the beacon are muted (the heading cannot be trusted)
+but obstacle warnings stay on (a wall outranks the coaching). Distinct 3-tap haptic. **Obstacles** - `ObstacleKind` + `ObstacleReport`; kind from the labelled LiDAR mesh (wall/door/window/table/seat) first, then Apple Vision image classification of a crop around the hit
+(`VNClassifyImageRequest`, no download; 1,303 labels on the test phone incl. `trash_can`, `chair`, `door`, `stairs`, `table`, `window`, `plant`); spoken at once as "obstacle" and upgraded when identified; low confidence is hedged ("Possibly a trash can directly ahead"), never stated as fact; STOP repeats every 3 s.
+**Instructions** - route briefing ("Walk straight about 12 meters, then turn right."), countdown at 10/5/2 m ("In 5 meters, turn right."), the turn itself, landmarks ("Room 206 on your right."), arrival; distances in steps up close and meters further out. All wording is in `SpokenPhrases.swift` and asserted verbatim in tests so it can be reviewed by U4 and blind users.
+**Camera-axis finding (a real bug):** ARKit's camera frame is fixed to the SENSOR. For an upright portrait phone camera +x points toward the BOTTOM of the phone and +y toward the user's RIGHT. The real-device audio beacon used camera-local x as "right", which is wrong in portrait (the simulation hid it because its fake camera used x = right). Fixed in one place: `Geometry.cameraTransform` now produces the real convention and
+`Geometry.cameraLocalToUser` converts for the audio engine; the depth detector's corridor was also the wrong shape on a portrait phone and now unprojects to world points and ignores floor/ceiling (`ObstacleBand`). **All of this is derived from Apple's documented axes and proven only by synthetic poses: it MUST be confirmed on a real phone** (docs/TESTING.md, "Accessibility checks on a real phone").
+Not done yet: side obstacles ("chair on your left" needs a left/right scan), stairs-down/ledge detection, low objects under 15 cm, temporal voting for object names, calibration of thresholds, blind-user review of the wording. **Status:** accepted; implemented; device behaviour UNVERIFIED.
+
+## D-023 — Arrival outranks obstacle warnings, and the first route waits for the pose to settle (2026-10-17)
+Both from testing on a phone (WORKLOG entry below this one).
+1. **Arrival.** The destination is usually a thing you can walk into - a door - so the depth sensor sees it at STOP range
+and `FeedbackPlanner` spoke "Stop. You are about to walk into a door." and `return`ed, which meant the arrival was never
+announced at all. Arrival is now handled BEFORE obstacles: it is said once, the beacon is muted, and obstacle chatter is
+suppressed from then on. Wording comes from the destination node's `NodeKind` (`ArrivalSpeech`), so it is general -
+"You have arrived at Room 204. The door is right in front of you." / "...The stairs are right in front of you." /
+"You have arrived at Room 204." for a plain room. This needed a **CONTRACT CHANGE**: `GuidanceInstruction.targetKind`
+(optional, defaulted, so the JSON map format and every existing caller are unaffected).
+2. **Start of the route.** `NavigationController` built its `RouteFollower` from the FIRST tick with tracking OK. Just
+after relocalization the pose is still converging and often reads near the session origin - where the VOLUNTEER began
+scanning - so the route was computed from there and walked the user back to the start of the scan before heading to the
+destination. A new `StartGate` (pure logic, tested) requires N consecutive ticks within 0.35 m of each other before the
+route may be computed. It is a race, which is why it was only seen once.
+3. **Speech clipping.** One tick can emit several `.speak` actions and every `.high` one stops the synthesizer, so
+earlier lines were cut off mid-word. `NavigationController.perform` now joins a tick's lines into one utterance at the
+highest priority present. (This is NOT the separate dual-synthesizer problem on `app-ui-workflows`, where `Announcer`
+and `SpeechGuide` own different `AVSpeechSynthesizer`s and genuinely talk over each other; that one is still open.)
+**Status:** accepted; 91 tests pass. Arrival wording and the gate are UNVERIFIED ON DEVICE.

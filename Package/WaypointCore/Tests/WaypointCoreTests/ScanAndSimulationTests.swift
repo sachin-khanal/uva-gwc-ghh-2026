@@ -70,16 +70,24 @@ final class ScanAndSimulationTests: XCTestCase {
 
     // MARK: cameraTransform
 
-    func testCameraTransformMatchesARKitConvention() {
-        let t = Geometry.cameraTransform(position: [2, 1.5, -3], forward: [1, 0.7, 0]) // pitch ignored
+    func testCameraTransformMatchesARKitPortraitConvention() {
+        let t = Geometry.cameraTransform(position: [2, 1.5, -3], forward: [1, 0.7, 0]) // pitch comes only from the pitch argument
         XCTAssertEqual(Geometry.translation(of: t), [2, 1.5, -3])
         let f = Geometry.cameraForward(of: t)
         XCTAssertEqual(f.x, 1, accuracy: 1e-5); XCTAssertEqual(f.y, 0, accuracy: 1e-5); XCTAssertEqual(f.z, 0, accuracy: 1e-5)
-        // A point 3 m ahead and 1 m to the user's right (facing +x, right is +z) is local (+1, 0, -3).
+        // A point 3 m ahead and 1 m to the user's right (facing +x, so right is +z). In ARKit's sensor-fixed camera frame for an upright phone
+        // that is local (x = 0 [no height difference], y = +1 [camera +y = the user's right], z = -3 [looking along -z]).
         let world = SIMD3<Float>(2 + 3, 1.5, -3 + 1)
         let local = Geometry.transformPoint(t.inverse, world)
-        XCTAssertEqual(local.x, 1, accuracy: 1e-4)
+        XCTAssertEqual(local.x, 0, accuracy: 1e-4)
+        XCTAssertEqual(local.y, 1, accuracy: 1e-4)
         XCTAssertEqual(local.z, -3, accuracy: 1e-4)
+        // Converted to the user frame (x right, y up, ahead = -z) the audio engine needs:
+        let user = Geometry.cameraLocalToUser(local)
+        XCTAssertEqual(user.x, 1, accuracy: 1e-4); XCTAssertEqual(user.y, 0, accuracy: 1e-4); XCTAssertEqual(user.z, -3, accuracy: 1e-4)
+        // A point 1 m ABOVE the phone is local x = -1 (camera +x points toward the bottom of the phone) -> user y = +1.
+        let above = Geometry.cameraLocalToUser(Geometry.transformPoint(t.inverse, SIMD3<Float>(2 + 3, 2.5, -3)))
+        XCTAssertEqual(above.y, 1, accuracy: 1e-4)
         // Degenerate forward falls back to -z.
         XCTAssertEqual(Geometry.cameraForward(of: Geometry.cameraTransform(position: .zero, forward: [0, 1, 0])).z, -1, accuracy: 1e-5)
     }
@@ -143,5 +151,80 @@ final class ScanAndSimulationTests: XCTestCase {
         let sim = PoseSimulator(route: route, startFacing: [0, 0, 1]) // facing away from the route
         let follower = RouteFollower(route: route, graph: graph)
         XCTAssertEqual(follower.update(position: sim.position, forward: sim.forward).kind, .turnAround)
+    }
+}
+
+// MARK: Fast, exact bounding box (convex hull) - added when the live scan lagged
+
+final class FastBoxFitTests: XCTestCase {
+
+    /// Deterministic pseudo-random numbers so a failure can be reproduced.
+    private struct LCG: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 { state = state &* 6364136223846793005 &+ 1442695040888963407; return state }
+    }
+
+    func testHullOfSquareWithInteriorAndCollinearPoints() {
+        var pts: [SIMD2<Float>] = [[0, 0], [4, 0], [4, 4], [0, 4], [2, 0], [4, 2], [2, 2], [1, 1], [3, 3], [0, 0]]
+        var shuffler = LCG(state: 7)
+        pts.shuffle(using: &shuffler)
+        let hull = ConvexHull2D.hull(pts)
+        XCTAssertEqual(Set(hull.map { "\($0.x),\($0.y)" }), ["0.0,0.0", "4.0,0.0", "4.0,4.0", "0.0,4.0"])
+        XCTAssertEqual(ConvexHull2D.hull([[1, 1], [2, 2]]).count, 2)
+        XCTAssertTrue(ConvexHull2D.hull([]).isEmpty)
+    }
+
+    /// THE lossless guarantee: the hull-based fit equals the brute-force fit over every point, on many random clouds.
+    func testHullFitEqualsBruteForceOnRandomClouds() throws {
+        var rng = LCG(state: 42)
+        for trial in 0..<60 {
+            let yaw = Float.random(in: 0..<Float.pi, using: &rng)
+            let w = Float.random(in: 1...20, using: &rng), d = Float.random(in: 1...40, using: &rng)
+            let n = Int.random(in: 20...2_000, using: &rng)
+            let origin = SIMD3<Float>(Float.random(in: -50...50, using: &rng), Float.random(in: -1...1, using: &rng), Float.random(in: -50...50, using: &rng))
+            let pts: [SIMD3<Float>] = (0..<n).map { _ in
+                let local = SIMD3<Float>(Float.random(in: 0...w, using: &rng), Float.random(in: 0...3, using: &rng), Float.random(in: 0...d, using: &rng))
+                return origin + OrientedBox.rotateY(local, by: yaw)
+            }
+            let fast = try XCTUnwrap(OrientedBox.fitBest(points: pts))
+            let slow = try XCTUnwrap(OrientedBox.fitBestBruteForce(points: pts))
+            XCTAssertEqual(fast.yaw, slow.yaw, accuracy: 1e-6, "trial \(trial): yaw")
+            for i in 0..<3 {
+                XCTAssertEqual(fast.center[i], slow.center[i], accuracy: 1e-3, "trial \(trial): center \(i)")
+                XCTAssertEqual(fast.halfExtents[i], slow.halfExtents[i], accuracy: 1e-3, "trial \(trial): extents \(i)")
+            }
+            XCTAssertTrue(pts.allSatisfy { fast.contains($0, slack: 1e-3) }, "trial \(trial): box must contain every point")
+        }
+    }
+
+    /// Per-anchor hulls merged together equal the hull of everything (how the app streams the mesh).
+    func testMergedPerAnchorHullsEqualWholeCloud() throws {
+        var rng = LCG(state: 9)
+        let cloud: [SIMD3<Float>] = (0..<6_000).map { _ in
+            SIMD3<Float>(Float.random(in: -10...10, using: &rng), Float.random(in: 0...3, using: &rng), Float.random(in: -30...30, using: &rng))
+        }
+        let chunks = stride(from: 0, to: cloud.count, by: 500).map { Array(cloud[$0..<min($0 + 500, cloud.count)]) }
+        var merged: [SIMD2<Float>] = []
+        var minY = Float.infinity, maxY = -Float.infinity
+        for chunk in chunks {
+            merged += ConvexHull2D.hull(chunk.map { SIMD2($0.x, $0.z) })
+            minY = min(minY, chunk.map(\.y).min()!); maxY = max(maxY, chunk.map(\.y).max()!)
+        }
+        let viaChunks = try XCTUnwrap(OrientedBox.fitBest(hull: ConvexHull2D.hull(merged), minY: minY, maxY: maxY))
+        let direct = try XCTUnwrap(OrientedBox.fitBest(points: cloud))
+        XCTAssertEqual(viaChunks.size.x, direct.size.x, accuracy: 1e-4)
+        XCTAssertEqual(viaChunks.size.z, direct.size.z, accuracy: 1e-4)
+        XCTAssertEqual(viaChunks.yaw, direct.yaw, accuracy: 1e-6)
+    }
+
+    func testFastFitIsMuchFasterOnAHugeCloud() throws {
+        var rng = LCG(state: 3)
+        let cloud: [SIMD3<Float>] = (0..<300_000).map { _ in
+            SIMD3<Float>(Float.random(in: 0...12, using: &rng), Float.random(in: 0...3, using: &rng), Float.random(in: 0...60, using: &rng))
+        }
+        let t0 = Date(); _ = OrientedBox.fitBestBruteForce(points: cloud); let slow = Date().timeIntervalSince(t0)
+        let t1 = Date(); _ = OrientedBox.fitBest(points: cloud); let fast = Date().timeIntervalSince(t1)
+        print("box fit, 300k points: brute force \(Int(slow * 1000)) ms, hull \(Int(fast * 1000)) ms")
+        XCTAssertLessThan(fast, slow, "hull fit should beat brute force")
     }
 }

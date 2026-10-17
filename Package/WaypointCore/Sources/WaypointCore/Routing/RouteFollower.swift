@@ -49,8 +49,9 @@ public final class RouteFollower {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,
-                targetPosition: target.position, hazard: nil)
+                targetPosition: target.position, hazard: nil, targetKind: target.kind)
         }
+        let upcoming = lookahead(from: position, distanceToTarget: distance)
 
         let bearing = Geometry.signedBearing(forward: forward, toTarget: target.position - position)
         let kind: GuidanceInstruction.Kind
@@ -68,6 +69,59 @@ public final class RouteFollower {
         return GuidanceInstruction(
             kind: kind, bearingRadians: bearing, distanceMeters: distance,
             targetNodeId: target.id, targetLabel: target.label,
-            targetPosition: target.position, hazard: hazard)
+            targetPosition: target.position, hazard: hazard,
+            upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id),
+            targetKind: target.kind)
+    }
+
+    // MARK: Look-ahead and landmarks
+
+    /// A heading change of more than this between two route segments counts as a turn.
+    public static let turnThreshold: Float = 35 * .pi / 180
+    /// How far ahead (metres along the route) we look for the next maneuver.
+    public static let lookaheadMeters: Float = 40
+    /// A labelled node closer than this to the user is "abeam" and gets announced.
+    public static let landmarkRadius: Float = 2.5
+
+    /// The next turn, stairs, or the arrival, measured ALONG the route from the user's position.
+    func lookahead(from position: SIMD3<Float>, distanceToTarget: Float) -> Maneuver? {
+        var along = distanceToTarget
+        var k = targetIndex
+        while k < route.count, along <= Self.lookaheadMeters {
+            let node = route[k]
+            if k == route.count - 1 {
+                return Maneuver(kind: .arrive, distanceMeters: along, nodeId: node.id, label: node.label)
+            }
+            let next = route[k + 1]
+            // Stairs: the edge LEAVING this node is a stairs edge -> the stairs start at this node.
+            if graph.edge(between: node.id, next.id)?.hazard == .stairs {
+                return Maneuver(kind: .stairs, distanceMeters: along, nodeId: node.id, label: next.label)
+            }
+            // Turn at this node: compare the segment arriving here with the segment leaving.
+            let incoming = k > 0 ? node.position - route[k - 1].position : node.position - position
+            let outgoing = next.position - node.position
+            let angle = Geometry.signedBearing(forward: incoming, toTarget: outgoing)
+            if abs(angle) > Self.turnThreshold {
+                return Maneuver(kind: angle > 0 ? .turnRight : .turnLeft, distanceMeters: along, nodeId: node.id, label: node.label)
+            }
+            along += Geometry.horizontalDistance(node.position, next.position)
+            k += 1
+        }
+        return nil
+    }
+
+    /// The nearest labelled place (room, door, stairs...) that is beside the user: close, and roughly 50-130 degrees to the left or right.
+    func landmark(at position: SIMD3<Float>, forward: SIMD3<Float>, excluding targetId: UUID) -> Landmark? {
+        var best: (node: MapNode, side: Side, distance: Float)?
+        for node in graph.map.nodes where node.kind != .corridor && node.id != targetId && node.id != route.last?.id {
+            guard let label = node.label, !label.isEmpty else { continue }
+            let d = Geometry.horizontalDistance(position, node.position)
+            guard d < Self.landmarkRadius else { continue }
+            let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)
+            let degrees = abs(bearing) * 180 / .pi
+            guard degrees >= 50, degrees <= 130 else { continue }
+            if best == nil || d < best!.distance { best = (node, bearing > 0 ? .right : .left, d) }
+        }
+        return best.flatMap { b in b.node.label.map { Landmark(label: $0, side: b.side, nodeId: b.node.id) } }
     }
 }

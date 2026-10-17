@@ -42,6 +42,22 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var fittedBox: OrientedBox?
     private var lastBoxUpdate: TimeInterval = 0
 
+    // Performance telemetry (shown in the console `scan:` line) and the mesh-overlay switch.
+    @Published private(set) var fps: Double = 0
+    @Published private(set) var lastFitMs: Double = 0
+    /// Draw the live mesh over the camera. Turning it off does NOT stop mapping or lose anything: ARKit keeps building the same mesh and
+    /// world map, and the HUD numbers and bounding box keep updating; only the GPU work of drawing every triangle each frame stops.
+    @Published var showMeshOverlay: Bool = CaptureController.launchFlag("scanOverlay", default: true)
+    private var framesSinceStatus = 0
+    private var lastStatusTime: TimeInterval = 0
+    private var isFitting = false
+    private let boundsQueue = DispatchQueue(label: "waypoint.scan.bounds", qos: .userInitiated)
+
+    /// Reads a Bool launch argument such as `-scanOverlay NO` (UserDefaults argument domain); `default` when absent.
+    static func launchFlag(_ name: String, default fallback: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: name) == nil ? fallback : UserDefaults.standard.bool(forKey: name)
+    }
+
     // MARK: Collaborators
     let session = ARSession()
     private let store: MapStore
@@ -59,7 +75,10 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     // MARK: Control
 
-    func start(mapName: String) {
+    /// - Parameter recordSurfaceLabels: record ARKit's per-face surface classification (wall, floor, ceiling, door, window, table, seat).
+    ///   It cannot be added to a scan afterwards, so it is ON by default for any scan you keep; turn it off only for quick tests or lag A/B runs.
+    ///   `nil` = read the launch flag `-scanClassification YES/NO` (default YES).
+    func start(mapName: String, recordSurfaceLabels: Bool? = nil) {
         guard ARWorldTrackingConfiguration.isSupported else {
             errorMessage = "ARKit world tracking is not supported on this device."
             return
@@ -69,23 +88,28 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         savedMap = nil
         scanBox = nil
         fittedBox = nil
+        fps = 0
+        lastFitMs = 0
         triangleCount = 0
         meshAnchorCount = 0
         lastBoxUpdate = 0
 
         let config = ARWorldTrackingConfiguration()
         // LiDAR mesh improves tracking/mapping quality; only available on Pro iPhones.
-        // Classification lets us colour/filter by wall, floor, door... later; falls back to a plain mesh.
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
+        // Surface classification (wall/floor/door...) costs extra on-device compute, but a scan recorded WITHOUT it can never get those labels
+        // later (decision D-020, updated), so it is ON by default and switchable on the start screen / with `-scanClassification NO`.
+        // Plane detection stays off: no code uses plane anchors, so nothing is lost.
+        let wantClassification = recordSurfaceLabels ?? Self.launchFlag("scanClassification", default: true)
+        if wantClassification, ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
             config.sceneReconstruction = .meshWithClassification
         } else if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             config.sceneReconstruction = .mesh
         }
-        config.planeDetection = [.horizontal, .vertical]
+        config.planeDetection = []
         config.environmentTexturing = .none // saves memory/power; we never render reflections
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
-        Log.capture.info("capture started: \(mapName)")
+        Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
     }
 
     func stop() {
@@ -137,12 +161,23 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         latestCameraTransform = frame.camera.transform
-        mappingStatus = frame.worldMappingStatus
-        trackingSummary = Self.describe(frame.camera.trackingState)
+        // PERFORMANCE (lossless): assigning an @Published property re-renders the SwiftUI screen even when the value is unchanged, and this
+        // runs ~60x per second. Only publish real changes.
+        if mappingStatus != frame.worldMappingStatus { mappingStatus = frame.worldMappingStatus }
+        let summary = Self.describe(frame.camera.trackingState)
+        if trackingSummary != summary { trackingSummary = summary }
+        framesSinceStatus += 1
 
         if frame.timestamp - lastBoxUpdate >= 1.0 {
+            let elapsed = frame.timestamp - lastBoxUpdate
             lastBoxUpdate = frame.timestamp
+            let newFps = lastStatusTime > 0 && elapsed > 0 ? Double(framesSinceStatus) / elapsed : 0
+            framesSinceStatus = 0
+            lastStatusTime = frame.timestamp
+            if abs(newFps - fps) > 0.5 { fps = newFps }
             updateScanBox(from: frame)
+            let box = scanBox.map { String(format: "%.1fx%.1fx%.1f", $0.size.x, $0.size.y, $0.size.z) } ?? "none"
+            Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay)")
         }
 
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
@@ -152,14 +187,28 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
     }
 
+    /// Measures the mesh and refits the bounding box OFF the main thread. If the previous fit is still running this tick is skipped
+    /// (the next one reads a newer mesh anyway), so slow fits can never stack up and stall the UI or AR callbacks.
     private func updateScanBox(from frame: ARFrame) {
-        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
-        guard !anchors.isEmpty else { return }
-        let sample = MeshSampler.sample(anchors: anchors)
-        triangleCount = sample.triangleCount
-        meshAnchorCount = sample.anchorCount
-        fittedBox = OrientedBox.fitBest(points: sample.points)
-        scanBox = fittedBox?.expanded(by: boxMargin)
+        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor } // immutable snapshots; safe to read on another queue
+        guard !anchors.isEmpty, !isFitting else { return }
+        isFitting = true
+        boundsQueue.async { [weak self] in
+            let start = CACurrentMediaTime()
+            let measurement = MeshSampler.measure(anchors: anchors)
+            let box = OrientedBox.fitBest(hull: measurement.hull, minY: measurement.minY, maxY: measurement.maxY)
+            let ms = (CACurrentMediaTime() - start) * 1000
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isFitting = false
+                self.lastFitMs = ms
+                if self.triangleCount != measurement.triangleCount { self.triangleCount = measurement.triangleCount }
+                if self.meshAnchorCount != measurement.anchorCount { self.meshAnchorCount = measurement.anchorCount }
+                self.fittedBox = box
+                let shown = box?.expanded(by: self.boxMargin)
+                if self.scanBox != shown { self.scanBox = shown }
+            }
+        }
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {

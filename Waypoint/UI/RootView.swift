@@ -31,19 +31,27 @@ struct RootView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if app.mode != .none {
-                        Button("Home") { app.mode = .none }
+                        Button("Home") { app.mode = .none }.accessibilityIdentifier("toolbar.home")
                     } else {
                         Button { showSettings = true } label: { Image(systemName: "gearshape") }
                             .accessibilityLabel("Settings")
+                            .accessibilityIdentifier("toolbar.settings")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Share maps") { showSync = true }
                         .accessibilityLabel("Share maps with nearby phones")
+                        .accessibilityIdentifier("toolbar.share")
                 }
             }
             .sheet(isPresented: $showSync) { SyncView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .task {
+                // `-autoE2E YES`: run the headless end-to-end self-test once, then quit with its result.
+                guard app.launchCommand == .e2e else { return }
+                let ok = await E2ESelfTest.run(app: app)
+                exit(ok ? 0 : 1)
+            }
         }
         .onAppear {
             guard !didAutoOpen else { return }
@@ -54,10 +62,10 @@ struct RootView: View {
 
     private var modePicker: some View {
         VStack(spacing: 24) {
-            bigButton("Navigate", subtitle: "Get guided to a room", systemImage: "figure.walk") {
+            bigButton("Navigate", id: "mode.navigate", subtitle: "Get guided to a room", systemImage: "figure.walk") {
                 app.mode = .navigator
             }
-            bigButton("Scan a building", subtitle: "Volunteer: record a map", systemImage: "camera.viewfinder") {
+            bigButton("Scan a building", id: "mode.scan", subtitle: "Volunteer: record a map", systemImage: "camera.viewfinder") {
                 app.mode = .volunteer
             }
             Text("\(app.maps.count) map(s) on this phone")
@@ -66,7 +74,7 @@ struct RootView: View {
         .padding(24)
     }
 
-    private func bigButton(_ title: String, subtitle: String, systemImage: String,
+    private func bigButton(_ title: String, id: String, subtitle: String, systemImage: String,
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 16) {
@@ -82,5 +90,6 @@ struct RootView: View {
             .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 20))
         }
         .accessibilityLabel("\(title). \(subtitle)")
+        .accessibilityIdentifier(id) // stable id for UI tests (WaypointUITests)
     }
 }

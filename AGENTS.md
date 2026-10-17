@@ -84,6 +84,11 @@ right of the user's facing. See `Geometry.swift` and its tests.
 | `make gen` | regenerate `Waypoint.xcodeproj` from `project.yml` | no |
 | `make check` | full unsigned `xcodebuild` compile (needs healthy Xcode) | no |
 | `make devices` | list connected iPhones | yes |
+| `DEVICE=<id> make selftest-sim` | **Update 2026-10-17:** headless simulated walk on the phone, prints every cue, PASS/FAIL (phone unlocked) | yes |
+| `DEVICE=<id> make selftest-scan` | **Update 2026-10-17:** headless scan monitor, prints tracking/mesh/box stats each second | yes |
+| `DEVICE=<id> make uitest` | **Update 2026-10-17:** UI tests on the phone (taps + screenshots + HUD readback); results/screens in `~/Library/Caches/Waypoint/uitest-screens/` | yes |
+| `DEVICE=<id> make selftest-e2e` | **Update 2026-10-17:** in-app end-to-end self-test on the phone (capabilities, storage, Keychain, synthetic scan -> save -> reload -> share -> walk, cloud if configured) | yes |
+| `make team-id` | **Update 2026-10-17:** print your Apple team id from your signing certificate | no |
 | `DEVICE=<id> make run` | build + sign + install + launch + stream console | yes |
 | `make doctor` | diagnose the machine | no |
 

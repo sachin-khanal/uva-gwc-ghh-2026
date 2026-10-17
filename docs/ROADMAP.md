@@ -264,3 +264,16 @@ U4.5 ── U2.3        U4.6 ── U1.7        INF-1 ── U3/U4 devices
 2. Which GitHub plan runs the repo's CI (macOS runner minutes)?
 3. Is the regular iPhone (U4) allowed to be the demo's navigator phone if U4.8 passes? It would leave the three LiDAR phones free for scanning.
 4. Public ("share with everyone") or team-only sharing for maps? (Architecture §9, item 7)
+
+## Update 2026-10-17 — accessibility requirements added to the plan (D-022)
+
+New tasks, in addition to the Revision 3 tables above (owners follow the existing lanes):
+| ID | Owner | Task | Done when |
+|---|---|---|---|
+| A11Y-1 | U1 | On the Pro Max run checks A1-A3 (docs/TESTING.md, "Accessibility checks on a real phone") and confirm the posture signs/axes; report anything swapped | pitch/roll read as described |
+| A11Y-2 | U2 | A4 + A5 with headphones: posture coaching feels right and the beacon is in the correct ear | both pass; tune thresholds (`PostureMonitor`) and haptic strength |
+| A11Y-3 | U2 + U1 | A6 in a real corridor: obstacle sentences and timing; calibrate `ObstacleDetector` corridor/band and `ObstacleClassifier` distances; side obstacles; low objects | walking into a wall/chair/trash can is announced by name before contact |
+| A11Y-4 | U4 | Review every sentence in `SpokenPhrases.swift` / `PhonePosture.swift` with a blind or low-vision person if reachable; list wording changes (they are one file each, with tests) | list handed to U2 |
+| A11Y-5 | U3 | Run `make selftest-e2e` on every teammate's phone; paste the `vision.labels.*` lines so the label mapper can be tuned for all models | lines in WORKLOG |
+| A11Y-6 | U2 | Stairs-down / ledge detection (a downward depth check) and temporal voting for object names (needs A11Y-3 data) | stretch |
+Cut line: A11Y-1/2/3 are part of the never-cut "guided walk with obstacles" path; A11Y-6 is stretch.

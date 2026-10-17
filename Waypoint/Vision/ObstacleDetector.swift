@@ -1,33 +1,48 @@
 //
 // File:     Waypoint/Vision/ObstacleDetector.swift
 // Owner:    C (Vision)
-// Purpose:  Reads the LiDAR depth map ARKit attaches to each frame (`frame.sceneDepth`) and returns
-//           the NEAREST trusted distance in the region directly in front of the user.
-//           WaypointCore's `ObstacleClassifier` then turns that number into clear/caution/stop.
-// Depth map: 256x192 Float32 meters, in the sensor's landscape orientation. Phone held PORTRAIT
-//           => sensor-x runs along the portrait-vertical axis. The central box below is symmetric
-//           enough that it works either way, but if you want a tall "body-width" corridor
-//           (instead of a square) swap which axis you narrow - tune on a device.
-// Confidence: ARKit supplies a per-pixel confidence map; we ignore .low pixels (noisy at edges,
-//           glass, dark surfaces) and non-finite or implausibly-near (<0.1 m) values.
-// Status:   SCAFFOLD. TODO(C): use a low percentile instead of the minimum to reject single-pixel
-//           noise; add a downward region to catch drop-offs/descending stairs.
+// Purpose:  Reads the LiDAR depth map ARKit attaches to each frame (`frame.sceneDepth`) and finds the NEAREST OBSTACLE in the corridor straight
+//           ahead of the user: its distance, where it is in the world, and which side it is on. WaypointCore's `ObstacleClassifier` turns the
+//           distance into clear/caution/stop; `ObstacleIdentifier` works out WHAT it is.
+// Geometry: the depth map is in the SENSOR's orientation (landscape, 256x192). For a phone held UPRIGHT IN PORTRAIT (the posture the app coaches
+//           the user into, see PhonePosture):
+//             * sensor COLUMN grows toward the BOTTOM of the phone  -> columns are "height"; we scan most of them (head to knee),
+//             * sensor ROW grows toward the user's LEFT              -> rows are "left-right"; the corridor straight ahead is the middle ~28 %.
+//           Each sample is unprojected with the camera intrinsics to a WORLD point, and only points inside the obstacle band count
+//           (`ObstacleBand`: not the floor under the user's feet, not the ceiling), so the result no longer depends on how far the phone is
+//           tilted down. (Before 2026-10-17 this was a plain box in depth-map coordinates, which on a portrait phone was the wrong shape.)
+// Confidence: ARKit supplies a per-pixel confidence map; we ignore .low pixels (noisy at edges, glass, dark surfaces) and non-finite or
+//           implausibly-near (<0.1 m) values.
+// Status:   SCAFFOLD, UNVERIFIED ON DEVICE with real obstacles. TODO(C): calibrate the band/corridor in a real hallway; stairs-down and
+//           ledges (need a downward check); side hits for "chair on your left".
 //
 import ARKit
+import WaypointCore
+
+/// The closest obstacle straight ahead.
+struct DepthHit {
+    var depth: Float            // meters along the camera's viewing axis
+    var worldPoint: SIMD3<Float>
+    var side: Side              // v1: always `.ahead` (only the straight-ahead corridor is scanned)
+}
 
 enum ObstacleDetector {
 
-    /// Fraction of the depth map to sample, centered. 0.3 x 0.5 = middle 30% wide, middle 50% tall.
-    static let regionWidthFraction: Float = 0.3
-    static let regionHeightFraction: Float = 0.5
+    /// Fraction of the sensor COLUMNS scanned (the phone's vertical extent) and of the ROWS (the left-right corridor).
+    static let columnFractions: ClosedRange<Float> = 0.10...0.90
+    static let corridorRowFractions: ClosedRange<Float> = 0.36...0.64
+    /// Look at every n-th pixel: 256x192 -> a few thousand samples is plenty and keeps this cheap at 10 Hz.
+    static let sampleStride = 2
 
-    /// - Returns: smallest trusted depth (meters) in the forward region, or nil if none were trusted.
-    static func nearestDepth(in frame: ARFrame) -> Float? {
+    static func centerHit(in frame: ARFrame) -> DepthHit? {
         guard let depthData = frame.sceneDepth else { return nil }
-        return nearestDepth(depthMap: depthData.depthMap, confidenceMap: depthData.confidenceMap)
+        return centerHit(depthMap: depthData.depthMap, confidenceMap: depthData.confidenceMap, camera: frame.camera)
     }
 
-    static func nearestDepth(depthMap: CVPixelBuffer, confidenceMap: CVPixelBuffer?) -> Float? {
+    /// Legacy convenience: just the distance.
+    static func nearestDepth(in frame: ARFrame) -> Float? { centerHit(in: frame)?.depth }
+
+    static func centerHit(depthMap: CVPixelBuffer, confidenceMap: CVPixelBuffer?, camera: ARCamera) -> DepthHit? {
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
         if let confidenceMap { CVPixelBufferLockBaseAddress(confidenceMap, .readOnly) }
@@ -37,26 +52,43 @@ enum ObstacleDetector {
         let height = CVPixelBufferGetHeight(depthMap)
         guard let depthBase = CVPixelBufferGetBaseAddress(depthMap) else { return nil }
         let depthStride = CVPixelBufferGetBytesPerRow(depthMap)
-
         let confBase = confidenceMap.flatMap { CVPixelBufferGetBaseAddress($0) }
         let confStride = confidenceMap.map { CVPixelBufferGetBytesPerRow($0) } ?? 0
 
-        let x0 = Int(Float(width) * (0.5 - regionWidthFraction / 2))
-        let x1 = Int(Float(width) * (0.5 + regionWidthFraction / 2))
-        let y0 = Int(Float(height) * (0.5 - regionHeightFraction / 2))
-        let y1 = Int(Float(height) * (0.5 + regionHeightFraction / 2))
+        // Camera intrinsics are in captured-image pixels; scale them to the (smaller) depth map.
+        let K = camera.intrinsics
+        let sx = Float(width) / Float(camera.imageResolution.width)
+        let sy = Float(height) / Float(camera.imageResolution.height)
+        let fx = K[0][0] * sx, fy = K[1][1] * sy, cx = K[2][0] * sx, cy = K[2][1] * sy
+        let transform = camera.transform
+        let cameraY = transform.columns.3.y
+        let confidenceFloor = UInt8(ARConfidenceLevel.medium.rawValue)
 
-        var nearest: Float?
-        for y in y0..<y1 {
-            let depthRow = depthBase.advanced(by: y * depthStride).assumingMemoryBound(to: Float32.self)
-            let confRow = confBase?.advanced(by: y * confStride).assumingMemoryBound(to: UInt8.self)
-            for x in x0..<x1 {
-                if let confRow, confRow[x] < UInt8(ARConfidenceLevel.medium.rawValue) { continue }
-                let d = depthRow[x]
+        let col0 = Int(Float(width) * columnFractions.lowerBound), col1 = Int(Float(width) * columnFractions.upperBound)
+        let row0 = Int(Float(height) * corridorRowFractions.lowerBound), row1 = Int(Float(height) * corridorRowFractions.upperBound)
+
+        var best: DepthHit?
+        var row = row0
+        while row < row1 {
+            let depthRow = depthBase.advanced(by: row * depthStride).assumingMemoryBound(to: Float32.self)
+            let confRow = confBase?.advanced(by: row * confStride).assumingMemoryBound(to: UInt8.self)
+            var col = col0
+            while col < col1 {
+                defer { col += sampleStride }
+                if let confRow, confRow[col] < confidenceFloor { continue }
+                let d = depthRow[col]
                 guard d.isFinite, d > 0.1 else { continue }
-                if nearest == nil || d < nearest! { nearest = d }
+                if let b = best, d >= b.depth { continue } // only the nearest matters; skip the unprojection for farther pixels
+
+                // Unproject to camera space (x right in the image, y UP in the image, camera looks along -z) and then to world space.
+                let u = Float(col) + 0.5, v = Float(row) + 0.5
+                let local = SIMD4<Float>((u - cx) * d / fx, -(v - cy) * d / fy, -d, 1)
+                let world = transform * local
+                guard ObstacleBand.contains(pointY: world.y, cameraY: cameraY) else { continue }
+                best = DepthHit(depth: d, worldPoint: SIMD3<Float>(world.x, world.y, world.z), side: .ahead)
             }
+            row += sampleStride
         }
-        return nearest
+        return best
     }
 }
