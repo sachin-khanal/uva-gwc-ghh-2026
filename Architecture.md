@@ -216,3 +216,60 @@ Test early in **any real corridor** (dorm, Rice Hall itself) rather than at a de
 2. Headphones for the demo (AirPods vs wired) — it affects the spatial audio design.
 3. Whether the QR marker is mandatory in the demo or only a fallback.
 4. One shared Apple ID for signing vs each dev signing their own phone.
+
+---
+
+## 10. Revision 2 (PROPOSED, 2026-10-17): Supabase backend and Polycam-style live scanner
+
+Sections 1-9 describe the original local-only design and remain valid unless listed here.
+Roadmap and parallel workstreams: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### 10.1 What changed
+- Native iPhone app, sideloaded (free Apple ID), never published. Unchanged from section 1.
+- **Backend: Supabase free tier** (Postgres + Storage + anonymous auth). Replaces "no server" as the
+  primary sync path. MultipeerConnectivity and AirDrop export stay as the **offline fallback**.
+- **Scanner upgraded** from "breadcrumbs only" to a Polycam-style LiDAR scan: live mesh overlay,
+  adjustable bounding box, saved 3D model with navigation pins.
+
+### 10.2 Live scanner design (volunteer mode)
+- ARKit: `sceneReconstruction = .meshWithClassification` (falls back to `.mesh`) on Pro iPhones.
+  Each `ARMeshAnchor` carries vertices, faces, and a per-face class (wall, floor, ceiling, door, window,
+  table, seat). Anchors update as the mesh grows.
+- Rendering: RealityKit `ARView`. Start with the built-in `debugOptions: .showSceneUnderstanding`
+  for a first live overlay, then replace with one `ModelEntity` per anchor to colour by class.
+- Bounding box: gravity-aligned box (yaw only) fit to the mesh vertices, drawn as a wireframe, with
+  handles to shrink/grow. The box is also the crop volume for export and the "scan area" shown in the HUD.
+  Box math lives in `WaypointCore` (`Scan/BoundingBox.swift`) so it is unit-tested.
+- Export: crop anchors to the box, assemble `MDLMesh` via ModelIO, write USDZ. Byte budget 40 MB per
+  file (Supabase free tier limit is 50 MB per upload); decimate or drop small anchors to fit.
+- Bonus for navigation (stretch): classification gives free door candidates (suggested door nodes)
+  and wall/floor information for obstacle checks. Humans still confirm labels.
+- Navigation data is unchanged: the mesh is for viewing/export; routing still uses the waypoint graph and
+  the `ARWorldMap` for relocalization (section 4.2).
+
+### 10.3 Cloud design (Supabase)
+- **Auth:** anonymous sign-in (no signup UI). Each phone gets a user id; Row Level Security uses it.
+- **Tables:** `buildings` (id, owner, name, version, map_json jsonb, is_shared, updated_at) and
+  `scans` (id, building_id, owner, storage_path, bytes, bbox jsonb, triangle_count, created_at).
+- **Storage buckets:** `worldmaps` (ARWorldMap binaries), `meshes` (USDZ). Private; access via RLS on
+  `storage.objects` keyed on owner id; shared buildings readable by all authenticated users.
+- **Client:** plain REST via `URLSession` (PostgREST + Storage + GoTrue anonymous), implemented in
+  `WaypointCore` with an injectable transport so it is unit-tested with a mock. No Supabase SDK (D-014).
+- **Trust:** the app ships with the public anon key, so ALL authorization is RLS. Downloaded maps are
+  untrusted data: they go through the same `MapBundle.validate()` and user approval as peer-to-peer
+  imports (D-012).
+- **Free-tier realities (verify in the dashboard):** about 500 MB database, 1 GB storage, 50 MB per
+  file, project auto-pauses after about a week of inactivity (wake it before the demo), no SLA.
+- **Offline first:** every screen must work with no network; cloud is sync, not a dependency of
+  navigation. Pre-load the demo maps onto every phone.
+
+### 10.4 Updated module map (additions)
+```
+Package/WaypointCore/Sources/WaypointCore/
+  Scan/        BoundingBox, ExportBudget                  (A/C)
+  Cloud/       SupabaseClient, CloudModels, SyncEngine    (D)
+Waypoint/
+  Scan/        LiveScanView (RealityKit), MeshExporter, ModelViewer   (A/C)
+  Cloud/       LibraryView, AuthSession                                 (D)
+supabase/migrations/   SQL schema + RLS                                 (D)
+```

@@ -19,6 +19,22 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 12:30 — Claude (agent, for Sachin) — Direction change: Supabase + Polycam-style scanner (docs only)   [tags: DOCS]
+Area: shared
+Trigger: user said the app is native-iPhone-only (not published), uses Supabase free tier, and needs a
+live bounding-box -> 3D LiDAR scanner like Polycam.
+Files created: `docs/ROADMAP.md` (workstreams 0-7, owners, milestones M0-M5, cut lines, tasks an agent
+can start without a phone).
+Files edited: `Architecture.md` (+section 10 "Revision 2", PROPOSED); `docs/DECISIONS.md` (+D-013..D-016, all
+PROPOSED; D-016 amends D-007).
+Code changed: none. No tests affected.
+Verified: nothing to run (docs only).
+Open: team must approve the proposals; then start stream 0 (device bring-up) and the phone-free tasks in
+ROADMAP.md. Supabase project must be created by a human (needs their account); never commit the service-role key,
+only the public anon key belongs in the app config.
+
+---
+
 ## 2026-10-17 12:05 — Claude (agent, for Sachin) — xcodebuild now works; first full app build succeeds   [tags: BUILD]
 Area: shared
 Context: after the CoreSimulator fix (`sudo xcodebuild -runFirstLaunch`, run by Sachin), retried the build.

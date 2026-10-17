@@ -61,3 +61,22 @@ merging into an existing map, new edges between two already-known nodes are refu
 spliced shortcuts; also blocks legit loop-closing - scan a node in between). Not covered:
 authenticating WHO sent the map (Multipeer has no strong identity; the human check is the
 control) and detecting a fully-formed but false map from an approved peer. **Status:** accepted.
+
+## D-013 — Polycam-style live LiDAR scanner is part of volunteer mode (PROPOSED)
+Live mesh overlay + resizable bounding box + exported 3D model, using ARKit mesh reconstruction with
+classification. Navigation remains the demo's climax; the scanner produces the map and the visuals.
+Not in scope: photogrammetry, measuring, floor plans, public explore feed. **Status:** proposed, awaiting team OK.
+
+## D-014 — Supabase over plain REST, no Supabase SDK (PROPOSED)
+Supersedes the "no backend" assumption for sync. We call PostgREST/Storage/GoTrue with `URLSession`
+to keep D-003 (zero third-party dependencies) and to unit-test the client with a mock transport.
+Trade-off: more code than `supabase-swift`. Revisit if the client takes more than ~3 hours.
+**Status:** proposed.
+
+## D-015 — Anonymous auth + Row Level Security; cloud data is untrusted (PROPOSED)
+No signup flow in a 24h demo. The anon key is public, so RLS is the only authorization. Downloaded
+maps are validated and user-approved exactly like peer-to-peer imports (D-012). **Status:** proposed.
+
+## D-016 — Multipeer/AirDrop stay as the offline fallback (PROPOSED)
+Venue Wi-Fi may be bad or the free-tier project may be paused. Navigation never depends on the network.
+Amends D-007: Multipeer is no longer the primary sync path. **Status:** proposed.
