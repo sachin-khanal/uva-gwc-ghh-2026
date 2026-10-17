@@ -58,6 +58,7 @@ Example file per version: `docs/map-format/map-v1.json`, `docs/map-format/map-v2
 
 ### On-disk layout
 `<Documents>/Maps/<map-uuid>/map.json` and `worldmap-<segmentId>.arworldmap`.
+**Update 2026-10-17 (Claude):** the folder can also hold `route-memory.json` (derived cache, never shared) and `model.usdz` (3D model of the scan, written when a scan is saved; not part of `.waypointmap` bundles or cloud sync yet). Neither changes the map format.
 
 ## Format 1 (legacy, still readable)
 

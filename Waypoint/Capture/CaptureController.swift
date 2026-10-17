@@ -22,6 +22,7 @@
 // Test on:  physical Pro iPhone only.
 //
 import ARKit
+import SceneKit
 import Combine
 import WaypointCore
 
@@ -51,6 +52,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var lastFitMs: Double = 0
     /// Draw the live mesh over the camera. Turning it off does NOT stop mapping or lose anything: ARKit keeps building the same mesh and
     /// world map, and the HUD numbers and bounding box keep updating; only the GPU work of drawing every triangle each frame stops.
+    /// Recording is paused: no breadcrumbs, no tags, no mesh counting, no box refit, no coverage. The AR session keeps TRACKING (pausing it would
+    /// lose the map's origin), so resuming is seamless. See `pauseRecording` / `resumeRecording`.
+    /// Progress of the 3D model export that follows a save: nil (nothing), "Building 3D model…", "3D model saved (12.3 MB)", or an error sentence.
+    @Published private(set) var modelStatus: String?
+    @Published private(set) var isPaused = false
+    /// "Unscanned areas" overlay (yellow tiles on the box faces where no mesh exists yet). Off by default; turning it on costs one background pass per second.
+    @Published var showCoverage = CaptureController.launchFlag("scanCoverage", default: false)
+    @Published private(set) var coverage: CoverageSnapshot?
+    private var pausedAt: SIMD3<Float>?
     @Published var showMeshOverlay: Bool = CaptureController.launchFlag("scanOverlay", default: true)
     private var framesSinceStatus = 0
     private var lastStatusTime: TimeInterval = 0
@@ -71,6 +81,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var isExtension = false
     private var extensionAttached = false
     private var isSaving = false
+    private var exportProbeDone = false
     private var latestCameraTransform: simd_float4x4?
 
     var needsExtensionAttachment: Bool { isExtension && !extensionAttached && isRunning }
@@ -135,6 +146,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             errorMessage = "ARKit world tracking is not supported on this device."
             return
         }
+        modelStatus = nil
         let config = ARWorldTrackingConfiguration()
         // A failed/missing world map must never silently create an unaligned extension.
         // Reading and decoding one is slow (tens of megabytes through NSKeyedUnarchiver), so when
@@ -196,7 +208,35 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         extensionStatus = nil
     }
 
+    /// Stops recording without stopping tracking. Idempotent.
+    func pauseRecording() {
+        guard isRunning, !isPaused else { return }
+        isPaused = true
+        pausedAt = latestCameraTransform.map { Geometry.translation(of: $0) }
+        canRecord = false
+        errorMessage = nil
+    }
+
+    /// Resumes recording, but only near where it was paused: otherwise the next breadcrumb would be joined to the last one by a straight edge
+    /// through whatever lies between (see `ResumeGuard`). Returns false (and sets `errorMessage`) when refused.
+    @discardableResult
+    func resumeRecording() -> Bool {
+        guard isPaused else { return true }
+        let now = latestCameraTransform.map { Geometry.translation(of: $0) }
+        guard ResumeGuard.canResume(pausedAt: pausedAt, now: now) else {
+            if let a = pausedAt, let b = now { errorMessage = ResumeGuard.message(distance: Geometry.horizontalDistance(a, b)) }
+            return false
+        }
+        errorMessage = nil
+        isPaused = false
+        pausedAt = nil
+        return true
+    }
+
     func stop() {
+        isPaused = false
+        pausedAt = nil
+        coverage = nil
         isPreparing = false
         preparedExtension = nil
         session.pause()
@@ -285,6 +325,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         // the same capture. Tracking telemetry continues until the save completes.
         canRecord = false
         isSaving = true
+        // Snapshot the mesh now (before stop() pauses the session) for the 3D model export that follows the save.
+        let meshAnchors = session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
+        let exportBox = scanBox
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
             DispatchQueue.main.async {
@@ -300,12 +343,33 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     // cannot be erased by saving this older starting snapshot.
                     let saved = try self.store.importBundle(MapBundle(map: map, worldMaps: [savedSegment: data]))
                     self.savedMap = saved
+                    self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
                     self.stop()
                     Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
                 } catch {
                     self.errorMessage = "Save failed: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    /// Builds the 3D model (USDZ) next to the saved map on a background queue. A failure never affects the saved map.
+    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID) {
+        guard !anchors.isEmpty else { modelStatus = nil; return }
+        modelStatus = "Building 3D model…"
+        let url = store.modelURL(mapId: mapId)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let message: String
+            do {
+                let report = try MeshExporter.export(anchors: anchors, box: box, to: url)
+                let size = ByteCountFormatter.string(fromByteCount: Int64(report.fileBytes), countStyle: .file)
+                message = "3D model saved (\(size), \(report.triangles.formatted()) triangles)"
+                Log.capture.info("model exported: \(report.fileBytes) bytes, \(report.triangles) triangles, cell=\(report.clusterCellSize.map { String($0) } ?? "none"), fits=\(report.fitsBudget)")
+            } catch {
+                message = "3D model not saved: \(error.localizedDescription)"
+                Log.capture.error("model export failed: \(error.localizedDescription)")
+            }
+            DispatchQueue.main.async { self?.modelStatus = message }
         }
     }
 
@@ -327,13 +391,35 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             framesSinceStatus = 0
             lastStatusTime = frame.timestamp
             if abs(newFps - fps) > 0.5 { fps = newFps }
-            updateScanBox(from: frame)
+            if !isPaused { updateScanBox(from: frame) }
+            // Headless check (`-scanExportProbe YES`, with -autoScan): once there is a real mesh, export it exactly as a save would, log the
+            // result and delete the file. Proves ARMeshAnchor extraction + decimation + USDZ writing on real LiDAR data without walking.
+            if !exportProbeDone, Self.launchFlag("scanExportProbe", default: false), triangleCount > 3000 {
+                exportProbeDone = true
+                let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+                let box = scanBox
+                DispatchQueue.global(qos: .utility).async {
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("probe-\(UUID().uuidString).usdz")
+                    defer { try? FileManager.default.removeItem(at: url) }
+                    let started = CACurrentMediaTime()
+                    do {
+                        let r = try MeshExporter.export(anchors: anchors, box: box, to: url)
+                        let scene = try? SCNScene(url: url, options: nil)
+                        var back = 0
+                        scene?.rootNode.enumerateHierarchy { node, _ in for e in node.geometry?.elements ?? [] { back += e.primitiveCount } }
+                        Log.capture.info("EXPORT PROBE PASS: \(anchors.count) anchors -> \(r.triangles) triangles (read back \(back)), \(r.fileBytes) bytes, cell=\(r.clusterCellSize.map { String($0) } ?? "none"), fits=\(r.fitsBudget), \(Int((CACurrentMediaTime() - started) * 1000)) ms")
+                    } catch {
+                        Log.capture.error("EXPORT PROBE FAIL: \(error.localizedDescription)")
+                    }
+                }
+            }
             let box = scanBox.map { String(format: "%.1fx%.1fx%.1f", $0.size.x, $0.size.y, $0.size.z) } ?? "none"
-            Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay)")
+            Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay) | coverage=\(coverage.map { String(format: "%.0f%% (%d open tiles, %d outline dashes)", $0.percent * 100, $0.tiles.count, $0.outline.count) } ?? "off") | paused=\(isPaused)")
         }
 
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
         guard isRunning, savedMap == nil, !isSaving else { return }
+        guard !isPaused else { if canRecord { canRecord = false }; return }
         guard case .normal = frame.camera.trackingState else {
             if canRecord { canRecord = false }
             return
@@ -352,10 +438,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor } // immutable snapshots; safe to read on another queue
         guard !anchors.isEmpty, !isFitting else { return }
         isFitting = true
+        let wantCoverage = showCoverage, margin = boxMargin
         boundsQueue.async { [weak self] in
             let start = CACurrentMediaTime()
             let measurement = MeshSampler.measure(anchors: anchors)
             let box = OrientedBox.fitBest(hull: measurement.hull, minY: measurement.minY, maxY: measurement.maxY)
+            // Coverage grid over the (margin-expanded) box, only when the overlay is on.
+            var snapshot: CoverageSnapshot?
+            if wantCoverage, let shown = box?.expanded(by: margin) {
+                var grid = CoverageGrid(box: shown)
+                grid.add(points: MeshSampler.samplePoints(anchors: anchors))
+                snapshot = CoverageSnapshot(tiles: grid.uncoveredTiles(), outline: CoverageGrid.dashed(grid.outline()), percent: grid.coverage)
+            }
             let ms = (CACurrentMediaTime() - start) * 1000
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -364,6 +458,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 if self.triangleCount != measurement.triangleCount { self.triangleCount = measurement.triangleCount }
                 if self.meshAnchorCount != measurement.anchorCount { self.meshAnchorCount = measurement.anchorCount }
                 self.fittedBox = box
+                if wantCoverage { self.coverage = snapshot } else if self.coverage != nil { self.coverage = nil }
                 let shown = box?.expanded(by: self.boxMargin)
                 if self.scanBox != shown { self.scanBox = shown }
             }
@@ -389,4 +484,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             }
         }
     }
+}
+
+/// What the "unscanned areas" overlay draws: yellow tiles, a dashed white outline, and the coverage figure for the HUD.
+struct CoverageSnapshot: Equatable {
+    var tiles: [UncoveredTile]
+    var outline: [CoverageSegment]
+    /// 0...1
+    var percent: Float
 }

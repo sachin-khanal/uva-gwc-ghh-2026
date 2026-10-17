@@ -20,6 +20,9 @@ struct ScanReviewView: View {
     @State private var renaming: MapNode?
     @State private var renameText = ""
     @State private var saveError: String?
+    @State private var modelReady = false
+    @State private var showModel = false
+    private let openedAt = Date()
 
     init(map: BuildingMap, onShare: @escaping (BuildingMap) -> Void, onDone: @escaping () -> Void) {
         _map = State(initialValue: map)
@@ -84,7 +87,7 @@ struct ScanReviewView: View {
                     }
                 }
 
-                placeholder3D
+                model3D
 
                 VStack(spacing: Theme.Space.m) {
                     HeroButton(title: "Save & share", subtitle: "Send to nearby phones or the cloud",
@@ -95,6 +98,10 @@ struct ScanReviewView: View {
             .padding(Theme.Space.l)
         }
         .background(Theme.screenBackground)
+        .fullScreenCover(isPresented: $showModel) {
+            ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { showModel = false })
+        }
+        .onAppear { modelReady = app.store.hasModel(mapId: map.id) }
         .alert("Rename place", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Label", text: $renameText)
                 .textInputAutocapitalization(.words)
@@ -156,19 +163,54 @@ struct ScanReviewView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var placeholder3D: some View {
-        HStack(spacing: Theme.Space.m) {
-            Image(systemName: "cube.transparent").font(.title).foregroundStyle(Theme.accent).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("3D model").font(.headline)
-                Text("Coming soon: mesh export and 3D preview (roadmap U3.8).")
-                    .font(.subheadline).foregroundStyle(.secondary)
+    /// The 3D model of this scan (USDZ written at save time, see MeshExporter). It is built in the background after saving, so the
+    /// card first says it is being built, then offers the viewer. Scans without a model (demo scans, the sample map, scans made before
+    /// this feature) say so plainly.
+    private var model3D: some View {
+        let ready = modelReady
+        return Button {
+            if ready { showModel = true }
+        } label: {
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: ready ? "cube.fill" : "cube.transparent").font(.title).foregroundStyle(Theme.accent).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("3D model").font(.headline)
+                    Text(ready ? "Open the scan as a 3D model with the places pinned on it."
+                         : modelWaiting ? "Building the 3D model from the scan…"
+                         : "No 3D model for this scan (only real LiDAR scans saved with this version have one).")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if ready { Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true) }
+                else if modelWaiting { ProgressView() }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.l)
+            .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!ready)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(ready ? .isButton : [])
+        .accessibilityIdentifier("review.model3d")
+        .task {
+            // A scan that was just saved is still being exported: look for the file for up to a minute.
+            for _ in 0..<60 {
+                if app.store.hasModel(mapId: map.id) { modelReady = true; break }
+                if !savedRecently { break } // an older scan: nothing is coming
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Space.l)
-        .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .accessibilityElement(children: .combine)
+    }
+
+    /// True while a model may still be coming (the review opened right after a save).
+    private var modelWaiting: Bool { !modelReady && Date().timeIntervalSince(openedAt) < 60 && savedRecently }
+
+    /// The map file was written in the last two minutes, i.e. this review follows a fresh scan whose model is still being built.
+    private var savedRecently: Bool {
+        let file = app.store.directory(for: map.id).appendingPathComponent("map.json")
+        guard let modified = (try? FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate]) as? Date else { return false }
+        return Date().timeIntervalSince(modified) < 120
     }
 
     private func applyRename() {

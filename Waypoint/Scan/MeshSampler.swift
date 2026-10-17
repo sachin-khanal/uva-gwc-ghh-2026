@@ -133,3 +133,27 @@ extension MeshSampler {
         return points
     }
 }
+
+extension MeshSampler {
+
+    /// World-space mesh vertices, every `stride`-th one, for the coverage ("unscanned areas") grid. Runs on a background queue; reads
+    /// immutable anchor snapshots only. `limit` caps the total so a huge scan cannot make this slow.
+    static func samplePoints(anchors: [ARMeshAnchor], stride step: Int = 3, limit: Int = 120_000) -> [SIMD3<Float>] {
+        var points: [SIMD3<Float>] = []
+        for anchor in anchors {
+            let vertices = anchor.geometry.vertices
+            guard vertices.count > 0 else { continue }
+            let m = anchor.transform
+            let base = vertices.buffer.contents().advanced(by: vertices.offset)
+            for i in Swift.stride(from: 0, to: vertices.count, by: max(1, step)) {
+                let f = base.advanced(by: i * vertices.stride).assumingMemoryBound(to: Float.self)
+                let x = f[0], y = f[1], z = f[2]
+                points.append(SIMD3<Float>(m.columns.0.x * x + m.columns.1.x * y + m.columns.2.x * z + m.columns.3.x,
+                                           m.columns.0.y * x + m.columns.1.y * y + m.columns.2.y * z + m.columns.3.y,
+                                           m.columns.0.z * x + m.columns.1.z * y + m.columns.2.z * z + m.columns.3.z))
+                if points.count >= limit { return points }
+            }
+        }
+        return points
+    }
+}

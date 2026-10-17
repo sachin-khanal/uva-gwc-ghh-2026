@@ -9,8 +9,8 @@
 // Mapping:  trackingSummary -> ScanTracking.from(summary:) (tested in FlowTests)
 //           mappingStatus   -> ScanQuality
 //           nodeCount, triangleCount, scanBox, boxMargin, errorMessage copied as they are.
-// Limits:   * Pause only stops accepting tags; ARKit keeps running (CaptureController has no pause that keeps
-//             the map - requested from U1 in UI_PLAN §11).
+// Limits:   * Pause is REAL since 2026-10-17: CaptureController.pauseRecording stops breadcrumbs, tags, mesh counting and box fitting while
+//             ARKit keeps tracking (stopping the session would lose the map origin). Resume is refused far from the pause point.
 //           * Tags are recorded here as they are requested; CaptureController.tagPOI silently ignores a tag
 //             made before the first camera frame, so the list can very rarely include one extra tag.
 // Threading: CaptureController publishes on the main queue; we hop to the next run-loop turn after
@@ -58,8 +58,23 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
-    func pause() { isPaused = true }
-    func resume() { isPaused = false }
+    func pause() {
+        isPaused = true
+        controller.pauseRecording()
+        refresh()
+    }
+
+    func resume() {
+        if controller.resumeRecording() { isPaused = false }
+        refresh()
+    }
+
+    var coverageOverlay: CoverageSnapshot? { controller.coverage }
+
+    func setShowCoverage(_ on: Bool) {
+        controller.showCoverage = on
+        refresh()
+    }
 
     func tag(kind: NodeKind, label: String?) {
         guard controller.isRunning, !isPaused else { return }
@@ -131,6 +146,9 @@ final class LiveScanService: ScanService {
         s.tags = tags
         s.errorMessage = controller.errorMessage
         s.extensionStatus = controller.extensionStatus
+        s.isPaused = controller.isPaused
+        s.showCoverage = controller.showCoverage
+        s.coveragePercent = controller.coverage?.percent
         s.canRecord = controller.extensionStatus == nil || controller.canRecord
         snapshot = s
     }

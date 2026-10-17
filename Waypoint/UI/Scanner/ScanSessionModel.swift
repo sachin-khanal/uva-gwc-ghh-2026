@@ -45,8 +45,13 @@ final class ScanSessionModel: ObservableObject {
     }
 
     func togglePause() {
-        isPaused.toggle()
-        if isPaused { service.pause() } else { service.resume() }
+        if isPaused {
+            service.resume()
+            isPaused = service.snapshot.isPaused // the live engine refuses to resume far from where it was paused
+        } else {
+            service.pause()
+            isPaused = true
+        }
         Announcer.voiceOverOnly(isPaused ? "Scan paused" : "Scan resumed")
     }
 

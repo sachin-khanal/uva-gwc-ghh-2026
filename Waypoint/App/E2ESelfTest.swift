@@ -15,6 +15,8 @@
 // Run on every teammate's phone: the INFO lines are a capability matrix (does this phone have LiDAR? haptics? ...), useful for the U4 no-LiDAR checks.
 //
 import ARKit
+import ModelIO
+import SceneKit
 import CoreHaptics
 import AVFoundation
 import Vision
@@ -139,6 +141,24 @@ enum E2ESelfTest {
         } else {
             fail("nav.simulatedWalk", "no route in the synthetic map")
         }
+
+        info("export.formats", ["usd", "usda", "usdc", "usdz", "obj", "ply", "stl", "abc"].map { "\($0)=\(MDLAsset.canExportFileExtension($0))" }.joined(separator: " "))
+        // 3D model export on THIS phone: a synthetic 40 x 40 floor grid goes through decimation, ModelIO and USDZ writing, then is read back.
+        do {
+            var verts: [SIMD3<Float>] = [], idx: [UInt32] = []
+            for z in 0...40 { for x in 0...40 { verts.append([Float(x) * 0.1, 0, Float(z) * 0.1]) } }
+            for z in 0..<40 { for x in 0..<40 { let a = UInt32(z * 41 + x); idx += [a, a + 1, a + 41, a + 1, a + 42, a + 41] } }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("e2e-\(UUID().uuidString).usdz")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let fitted = MeshDecimator.fit(IndexedMesh(vertices: verts, indices: idx), budgetBytes: 20_000, startCellSize: 0.1)
+            try MeshExporter.writeUSDZ(fitted.mesh, to: url)
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+            let scene = try? SCNScene(url: url, options: nil)
+            var triangles = 0
+            scene?.rootNode.enumerateHierarchy { node, _ in for e in node.geometry?.elements ?? [] { triangles += e.primitiveCount } }
+            check("export.usdz", size > 0 && triangles > 0 && fitted.fitsBudget,
+                  "\(size) bytes, \(triangles) triangles read back (from \(idx.count / 3), cell \(fitted.cellSize.map { String(format: "%.2f", $0) } ?? "none"))")
+        } catch { fail("export.usdz", "\(error)") }
 
         // ---- D. RESOURCES
         if let url = Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json"),

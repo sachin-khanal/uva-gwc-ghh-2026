@@ -60,12 +60,19 @@ struct LiveScanScreen: View {
         }
     }
 
+    private var coverageCaption: String {
+        guard s.showCoverage else { return "Yellow tiles mark walls, floor and ceiling the scan has not reached." }
+        guard let percent = s.coveragePercent else { return "Measuring…" }
+        return String(format: "%.0f%% of the box surfaces scanned. Yellow = not scanned yet.", percent * 100)
+    }
+
     // MARK: Camera
 
     @ViewBuilder
     private var camera: some View {
         if let session = model.service.arSession {
-            LiveScanView(session: session, box: model.service.scanBox)
+            LiveScanView(session: session, box: model.service.scanBox, showMesh: !model.isPaused,
+                         coverage: model.isPaused ? nil : model.service.coverageOverlay)
                 .accessibilityHidden(true)
         } else {
             MockCameraView()
@@ -227,6 +234,14 @@ struct LiveScanScreen: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Recent tags: " + s.tags.suffix(4).reversed().map { $0.label ?? $0.kind.displayName }.joined(separator: ", "))
         }
+
+        Toggle(isOn: Binding(get: { s.showCoverage }, set: { model.service.setShowCoverage($0) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Show unscanned areas").font(.subheadline.weight(.semibold))
+                Text(coverageCaption).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("scan.coverage")
 
         HStack {
             Text(String(format: "Box margin %.1f m", s.boxMargin)).font(.footnote).foregroundStyle(.secondary)

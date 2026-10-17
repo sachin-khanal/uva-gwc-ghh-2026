@@ -90,10 +90,12 @@ private struct ScanningView: View {
     let app: AppState
     let onFinish: () -> Void
     @State private var poiLabel = ""
+    @State private var viewingModel: BuildingMap?
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            LiveScanView(session: controller.session, box: controller.scanBox, showMesh: controller.showMeshOverlay)
+            LiveScanView(session: controller.session, box: controller.scanBox,
+                         showMesh: controller.showMeshOverlay && !controller.isPaused, coverage: controller.showCoverage && !controller.isPaused ? controller.coverage : nil)
                 .ignoresSafeArea()
 
             VStack(spacing: 10) {
@@ -102,6 +104,9 @@ private struct ScanningView: View {
             }
             .padding()
             .background(.regularMaterial)
+        }
+        .fullScreenCover(item: $viewingModel) { map in
+            ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { viewingModel = nil })
         }
     }
 
@@ -123,6 +128,10 @@ private struct ScanningView: View {
             }
             if let status = controller.extensionStatus {
                 Text(status).accessibilityIdentifier("scan.extension.status")
+            }
+            if controller.showCoverage, let c = controller.coverage {
+                Text(String(format: "Scanned: %.0f%% of the box surfaces (yellow = not scanned yet)", c.percent * 100))
+                    .accessibilityIdentifier("hud.coverage")
             }
         }
         .font(.footnote.monospacedDigit())
@@ -158,6 +167,9 @@ private struct ScanningView: View {
             Toggle("Mesh overlay (turn off if laggy; mapping continues)", isOn: $controller.showMeshOverlay)
                 .font(.footnote)
                 .accessibilityIdentifier("scan.overlay")
+            Toggle("Show unscanned areas (yellow)", isOn: $controller.showCoverage)
+                .font(.footnote)
+                .accessibilityIdentifier("scan.coverage")
 
             HStack {
                 Text("Box margin \(String(format: "%.1f", controller.boxMargin)) m")
@@ -175,9 +187,16 @@ private struct ScanningView: View {
                     .disabled(controller.mappingStatus != .mapped || !controller.canRecord)
                     .accessibilityIdentifier("scan.save")
                 if let saved = controller.savedMap {
-                    Text("Saved \(saved.nodes.count) nodes")
-                        .foregroundStyle(.green)
-                        .onAppear { app.reloadMaps() }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Saved \(saved.nodes.count) nodes").foregroundStyle(.green)
+                        if let status = controller.modelStatus {
+                            Text(status).font(.footnote).accessibilityIdentifier("scan.modelStatus")
+                        }
+                        if app.store.hasModel(mapId: saved.id) {
+                            Button("View 3D model") { viewingModel = saved }.font(.footnote).accessibilityIdentifier("scan.viewModel")
+                        }
+                    }
+                    .onAppear { app.reloadMaps() }
                 } else if controller.mappingStatus != .mapped {
                     Text("Save unlocks when mapping is complete").font(.footnote).foregroundStyle(.secondary)
                 }

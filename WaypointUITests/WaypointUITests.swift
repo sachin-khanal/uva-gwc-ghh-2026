@@ -177,6 +177,43 @@ final class WaypointUITests: XCTestCase {
         }
     }
 
+    /// Classic scan screen: the "unscanned areas" toggle exists, starts OFF and flips. (The overlay itself needs a real mesh, which a phone
+    /// lying on a desk does not build; the geometry is unit-tested and `-scanCoverage YES` logs it headlessly.)
+    func testUnscannedAreasToggleExistsAndFlips() {
+        need(app.buttons["mode.scan"], "Scan button missing").tap()
+        need(app.buttons["scan.start"], "Start scanning button missing").tap()
+        need(app.staticTexts["hud.tracking"], "live HUD never appeared", timeout: 20)
+        let toggle = need(app.switches["scan.coverage"], "unscanned-areas toggle missing")
+        XCTAssertEqual(toggle.value as? String, "0", "must start off")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        waitUntil("value == '1'", on: toggle, timeout: 5, "toggle did not turn on")
+    }
+
+    /// New Scanner (live mode): Pause turns into Resume, and the coverage toggle is in the expanded controls.
+    func testNewScannerPauseAndCoverageToggle() throws {
+        app.terminate()
+        app.launchArguments = ["-ui.newInterface", "YES", "-ui.serviceMode", "live"]
+        app.launch()
+        if app.state != .runningForeground { app.activate() }
+        need(app.buttons["mode.scan"], "Scan button missing").tap()
+        let newScan = app.buttons.matching(NSPredicate(format: "label CONTAINS 'New scan'")).firstMatch
+        need(newScan, "New scan button missing").tap()
+        let building = need(app.textFields["Building"], "building field missing")
+        building.tap(); building.typeText("UITest Hall")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Start scanning'")).firstMatch.tap()
+        let pause = need(app.buttons["Pause"], "Pause button missing", timeout: 20)
+        pause.tap()
+        need(app.buttons["Resume"], "Pause did not turn into Resume")
+        shot("80-new-scanner-paused")
+        app.buttons["Resume"].tap()
+        need(app.buttons["Pause"], "Resume did not turn back into Pause")
+        // expand the panel to reach the toggle
+        if app.buttons["Expand controls"].exists { app.buttons["Expand controls"].tap() } // it may already be open
+        let coverage = need(app.switches["scan.coverage"], "unscanned-areas toggle missing in the new Scanner")
+        XCTAssertEqual(coverage.value as? String, "0")
+        shot("81-new-scanner-expanded")
+    }
+
     func testScanScreenShowsLiveHUD() {
         need(app.buttons["mode.scan"], "Scan button missing").tap()
         need(app.buttons["scan.start"], "Start scanning button missing").tap()

@@ -42,7 +42,7 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 # Lets xcodebuild create/refresh the free provisioning profile and register the phone.
 SIGN_FLAGS := -allowProvisioningUpdates -allowProvisioningDeviceRegistration
 
-.PHONY: help setup doctor hooks test-hooks team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
+.PHONY: backup-maps restore-maps list-map-backups help setup doctor hooks test-hooks team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
 
 help: ## Show this help
 	@echo "Waypoint make targets:"; echo
@@ -89,7 +89,16 @@ build: gen ## Build + sign the app for your phone (set DEVICE=...)
 	@[ -n "$(TEAM)" ] && ! echo "$(TEAM)" | grep -q REPLACE || { echo "Set DEVELOPMENT_TEAM in $(LOCAL_XCCONFIG) (see docs/SETUP.md)"; exit 1; }
 	$(XCODEBUILD) $(SIGN_FLAGS) build | tail -25
 
-install: ## Install the last build onto the phone (DEVICE=...)
+backup-maps: ## Copy the maps (scans, 3D models) out of the app on the phone to ~/Library/Caches/Waypoint/map-backups (DEVICE=...)
+	@sh scripts/phone-maps.sh backup
+
+restore-maps: ## Copy the newest backup that has a scan back onto the phone (DEVICE=..., optional DIR=path)
+	@sh scripts/phone-maps.sh restore $(DIR)
+
+list-map-backups: ## List the map backups on this Mac
+	@sh scripts/phone-maps.sh list
+
+install: backup-maps ## Install the last build onto the phone (DEVICE=...); backs up the phone's maps first
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
 	xcrun devicectl device install app --device $(DEVICE) "$(APP_PATH)"
 
@@ -118,7 +127,7 @@ UITEST_RESULT := $(BUILD_ROOT)/uitest.xcresult
 UITEST_SHOTS  := $(BUILD_ROOT)/uitest-screens
 ONLY ?=
 
-uitest: gen ## Run the UI tests ON THE PHONE (taps + screenshots), then export screenshots (DEVICE=...; ONLY=testName for one). Phone unlocked; Settings > Developer > Enable UI Automation
+uitest: gen backup-maps ## Run the UI tests ON THE PHONE (taps + screenshots), then export screenshots (DEVICE=...; ONLY=testName for one). Phone unlocked; Settings > Developer > Enable UI Automation
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
 	rm -rf "$(UITEST_RESULT)"
 	-$(XCODEBUILD) $(SIGN_FLAGS) -resultBundlePath "$(UITEST_RESULT)" $(if $(ONLY),-only-testing:WaypointUITests/WaypointUITests/$(ONLY)) test 2>&1 | grep -E "Test Case|error:|Executed|TEST (SUCCEEDED|FAILED)|\*\* " | tail -40

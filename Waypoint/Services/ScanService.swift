@@ -33,6 +33,11 @@ struct ScanSnapshot: Equatable {
     /// A label read from a sign, offered as a one-tap tag (slot for SignReader, ROADMAP U2.7).
     var suggestion: String?
     var errorMessage: String?
+    /// Recording is really paused (live engine): no breadcrumbs, tags or mesh counting; the camera keeps tracking.
+    var isPaused = false
+    /// "Show unscanned areas" is on, and the share of the box surfaces already covered by mesh (nil until the first measurement).
+    var showCoverage = false
+    var coveragePercent: Float?
     /// Extending a saved map: what the scanner is waiting for / doing ("Look around slowly...", "Extending this building..."), nil for a new scan.
     var extensionStatus: String?
     /// False while an extension is still finding its place in the saved area (recording and tagging are paused).
@@ -59,7 +64,11 @@ protocol ScanService: AnyObject {
     func start(mapName: String, extending map: BuildingMap?, initialSegment: String?)
     /// Pause/resume recording. The live adapter can only stop accepting tags (see LiveScanService).
     func pause()
+    /// May refuse (live engine): resuming far from where recording was paused is not allowed. Check `snapshot.isPaused` afterwards.
     func resume()
+    /// The yellow "unscanned areas" overlay data for LiveScanView, nil when off / unavailable.
+    var coverageOverlay: CoverageSnapshot? { get }
+    func setShowCoverage(_ on: Bool)
     func tag(kind: NodeKind, label: String?)
     func dismissSuggestion()
     func adjustBox(by delta: Float)

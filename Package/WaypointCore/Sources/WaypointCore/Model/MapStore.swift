@@ -155,6 +155,17 @@ public final class MapStore {
         return try Data(contentsOf: url)
     }
 
+    // MARK: 3D model (derived from the scan mesh)
+
+    /// The exported 3D model of a scan (USDZ), written next to the map when a scan is saved. Not part of bundles or sync yet.
+    public func modelURL(mapId: UUID) -> URL {
+        directory(for: mapId).appendingPathComponent("model.usdz")
+    }
+
+    public func hasModel(mapId: UUID) -> Bool {
+        fm.fileExists(atPath: modelURL(mapId: mapId).path)
+    }
+
     // MARK: Route memory (derived cache, never shared)
 
     private func routeMemoryURL(_ mapId: UUID) -> URL {

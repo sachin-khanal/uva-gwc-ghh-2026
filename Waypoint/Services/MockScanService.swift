@@ -63,6 +63,9 @@ final class MockScanService: ScanService {
         timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in self?.step() }
     }
 
+    var coverageOverlay: CoverageSnapshot? { nil }
+    func setShowCoverage(_ on: Bool) {}
+
     func pause() { isPaused = true }
     func resume() { isPaused = false }
 
