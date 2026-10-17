@@ -257,7 +257,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertEqual(spoken(back), ["Phone position is good."], "only the confirmation on the recovery tick")
         let next = p.plan(instruction: instruction(.turnRight), obstacle: .clear, trackingOK: true,
                           posture: PostureUpdate(reading: ok.reading, issue: nil, announcement: nil, recovered: false))
-        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn right") } else { return false } },
+        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.lowercased().contains("right") } else { return false } },
                       "guidance resumes with the current instruction on the next tick")
     }
 
@@ -321,7 +321,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         // bearing never tripped the heading cue and a real turn went unannounced (D-030).
         XCTAssertEqual(said, ["Walk straight about 14 meters, then turn right.",
                               "In 10 meters, turn right.", "In 5 meters, turn right.", "In 2 meters, turn right.",
-                              "Turn right 85 degrees.", "Continue straight."])
+                              "Right.", "Continue straight."]) // 85 degrees is a square corner
     }
 
     func testFirstSeenCloseDoesNotBurstOldWarnings() {

@@ -37,6 +37,11 @@ public struct GuidanceSnapshot: Equatable, Sendable {
     public var destinationLabel: String
     /// Raw status from the source, for the escort panel only.
     public var rawStatus: String
+    /// The line the app most recently SPOKE, when a live service is driving guidance.
+    /// The screen shows this so that what is written and what is heard agree - they were derived
+    /// separately and drifted apart, which is confusing when you can see and hear both
+    /// (device report 2026-10-17). nil in mock mode, where the UI does the talking.
+    public var lastSpoken: String?
 
     public init(
         phase: GuidancePhase = .idle,
@@ -65,7 +70,10 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         switch phase {
         case .idle: return "Ready"
         case .localizing: return "Finding your position"
-        case .guiding: return SpokenText.instruction(kind ?? .continueStraight)
+        case .guiding:
+            // Prefer the words actually spoken, so the screen is not a paraphrase of the voice.
+            if let lastSpoken, !lastSpoken.isEmpty { return lastSpoken }
+            return SpokenText.instruction(kind ?? .continueStraight)
         case .lost: return "Position lost"
         case .obstacleStop: return "Stop"
         case .arrived: return "You have arrived"

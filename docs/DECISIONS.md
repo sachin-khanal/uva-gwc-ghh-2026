@@ -352,3 +352,35 @@ Cancellation matters here: a load that finishes AFTER the user backed out must n
 **Status:** accepted; 185 tests pass. **UNVERIFIED ON DEVICE** - the freeze was reported on a phone and the fix has
 not been timed on one. If "Start recording" still pauses on a NEW (non-extend) scan, the remaining cost is ARKit
 starting the camera, which we cannot move.
+
+## D-034 — Turn vocabulary; one fresh queued line; the screen says what the voice says (2026-10-17)
+Three reports from a walk, plus a wording spec from the team.
+1. **Queued lines went stale.** D-032 stopped speech chopping itself up by queuing instead of interrupting, and
+created the opposite problem: a direction spoken two seconds late to somebody who has kept walking contradicts what
+they can feel. `Speaker` now holds **at most one** waiting line, always the newest, and throws it away if it is more
+than 2 s old when its turn comes. We no longer use `AVSpeechSynthesizer`'s own queue, because once handed over an
+utterance cannot be revised. So: no fragments (nothing interrupts except safety), no backlog (one slot), no stale
+lines (TTL), and contradictions resolve in favour of the latest cue.
+2. **Turn wording**, to the team's spec: under 5 degrees "Continue straight."; 5-45 "Slightly right 20 degrees.";
+45-60 and 120-150 "Right 50 degrees."; 60-120 just "Right." (a square corner needs no number); 150+ "Turn around."
+A turn the planner has DECIDED on is never spoken as "continue straight" even if the measured bearing is tiny.
+`TurnReason` adds a clause when the turn is not simply the route ("Right. There is a wall ahead.") - wired into the
+phrasing now, with the obstacle-driven callers still to follow.
+3. **Screen and speech disagreed** because each derived its own words from the same state. `GuidanceSnapshot` now
+carries `lastSpoken`, fed from `NavigationController`, and the guiding headline prefers it. Mock mode, where the UI
+does the talking, keeps its own wording.
+**Status:** accepted; 194 tests pass. UNVERIFIED ON DEVICE. Tune on a phone: the 2 s staleness limit and the band
+edges.
+
+## D-035 — Relocalization is slow because nothing anchors it; the marker is still the answer (2026-10-17)
+Report: finding the start position "takes a while and a bunch of walking around... the environment hadn't changed."
+Not yet fixed, and recorded so the reasoning is not lost. ARKit relocalization matches live feature points against the
+saved `ARWorldMap`, and it needs enough overlap from a similar viewpoint. Today the user is told "slowly turn left and
+right" and nothing else: the app knows WHERE the scan began but never tells them, and a corridor looks much the same
+from either end, so they can be standing in the right place facing the wrong way and the match never lands.
+Options, cheapest first: (a) record the scan's starting POSE in the map and tell the user where to stand and which way
+to face - a contract change plus a capture change, and it only helps if they can find that spot; (b) try EVERY segment's
+world map rather than only the first that exists (`Relocalizer` still has that TODO); (c) the printed image marker from
+D-008, which has been the designed fallback since the first architecture and is still unbuilt - it gives an exact pose
+instantly and does not care how similar the corridor looks. The marker is the real answer; (a) is a useful stopgap.
+**Status:** accepted as analysis; nothing implemented yet. Needs U4.6 (print the marker) and U1.7 (wire it up).

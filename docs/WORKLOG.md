@@ -93,6 +93,30 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Turn vocabulary, stale-line fix, screen/speech agreement   [tags: BUILD, BUG]
+Area: B (Guidance) + UI. Branch `speech-accuracy` off `navigation-overhaul`. See D-034 and D-035.
+
+Files edited (WaypointCore): `Guidance/SpokenPhrases.swift` (`TurnSpeech` rewritten to the team's bands, +`TurnReason`,
+epsilon on the band edges because 5 degrees round-trips through radians as 4.9999995), `Flows/GuidanceState.swift`
+(+`lastSpoken`, headline prefers it).
+Files edited (app): `Waypoint/Guidance/Speaker.swift` (own single-slot queue with a 2 s freshness limit;
+`AVSpeechSynthesizerDelegate` to speak the pending line when the current one ends; cancel clears it),
+`Waypoint/Services/LiveGuidanceService.swift` (feeds `lastSpoken`).
+Tests added: `TurnWordingTests` (9) - every band, a decided turn never spoken as straight, reasons appended, and the
+screen showing the spoken words with a fallback for mock mode.
+Seven existing tests asserted the old "Turn right 85 degrees." vocabulary and were updated to the new bands.
+Verified: `make test` -> **194 tests, 0 failures** (was 185); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** The 2 s staleness limit is a guess and is the number most likely to need
+tuning - too low and cues go missing, too high and they contradict again.
+Open / handoff:
+1. **Relocalization slowness is NOT fixed** - analysis in D-035. The honest answer is the printed marker (D-008),
+   unbuilt since the first architecture. A cheap stopgap is recording the scan's start pose and telling the user where
+   to stand and which way to face.
+2. `TurnReason` exists and is tested but no caller passes anything but `.route` yet; wiring the obstacle-driven turns
+   to pass `.avoiding(...)` is the follow-up.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Load saved scans off the main thread; real loading states   [tags: BUILD, BUG]
 Area: A (capture/relocalization) + B (navigation) + UI. Branch `loading-states` off `navigation-overhaul`. See D-033.
 

@@ -24,14 +24,25 @@
 import AVFoundation
 import WaypointCore
 
-final class Speaker {
+final class Speaker: NSObject {
 
     static let shared = Speaker()
 
+    /// A queued line older than this is thrown away instead of spoken. Queuing stopped guidance being
+    /// chopped into fragments, but a direction spoken two seconds late to somebody who has kept
+    /// walking is worse than silence - it contradicts what they can feel (device report 2026-10-17).
+    private static let maxQueuedAge: TimeInterval = 2.0
+
     private let synthesizer = AVSpeechSynthesizer()
     private var gate = SpeechGate()
+    /// At most ONE line waits its turn, and it is always the NEWEST one. A backlog is what produced
+    /// contradictory directions; the latest cue is the only one that still describes the world.
+    private var pending: (text: String, priority: SpeechPriority, queuedAt: TimeInterval)?
 
-    private init() {}
+    private override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
 
     /// Monotonic clock: unaffected by the wall clock changing mid-demo.
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
@@ -41,14 +52,22 @@ final class Speaker {
         case .drop:
             return
         case .interrupt:
-            // Safety only. Everything queued behind the current line is now stale, so it goes too.
+            // Safety only. Anything waiting is now stale, so it goes too.
+            pending = nil
             synthesizer.stopSpeaking(at: .immediate)
-        case .enqueue, .speak:
-            // AVSpeechSynthesizer queues utterances natively and speaks them in order, which is
-            // exactly what we want: no fragment, no overlap, and a natural gap between lines.
+        case .enqueue:
+            // Hold it ourselves rather than handing it to AVSpeechSynthesizer, whose own queue cannot
+            // be revised: by the time it would speak, the user has moved and the line may be wrong.
+            pending = (text, priority, now)
+            return
+        case .speak:
             break
         }
 
+        speakNow(text)
+    }
+
+    private func speakNow(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -58,8 +77,33 @@ final class Speaker {
         Log.guidance.info("say: \(text)")
     }
 
+    /// Speaks whatever is waiting, if it is still worth saying.
+    private func speakPendingIfFresh() {
+        guard let next = pending else { return }
+        pending = nil
+        let age = now - next.queuedAt
+        guard age <= Self.maxQueuedAge else {
+            Log.guidance.info("dropped stale line after \(String(format: "%.1f", age))s: \(next.text)")
+            return
+        }
+        speakNow(next.text)
+    }
+
     func stop() {
+        pending = nil
         synthesizer.stopSpeaking(at: .immediate)
         gate.reset()
+    }
+}
+
+extension Speaker: AVSpeechSynthesizerDelegate {
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        speakPendingIfFresh()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        // Cancelled means something more important is being said; whatever was waiting is stale.
+        pending = nil
     }
 }

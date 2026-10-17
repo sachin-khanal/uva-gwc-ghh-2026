@@ -469,8 +469,16 @@ final class NaturalGuidanceTests: XCTestCase {
     // MARK: Turn cues carry an angle, and come one at a time
 
     func testTurnCuesIncludeARoundedAngle() {
-        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: 47 * .pi / 180), "Turn right 45 degrees.")
-        XCTAssertEqual(TurnSpeech.text(kind: .turnLeft, bearingRadians: -63 * .pi / 180), "Turn left 65 degrees.")
+        // Bands from the team's spec: a square corner needs no number, an odd angle does.
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: 20 * .pi / 180), "Slightly right 20 degrees.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: -30 * .pi / 180), "Slightly left 30 degrees.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: 90 * .pi / 180), "Right.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: -75 * .pi / 180), "Left.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: 180 * .pi / 180), "Turn around.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: 2 * .pi / 180), "Continue straight.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: 47 * .pi / 180), "Right 45 degrees.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnLeft, bearingRadians: -63 * .pi / 180), "Left.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: 135 * .pi / 180), "Right 135 degrees.")
         XCTAssertEqual(TurnSpeech.text(kind: .turnAround, bearingRadians: .pi), "Turn around.")
         XCTAssertNil(TurnSpeech.text(kind: .arrived, bearingRadians: 0))
     }

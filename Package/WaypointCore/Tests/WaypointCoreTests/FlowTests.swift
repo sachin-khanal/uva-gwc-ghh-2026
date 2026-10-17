@@ -293,3 +293,71 @@ final class LoadingPhaseTests: XCTestCase {
                                                destinationLabel: "x").phase, .idle)
     }
 }
+
+// MARK: - Turn wording bands and screen/speech agreement (team spec, 2026-10-17)
+
+final class TurnWordingTests: XCTestCase {
+
+    private func degrees(_ d: Float) -> Float { d * .pi / 180 }
+
+    func testSmallCorrectionsAreSlightAndCarryTheAngle() {
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(5)), "Slightly right 5 degrees.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(22)), "Slightly right 20 degrees.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(-44)), "Slightly left 45 degrees.")
+    }
+
+    /// A square corner needs no number: "right" is all a person can act on.
+    func testSquareCornersAreJustLeftOrRight() {
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(60)), "Right.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(90)), "Right.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(-119)), "Left.")
+    }
+
+    func testOddAnglesKeepTheirNumber() {
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(50)), "Right 50 degrees.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(-130)), "Left 130 degrees.")
+    }
+
+    func testTurnAroundOnlyWhenItReallyIsOne() {
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(150)), "Turn around.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(180)), "Turn around.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(-170)), "Turn around.")
+        XCTAssertNotEqual(TurnSpeech.phrase(bearingRadians: degrees(140)), "Turn around.")
+    }
+
+    func testOnCourseSaysNothingAboutTurning() {
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(3)), "Continue straight.")
+        XCTAssertEqual(TurnSpeech.phrase(bearingRadians: degrees(-1)), "Continue straight.")
+    }
+
+    /// If the planner decided it IS a turn, the words must say so even when the measured bearing is
+    /// tiny - otherwise a turn cue reads as "continue straight".
+    func testADecidedTurnIsNeverSpokenAsStraight() {
+        XCTAssertEqual(TurnSpeech.text(kind: .turnLeft, bearingRadians: 0), "Slightly left 5 degrees.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: 0), "Slightly right 5 degrees.")
+    }
+
+    /// Turning for a reason other than the route says why.
+    func testAReasonIsAddedWhenItIsNotJustTheRoute() {
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: degrees(90), reason: .route), "Right.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnRight, bearingRadians: degrees(90), reason: .avoiding(.wall)),
+                       "Right. There is a wall ahead.")
+        XCTAssertEqual(TurnSpeech.text(kind: .turnLeft, bearingRadians: degrees(-90), reason: .backOnRoute),
+                       "Left. Getting you back on the route.")
+    }
+
+    // MARK: Screen and speech agree
+
+    func testScreenShowsTheWordsThatWereSpoken() {
+        var snapshot = GuidanceSnapshot.derive(status: "Navigating", instruction: "turnRight, 1.5 m",
+                                               obstacle: .clear, destinationLabel: "Room 442")
+        snapshot.lastSpoken = "Right."
+        XCTAssertEqual(snapshot.headline, "Right.", "the screen must not paraphrase the voice")
+    }
+
+    func testWithoutASpokenLineTheScreenFallsBackToItsOwnWording() {
+        let snapshot = GuidanceSnapshot.derive(status: "Navigating", instruction: "turnRight, 1.5 m",
+                                               obstacle: .clear, destinationLabel: "Room 442")
+        XCTAssertFalse(snapshot.headline.isEmpty, "mock mode still needs a headline")
+    }
+}

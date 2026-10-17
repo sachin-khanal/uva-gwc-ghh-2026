@@ -24,7 +24,7 @@ final class FeedbackAndVisionTests: XCTestCase {
         XCTAssertTrue(first.contains(.haptic(.turnLeft)))
         // The angle itself is TurnSpeech's job (TurnSpeechTests); here we only care that the turn
         // was announced once.
-        XCTAssertTrue(first.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn left") } else { return false } })
+        XCTAssertTrue(first.contains { if case .speak(let t, _) = $0 { return t.lowercased().contains("left") } else { return false } })
         XCTAssertTrue(first.contains(.beacon([0, 0, -3])))
         let second = p.plan(instruction: instruction(.turnLeft), obstacle: .clear, trackingOK: true)
         XCTAssertEqual(second, [.beacon([0, 0, -3])]) // no repeated speech or haptic
@@ -77,7 +77,14 @@ final class FeedbackAndVisionTests: XCTestCase {
         var turns = 0
         for kind in [GuidanceInstruction.Kind.turnRight, .continueStraight, .continueStraight, .turnRight, .turnRight, .continueStraight, .turnLeft] {
             let actions = p.plan(instruction: instruction(kind, target: UUID()), obstacle: .clear, trackingOK: true)
-            turns += actions.filter { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn") }; return false }.count
+            // Turn wording is "Right.", "Slightly left 20 degrees." or "Turn around." now, so count
+            // anything that names a side.
+            turns += actions.filter {
+                if case .speak(let t, _) = $0 {
+                    return t != "Continue straight." && (t.lowercased().contains("left") || t.lowercased().contains("right") || t.hasPrefix("Turn around"))
+                }
+                return false
+            }.count
         }
         XCTAssertEqual(turns, 3, "right, right (after straight), left - the repeated right at the next waypoint is not repeated")
     }
