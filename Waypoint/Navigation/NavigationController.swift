@@ -112,6 +112,15 @@ final class NavigationController: ObservableObject {
     private static let rerouteDriftMeters: Float = 1.5
     /// Distance from the route a moment ago, for that drift test.
     private var routeDistanceHistory: [(distance: Float, time: TimeInterval)] = []
+    /// A position change larger than this between ticks is not walking - it is relocalization
+    /// correcting itself. Treating it as walking made the app think the user had left the route and
+    /// re-route, over and over (device report 2026-10-17). 3 m in a 0.1 s tick is 30 m/s.
+    private static let poseJumpMeters: Float = 3
+    /// Re-routes are rate limited: without this, a jumping pose produced a burst of recalculations,
+    /// each resetting the planner and so bypassing the cooldown that spaces out spoken directions.
+    private static let minimumSecondsBetweenReroutes: TimeInterval = 5
+    private var lastRerouteTime: TimeInterval = -.greatestFiniteMagnitude
+    private var lastTickPosition: SIMD3<Float>?
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -203,6 +212,8 @@ final class NavigationController: ObservableObject {
         lastMovementSample = nil
         isMoving = true
         routeDistanceHistory.removeAll()
+        lastTickPosition = nil
+        lastRerouteTime = -.greatestFiniteMagnitude
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
@@ -294,15 +305,29 @@ final class NavigationController: ObservableObject {
                 follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
                 routeNodeIds = follower?.route.map(\.id) ?? []
             }
+            // A position change larger than a person can walk between ticks is relocalization
+            // correcting itself, not movement. Decide this FIRST, so nothing downstream reads the
+            // jump as walking.
+            let jumped = lastTickPosition.map {
+                Geometry.horizontalDistance($0, mapPosition) > Self.poseJumpMeters
+            } ?? false
+            lastTickPosition = mapPosition
+            if jumped {
+                Log.nav.info("pose jumped; ignoring it for off-route and movement")
+                offRouteTicks = 0
+                routeDistanceHistory.removeAll()
+                lastMovementSample = nil
+            }
+
             self.mapPosition = mapPosition
             headingRadians = atan2(mapForward.x, -mapForward.z)
-            updateMovement(position: mapPosition, time: time)
+            if !jumped { updateMovement(position: mapPosition, time: time) }
             updateRouteWorldPositions(mapToWorld: mapToWorld)
             // Re-route when the user is genuinely somewhere else. The route used to be computed once
             // and kept for the whole session, so walking a different (often shorter) way than the one
             // the volunteer scanned left the app insisting on its original path (device report
             // 2026-10-17).
-            if let current = follower {
+            if let current = follower, !jumped {
                 let offRoute = current.distanceFromRoute(position: mapPosition)
                 routeDistanceHistory.append((offRoute, time))
                 routeDistanceHistory.removeAll { time - $0.time > 2 }
@@ -314,7 +339,8 @@ final class NavigationController: ObservableObject {
                 let drifting = isMoving
                     && (routeDistanceHistory.first.map { offRoute - $0.distance >= Self.rerouteDriftMeters } ?? false)
 
-                if farForAWhile || drifting {
+                if (farForAWhile || drifting), time - lastRerouteTime >= Self.minimumSecondsBetweenReroutes {
+                    lastRerouteTime = time
                     offRouteTicks = 0
                     routeDistanceHistory.removeAll()
                     if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {

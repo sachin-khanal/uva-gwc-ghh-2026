@@ -93,6 +93,32 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Latch the keyframe fix; ignore pose jumps   [tags: BUILD, BUG]
+Area: A (relocalization) + B (navigation). Branch `keyframe-latch` off `navigation-overhaul`. See D-039.
+
+Report after testing D-038: relocalization got "very quick", but pathfinding broke and directions came in
+contradicting bursts. Screenshots showed the user's marker at the destination, then mid-building, then off the trail.
+Cause (mine): the keyframe matcher kept running while `fix == .keyframe`, so a different keyframe re-anchored
+`mapToWorld` every 0.5 s. Each re-anchor teleported the position -> looked off-route -> re-route -> `planner.reset()`
+-> direction cooldown cleared -> burst of contradictory speech.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` (match only while `fix == .none`; re-arm when tracking is
+lost), `Waypoint/Navigation/NavigationController.swift` (pose-jump detection BEFORE anything consumes the position -
+over 3 m between ticks resets the off-route counters and the movement sampler and skips the off-route test; re-routes
+limited to one per 5 s).
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED (run on its own line).
+NOT verified: **UNVERIFIED ON DEVICE.** The three new constants (3 m jump, 5 s between re-routes, re-arm on lost
+tracking) are guesses.
+Open / handoff:
+1. Still needs calibration: `KeyframeIndex.defaultMaxDistance` (18) - the log line
+   "recognised a keyframe (distance X)" gives the real numbers.
+2. If the position still drifts after this, the next suspect is the keyframe pose itself: a descriptor match assumes
+   the user stands where the volunteer stood, so a match from 2 m away seeds a pose 2 m out. ARKit should absorb that
+   once it relocalizes properly; if it does not, the seed should be treated as a hint for ARKit rather than as the
+   answer.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Keyframe relocalization (D-035 option 2)   [tags: BUILD, CONTRACT CHANGE]
 Area: A (maps/relocalization) + C (vision). Branch `keyframe-relocalization` off `navigation-overhaul`. See D-038.
 

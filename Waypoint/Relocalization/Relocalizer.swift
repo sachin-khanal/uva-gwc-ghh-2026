@@ -159,7 +159,12 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
     /// the live camera transform we align against is trustworthy.
     private func matchKeyframeIfDue(_ frame: ARFrame) {
         guard let map, !map.keyframes.isEmpty,
-              fix != .worldMap, fix != .marker, !markerSeen, !usingWorldMap,
+              // ONCE only. The first version kept matching while `fix == .keyframe`, so every half
+              // second a different keyframe re-anchored `mapToWorld` and the user teleported around
+              // the map - which then looked like being off-route, forced a re-route, and produced
+              // contradictory directions (device report 2026-10-17). A keyframe SEEDS the pose;
+              // ARKit's own tracking carries it from there. We re-arm only if tracking is lost.
+              fix == .none, !markerSeen, !usingWorldMap,
               !isMatchingKeyframe,
               case .normal = frame.camera.trackingState else { return }
         let now = frame.timestamp
@@ -179,7 +184,7 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isMatchingKeyframe = false
-                guard let match, self.fix == .none || self.fix == .keyframe,
+                guard let match, self.fix == .none,
                       !self.markerSeen, !self.usingWorldMap else { return }
                 self.mapToWorld = match.keyframe.mapToWorldTransform(cameraWorld: cameraWorld)
                 self.fix = .keyframe
@@ -221,6 +226,9 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
                 state = .localized // coarse, but good enough to start guiding
             }
         case .limited(.relocalizing), .limited(.initializing):
+            // Tracking is gone, so the seed we had is no longer being carried forward: allow a
+            // keyframe to re-acquire. An exact fix (world map / marker) is never discarded this way.
+            if fix == .keyframe { fix = .none }
             if state == .localized { state = .lost } else if state == .idle { state = .searching }
         default:
             if state == .localized { state = .lost }

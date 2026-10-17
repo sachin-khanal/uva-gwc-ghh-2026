@@ -444,3 +444,23 @@ decodes a map with no `keyframes` key. `tools/validate_map.py` accepts the new f
 **Status:** accepted; 213 tests pass. **UNVERIFIED ON DEVICE** - no feature print has ever been computed on a phone.
 The distance threshold (18) is a guess: Vision's feature-print distances are not normalised and MUST be calibrated in
 a real corridor before this is trusted.
+
+## D-039 — A keyframe SEEDS the pose once; it does not keep correcting it (2026-10-17)
+D-038 worked - relocalization became "very quick" on a phone - but it broke navigation, and the user's diagnosis was
+right: the app leaned on the embeddings instead of the tracked world model.
+**The bug was mine and it was a loop.** `matchKeyframeIfDue` kept matching while `fix == .keyframe`, so every half
+second a *different* keyframe re-anchored `mapToWorld`. The user's position teleported around the map (screenshots
+show it at the destination, then mid-building, then off the trail within a minute). Each teleport looked like leaving
+the route, which forced a re-route, which called `planner.reset()`, which cleared the direction cooldown - so the
+cascade ended in several contradicting directions spoken within seconds.
+Three changes:
+1. **The keyframe fix is latched.** It is taken ONCE, from `fix == .none`, and ARKit's own tracking carries the pose
+from there. It re-arms only when tracking is lost, which is the one case where nothing is carrying it.
+2. **A pose jump is not walking.** More than 3 m between ticks (30 m/s) is relocalization correcting itself. On a jump
+the off-route counters and the movement sampler are reset and the tick does not test for leaving the route, so a
+correction can no longer masquerade as the user wandering off.
+3. **Re-routes are rate limited** to one per 5 s. Even if something else ever produces a burst, the spoken directions
+cannot machine-gun again, because the reset-the-planner path is what bypassed the cooldown.
+The principle worth keeping: the embedding answers "where am I, roughly, right now" ONCE; the LiDAR-backed world model
+is what maintains the position afterwards. Anything that re-aligns the map continuously will fight the tracker.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
