@@ -1,5 +1,9 @@
 # Work log
 
+## 2026-10-17 - Codex for U3 - Publish standalone web viewer to main
+User authorized commit and push to main. Prepared isolated publish-web-viewer worktree from origin/main; preserved original U3 working tree and all native/backend edits. Added web/ static explorer, router, OBJ integrity loading and WebGL surfaces, mock/DOM tests, loopback server, web-local synthetic schema-3 sample; added Samples/route-vectors.json. Native sample and Swift sources unchanged to preserve main's schema-2 compatibility. README adds deployment/native integration corrections. Edited docs/MODULES.md and this log additively.
+Verification: pre-integration browser 46/46 logic/GPU and 16/16 UI PASS; Python 15 PASS. Integrated browser checks recorded below before push. Native make test/typecheck unavailable on Windows; no Swift changes. Live cloud downloads and real scan fidelity/performance UNVERIFIED ON DEVICE. No dependencies added. Commands: git fetch/worktree, targeted copy/edit, Python loopback server, hidden headless Edge, git diff --check, targeted git add/commit/push. No native/backend files included.
+
 ## 2026-10-17 19:40 — Claude (agent, for Sachin) — Route memory persisted per map + device re-checks after merge/format change   [tags: ROUTING]
 Area: B (Routing/Navigation) + D (`MapStore`, additive).
 Files edited: `Model/MapStore.swift` (+`loadRouteMemory(mapId:)`, `saveRouteMemory(_:mapId:)`; file `route-memory.json` inside the map folder; a cache: NOT in bundles/sync, corrupt/missing file = empty memory), `Waypoint/Navigation/NavigationController.swift` (real mode loads memory on start and saves on stop; simulation never persists), `Tests/.../RoutePlannerTests.swift` (+2 tests), `docs/MODULES.md`.
@@ -585,3 +589,5 @@ wanted a CLI-first build and docs readable by humans and agents.
    scan/marker path works. B/C can still test audio/haptics/obstacles by temporarily feeding fake poses.)
 4. Fill in team names in `docs/MODULES.md`; decide Live Share vs git (`docs/WORKFLOW.md`).
 5. Known logic gaps are listed per owner at the bottom of `docs/MODULES.md`.
+
+**Update 2026-10-17 (Codex):** isolated main integration re-run: 46/46 browser logic/GPU/mock checks and 16/16 UI checks PASS; git diff --check PASS. Temporary preview server stopped.
