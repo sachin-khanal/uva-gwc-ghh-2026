@@ -28,6 +28,8 @@ final class WaypointUITests: XCTestCase {
             }
             return false
         }
+        // Pin the classic screens: a leftover "New interface" preference on the phone (UserDefaults) would change every screen these tests drive.
+        app.launchArguments += ["-ui.newInterface", "NO", "-ui.openInNavigate", "NO"]
         app.launch()
         // If something else (a notification, the person picking up the phone) pulled another app to the front, bring ours back.
         if app.state != .runningForeground { app.activate() }

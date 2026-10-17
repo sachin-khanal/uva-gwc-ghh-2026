@@ -297,8 +297,9 @@ final class NavigationController: ObservableObject {
                                                              destination: destination, context: sceneContext, firstManeuver: first.upcoming))
                 }
             }
-            self.mapPosition = mapPosition
-            headingRadians = atan2(mapForward.x, -mapForward.z)
+            // Only publish real changes (see setIfChanged): at 10 Hz an unconditional assignment keeps the screen redrawing and the UI tests never idle.
+            setIfChanged(\.mapPosition, mapPosition)
+            setIfChanged(\.headingRadians, atan2(mapForward.x, -mapForward.z))
             updateRouteWorldPositions(mapToWorld: mapToWorld)
             // Re-route when the user is genuinely somewhere else. The route used to be computed once
             // and kept for the whole session, so walking a different (often shorter) way than the one

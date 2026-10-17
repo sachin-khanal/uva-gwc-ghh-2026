@@ -257,6 +257,12 @@ public struct FeedbackPlanner {
             if let opening = pendingBriefing {
                 // The full opening (where you are, what is around, how to go). High priority so the "Navigating to ..." line cannot swallow it.
                 pendingBriefing = nil
+                // The briefing already covers the next maneuver and the place you are standing at: do not repeat them in the same breath
+                // ("...then turn right. In 9 meters, turn right. Door to lobby on your left." was heard on the phone 2026-10-17).
+                if let u = i.upcoming {
+                    for t in Self.warningThresholds where u.distanceMeters <= t { announcedWarnings.insert("\(u.nodeId)-\(t)") }
+                }
+                if let l = i.landmark { announcedLandmarks.insert(l.nodeId) }
                 actions.append(.speak(opening, priority: .high))
                 if i.kind == .continueStraight { lastKey = i.kind.rawValue }
             } else if let text = ManeuverSpeech.briefing(distanceToFirstManeuver: i.upcoming) {

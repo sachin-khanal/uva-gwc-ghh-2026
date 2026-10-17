@@ -183,6 +183,19 @@ final class ContextualGuidanceTests: XCTestCase {
         XCTAssertFalse(spoken(p.plan(instruction: instr(), obstacle: .clear, trackingOK: true, time: 3)).contains("STALE."), "reset drops a queued briefing")
     }
 
+    func testOpeningBriefingIsNotFollowedByTheSameInfoAgain() {
+        var p = FeedbackPlanner()
+        p.queueBriefing("OPENING.")
+        let turn = Maneuver(kind: .turnRight, distanceMeters: 9, nodeId: UUID())
+        var i = instr(upcoming: turn)
+        i.landmark = Landmark(label: "Door to lobby", side: .left, nodeId: UUID())
+        let said = spoken(p.plan(instruction: i, obstacle: .clear, trackingOK: true, time: 1))
+        XCTAssertEqual(said, ["OPENING."], "no countdown or landmark piled onto the briefing: \(said)")
+        // later warnings still come: 5 m and 2 m
+        var later = i; later.upcoming = Maneuver(kind: .turnRight, distanceMeters: 4.5, nodeId: turn.nodeId)
+        XCTAssertTrue(spoken(p.plan(instruction: later, obstacle: .clear, trackingOK: true, time: 5)).contains { $0.contains("5 meters") })
+    }
+
     func testSignSpeech() {
         XCTAssertEqual(SignSpeech.text(read: "Room 206", isDestination: false), "Sign reads Room 206.")
         XCTAssertEqual(SignSpeech.text(read: "Room 204", isDestination: true), "Sign reads Room 204. This is your destination.")
