@@ -93,6 +93,37 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Speech queues instead of interrupting; no nagging at doors   [tags: BUILD, BUG]
+Area: B (Guidance) + navigation. Branch `speech-queue-and-doors` off `navigation-overhaul`. Reasoning in D-032.
+
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` (+`SpeechPriority.critical`; safety lines moved to it;
+`isMoving` parameter; the way-through line said once per door via `announcedWayThrough`, re-armed when the way is
+clear; stop-repeat now requires movement and never applies to a door we were routed through),
+`Guidance/SpeechGate.swift` (+`.enqueue` decision), `Routing/RouteFollower.swift` (arrival = inside the extent OR
+within the radius, instead of extent-only).
+Files edited (app): `Waypoint/Guidance/Speaker.swift` (queue instead of interrupt for `.high`, 0.25 s
+`postUtteranceDelay`), `Waypoint/Navigation/NavigationController.swift` (+movement detection from the camera pose,
+fed to the planner).
+Tests added: `SpeechPacingTests` (6) - a door is explained once and not repeated while standing at it; stop is not
+repeated at someone who has stopped; it IS still repeated while they walk toward a wall; unknown movement keeps the old
+behaviour; the next door is explained again; safety is `.critical` while guidance queues. Plus the gate tests were
+split into critical-interrupts and high-queues.
+Five existing assertions were updated because the behaviour deliberately changed: safety lines are `.critical` now,
+not `.high`.
+One of my own test assertions was wrong and I fixed the test, not the code: I asserted the first tick at a door says
+exactly ONE line, but guidance correctly carries on toward the door, so a navigation cue comes with it. The assertion
+now checks what matters - the "open it" line appears once and no "Stop." line appears.
+Verified: `make test` -> **182 tests, 0 failures** (was 175); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has heard the queued speech. Movement thresholds (0.15 m/s over 0.6 s)
+and the 0.25 s gap between lines are guesses.
+Open / handoff:
+1. Arrival is now more forgiving, but a room whose extent came out too small is still worth catching at SCAN time -
+   the review screen lists each room's measured size, so compare it with the real room.
+2. Deferred by the user: using an opened door to predict that the destination is about to be reached.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Delete recordings, from both interfaces   [tags: BUILD]
 Area: D (app shell) + U3 (UI). Branch `delete-recordings` off `navigation-overhaul`.
 Request: "add the ability to delete recordings."

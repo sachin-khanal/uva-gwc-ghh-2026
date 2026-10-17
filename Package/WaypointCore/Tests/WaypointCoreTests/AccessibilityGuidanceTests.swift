@@ -266,7 +266,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         let bad = PostureUpdate(reading: .init(pitchDegrees: -50, rollDegrees: 0), issue: .tiltedDown, announcement: PostureIssue.tiltedDown.message, recovered: false)
         let a = p.plan(instruction: instruction(), obstacle: .stop, trackingOK: true, posture: bad,
                        report: ObstacleReport(kind: .wall, distanceMeters: 0.4))
-        XCTAssertEqual(a.first, .speak("Stop. You are heading toward a wall.", priority: .high), "a wall outranks the posture message")
+        XCTAssertEqual(a.first, .speak("Stop. You are heading toward a wall.", priority: .critical), "a wall outranks the posture message")
     }
 
     // ---- obstacles by type
@@ -276,7 +276,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         let wall = ObstacleReport(kind: .wall, distanceMeters: 0.5)
         let can = ObstacleReport(kind: .trashCan, distanceMeters: 0.5)
         let first = p.plan(instruction: instruction(), obstacle: .stop, trackingOK: true, report: wall)
-        XCTAssertEqual(first, [.speak("Stop. You are heading toward a wall.", priority: .high), .haptic(.obstacleStop), .beacon(nil)])
+        XCTAssertEqual(first, [.speak("Stop. You are heading toward a wall.", priority: .critical), .haptic(.obstacleStop), .beacon(nil)])
         XCTAssertEqual(p.plan(instruction: instruction(), obstacle: .stop, trackingOK: true, report: wall), [.beacon(nil)], "same thing, no chatter")
         let changed = p.plan(instruction: instruction(), obstacle: .stop, trackingOK: true, report: can)
         XCTAssertEqual(spoken(changed), ["Stop. You are about to walk into a trash can."])
@@ -296,7 +296,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
     func testCautionIsHighPriorityAndNamesTheObject() {
         var p = FeedbackPlanner()
         let a = p.plan(instruction: nil, obstacle: .caution, trackingOK: true, report: ObstacleReport(kind: .person, side: .left, distanceMeters: 1.9))
-        XCTAssertEqual(a.first, .speak("Careful. A person on your left, about 3 steps.", priority: .high))
+        XCTAssertEqual(a.first, .speak("Careful. A person on your left, about 3 steps.", priority: .critical))
         XCTAssertTrue(a.contains(.haptic(.obstacleCaution)))
     }
 

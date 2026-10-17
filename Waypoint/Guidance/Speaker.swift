@@ -41,14 +41,19 @@ final class Speaker {
         case .drop:
             return
         case .interrupt:
+            // Safety only. Everything queued behind the current line is now stale, so it goes too.
             synthesizer.stopSpeaking(at: .immediate)
-        case .speak:
+        case .enqueue, .speak:
+            // AVSpeechSynthesizer queues utterances natively and speaks them in order, which is
+            // exactly what we want: no fragment, no overlap, and a natural gap between lines.
             break
         }
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        // A short pause after each line so two queued cues do not run together as one sentence.
+        utterance.postUtteranceDelay = 0.25
         synthesizer.speak(utterance)
         Log.guidance.info("say: \(text)")
     }

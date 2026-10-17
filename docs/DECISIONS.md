@@ -312,3 +312,25 @@ rather than cycles, because a straight corridor has no cycles either and that is
 noise. Shown on the review screen so the problem is visible when the map is made, not during a walk.
 **Status:** accepted; 167 tests pass. UNVERIFIED ON DEVICE. Thresholds to tune: 8 start candidates, 5 m off-route,
 1.5 s dwell, and MapHealth's 1.5 m / 10-node revisit test.
+
+## D-032 — Guidance speech QUEUES; only safety interrupts; nothing nags at a standing user (2026-10-17)
+Three reports from a Rice Hall walk.
+1. **"It cuts itself off a bunch."** Every cue was `.high`, and `.high` interrupted whatever was being said. A walking
+user generates several cues in a row, so each one chopped the previous one mid-word. `SpeechPriority` now has three
+levels: **critical** (obstacle at STOP range, lost position) interrupts and clears the queue; **high** (turns, arrival,
+doors) is QUEUED and spoken in turn - `AVSpeechSynthesizer` queues natively, with a 0.25 s `postUtteranceDelay` so two
+lines do not run together; **normal** is ambient and still dropped while anything is speaking.
+2. **"It spams 'stop, there is a door ahead'."** Two causes. The stop warning repeats every 3 s, and the door
+explanation was re-issued on every level change. Now: the "you will need to open it" line is said ONCE per door and
+re-armed only when the way is clear again (so the next door is explained), and a door we were routed through never
+enters the repeating stop path at all.
+3. **Repeating at someone who has already stopped.** The repeat now requires the user to still be MOVING. Movement is
+measured from the ARKit camera pose (>= 0.15 m/s over 0.6 s), not CoreMotion: `CMPedometer`/`CMMotionActivity` would
+need `NSMotionUsageDescription`, and they describe the PHONE, while the pose describes the user's position in the map,
+which is what we actually care about. `isMoving` is optional - nil means "cannot tell" and keeps the old behaviour.
+Also: arrival is now "inside the room **OR** within the arrival radius". Extent-only meant that a room measured too
+small - a corner of a large room, say - made arrival LATER than before the extents existed, which is the "it makes me
+walk all the way to where I labelled it" report. The two rules together can only ever make arrival earlier.
+NOT done (explicitly deferred by the user): predicting that opening a door will complete the route.
+**Status:** accepted; 182 tests pass. UNVERIFIED ON DEVICE. Tune on a phone: 0.15 m/s and the 0.6 s window,
+`postUtteranceDelay` 0.25 s.
