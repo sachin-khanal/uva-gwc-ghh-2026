@@ -49,7 +49,7 @@ public final class RouteFollower {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,
-                targetPosition: target.position, hazard: nil)
+                targetPosition: target.position, hazard: nil, targetKind: target.kind)
         }
         let upcoming = lookahead(from: position, distanceToTarget: distance)
 
@@ -70,7 +70,8 @@ public final class RouteFollower {
             kind: kind, bearingRadians: bearing, distanceMeters: distance,
             targetNodeId: target.id, targetLabel: target.label,
             targetPosition: target.position, hazard: hazard,
-            upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id))
+            upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id),
+            targetKind: target.kind)
     }
 
     // MARK: Look-ahead and landmarks

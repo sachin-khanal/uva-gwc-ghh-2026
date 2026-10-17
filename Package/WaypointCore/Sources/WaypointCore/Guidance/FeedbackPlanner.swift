@@ -109,6 +109,25 @@ public struct FeedbackPlanner {
             lastHazardTarget = nil
         }
 
+        // 1b. ARRIVAL outranks everything below. At the destination the thing the depth sensor sees is
+        // usually the destination itself (the door you were walking to), so letting the obstacle branch
+        // run first produced "Stop. You are about to walk into a door." and the arrival was never
+        // announced at all - the `return` in the obstacle branch swallowed it (found on device
+        // 2026-10-17). Once arrived there is nothing left to steer, so we say it once, mute the beacon
+        // and stay quiet.
+        if let i = instruction, i.kind == .arrived {
+            if lastKey != i.kind.rawValue {
+                lastKey = i.kind.rawValue
+                actions.append(.speak(ArrivalSpeech.text(kind: i.targetKind, label: i.targetLabel), priority: .high))
+                actions.append(.haptic(.arrived))
+            }
+            // Keep the obstacle bookkeeping honest so nothing is re-announced if guidance restarts.
+            lastObstacle = obstacle
+            lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
+            actions.append(.beacon(nil))
+            return actions
+        }
+
         // 2. Obstacles: say WHAT and WHERE when the level or the kind of thing changes, and keep reminding while STOP persists.
         let levelChanged = obstacle != lastObstacle
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
@@ -178,9 +197,7 @@ public struct FeedbackPlanner {
             lastKey = key
             switch i.kind {
             case .arrived:
-                let where_ = i.targetLabel.map { " at \($0)" } ?? ""
-                actions.append(.speak("You have arrived\(where_).", priority: .high))
-                actions.append(.haptic(.arrived))
+                break // unreachable: handled in step 1b, before obstacles can pre-empt it
             case .turnLeft:
                 actions.append(.haptic(.turnLeft))
                 actions.append(.speak("Turn left.", priority: .high))

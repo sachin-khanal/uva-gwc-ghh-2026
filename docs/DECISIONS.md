@@ -135,3 +135,23 @@ but obstacle warnings stay on (a wall outranks the coaching). Distinct 3-tap hap
 **Camera-axis finding (a real bug):** ARKit's camera frame is fixed to the SENSOR. For an upright portrait phone camera +x points toward the BOTTOM of the phone and +y toward the user's RIGHT. The real-device audio beacon used camera-local x as "right", which is wrong in portrait (the simulation hid it because its fake camera used x = right). Fixed in one place: `Geometry.cameraTransform` now produces the real convention and
 `Geometry.cameraLocalToUser` converts for the audio engine; the depth detector's corridor was also the wrong shape on a portrait phone and now unprojects to world points and ignores floor/ceiling (`ObstacleBand`). **All of this is derived from Apple's documented axes and proven only by synthetic poses: it MUST be confirmed on a real phone** (docs/TESTING.md, "Accessibility checks on a real phone").
 Not done yet: side obstacles ("chair on your left" needs a left/right scan), stairs-down/ledge detection, low objects under 15 cm, temporal voting for object names, calibration of thresholds, blind-user review of the wording. **Status:** accepted; implemented; device behaviour UNVERIFIED.
+
+## D-023 — Arrival outranks obstacle warnings, and the first route waits for the pose to settle (2026-10-17)
+Both from testing on a phone (WORKLOG entry below this one).
+1. **Arrival.** The destination is usually a thing you can walk into - a door - so the depth sensor sees it at STOP range
+and `FeedbackPlanner` spoke "Stop. You are about to walk into a door." and `return`ed, which meant the arrival was never
+announced at all. Arrival is now handled BEFORE obstacles: it is said once, the beacon is muted, and obstacle chatter is
+suppressed from then on. Wording comes from the destination node's `NodeKind` (`ArrivalSpeech`), so it is general -
+"You have arrived at Room 204. The door is right in front of you." / "...The stairs are right in front of you." /
+"You have arrived at Room 204." for a plain room. This needed a **CONTRACT CHANGE**: `GuidanceInstruction.targetKind`
+(optional, defaulted, so the JSON map format and every existing caller are unaffected).
+2. **Start of the route.** `NavigationController` built its `RouteFollower` from the FIRST tick with tracking OK. Just
+after relocalization the pose is still converging and often reads near the session origin - where the VOLUNTEER began
+scanning - so the route was computed from there and walked the user back to the start of the scan before heading to the
+destination. A new `StartGate` (pure logic, tested) requires N consecutive ticks within 0.35 m of each other before the
+route may be computed. It is a race, which is why it was only seen once.
+3. **Speech clipping.** One tick can emit several `.speak` actions and every `.high` one stops the synthesizer, so
+earlier lines were cut off mid-word. `NavigationController.perform` now joins a tick's lines into one utterance at the
+highest priority present. (This is NOT the separate dual-synthesizer problem on `app-ui-workflows`, where `Announcer`
+and `SpeechGuide` own different `AVSpeechSynthesizer`s and genuinely talk over each other; that one is still open.)
+**Status:** accepted; 91 tests pass. Arrival wording and the gate are UNVERIFIED ON DEVICE.

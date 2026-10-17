@@ -58,6 +58,10 @@ public struct GuidanceInstruction: Equatable, Sendable {
     public var distanceMeters: Float
     public var targetNodeId: UUID
     public var targetLabel: String?
+    /// What the target node IS (door / room / stairs / ...). Lets arrival be phrased properly
+    /// ("You have arrived at Room 204. The door is right in front of you.") instead of being
+    /// described by the depth sensor as an obstacle. nil when the producer did not set it.
+    public var targetKind: NodeKind?
     /// Target position in the MAP frame (the spatial-audio beacon is placed here).
     public var targetPosition: SIMD3<Float>
     /// Hazard on the edge being walked toward the target (e.g. stairs), if any.
@@ -70,13 +74,14 @@ public struct GuidanceInstruction: Equatable, Sendable {
     public init(
         kind: Kind, bearingRadians: Float, distanceMeters: Float,
         targetNodeId: UUID, targetLabel: String?, targetPosition: SIMD3<Float>, hazard: Hazard?,
-        upcoming: Maneuver? = nil, landmark: Landmark? = nil
+        upcoming: Maneuver? = nil, landmark: Landmark? = nil, targetKind: NodeKind? = nil
     ) {
         self.kind = kind
         self.bearingRadians = bearingRadians
         self.distanceMeters = distanceMeters
         self.targetNodeId = targetNodeId
         self.targetLabel = targetLabel
+        self.targetKind = targetKind
         self.targetPosition = targetPosition
         self.hazard = hazard
         self.upcoming = upcoming

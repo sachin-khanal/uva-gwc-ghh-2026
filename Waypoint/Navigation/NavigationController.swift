@@ -68,6 +68,8 @@ final class NavigationController: ObservableObject {
     private var graph: WaypointGraph?
     private var destination: MapNode?
     private var follower: RouteFollower?
+    /// Holds the first route back until the relocalized pose has settled (see StartGate).
+    private var startGate = StartGate()
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -135,6 +137,7 @@ final class NavigationController: ObservableObject {
         graph = WaypointGraph(map: map)
         self.destination = destination
         follower = nil
+        startGate.reset()
         planner.reset()
         obstacles.reset()
         postureMonitor.reset()
@@ -215,7 +218,13 @@ final class NavigationController: ObservableObject {
             if isSimulating { mapPosition.y = 0 }
             let mapForward = Geometry.transformDirection(worldToMap, Geometry.cameraForward(of: camera))
 
-            if follower == nil { follower = makeFollower(from: mapPosition, graph: graph, destination: destination) }
+            // Do NOT route from the first pose that arrives: just after relocalization it is still
+            // converging and often sits near the session origin, i.e. where the scan STARTED. Routing
+            // from there walks the user back to the beginning of the scan first (device report
+            // 2026-10-17). Wait for the pose to hold still, then route from where they really are.
+            if follower == nil, startGate.update(position: mapPosition, trackingOK: trackingOK) {
+                follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
+            }
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
                 lastLoggedKind = i.kind
@@ -253,12 +262,26 @@ final class NavigationController: ObservableObject {
     /// Executes FeedbackPlanner output. Beacon positions arrive in the MAP frame and are converted
     /// to the camera-local frame here because that is what the audio engine expects.
     private func perform(_ actions: [FeedbackAction], camera: simd_float4x4, mapToWorld: simd_float4x4) {
+        // One tick can produce several `.speak` actions (e.g. arrival + a hazard). Saying them one by
+        // one made each `.high` line cut off the one before it mid-word, because SpeechGuide stops the
+        // synthesizer for every high-priority utterance. Join them into a single sentence instead, at
+        // the highest priority present, so nothing is clipped and nothing overlaps.
+        let spoken = actions.compactMap { action -> (String, SpeechPriority)? in
+            if case .speak(let text, let priority) = action { return (text, priority) }
+            return nil
+        }
+        if !spoken.isEmpty {
+            let text = spoken.map(\.0).joined(separator: " ")
+            let priority: SpeechPriority = spoken.contains { $0.1 == .high } ? .high : .normal
+            setIfChanged(\.lastSpoken, text)
+            recentSpeech = Array((recentSpeech + [text]).suffix(6))
+            speech.say(text, priority: priority)
+        }
+
         for action in actions {
             switch action {
-            case .speak(let text, let priority):
-                setIfChanged(\.lastSpoken, text)
-                recentSpeech = Array((recentSpeech + [text]).suffix(6))
-                speech.say(text, priority: priority)
+            case .speak:
+                break // already said, coalesced above
             case .haptic(let cue):
                 Log.guidance.info("haptic: \(cue)")
                 haptics.play(cue)

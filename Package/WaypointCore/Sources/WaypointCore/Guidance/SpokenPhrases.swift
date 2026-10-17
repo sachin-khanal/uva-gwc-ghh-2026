@@ -116,3 +116,42 @@ public enum ManeuverSpeech {
         "\(label) on your \(side == .left ? "left" : "right")."
     }
 }
+
+/// What the user hears when they reach the destination.
+///
+/// Why this exists: at the destination the thing the depth sensor sees IS the door or room we were
+/// walking to, so the obstacle wording ("Stop. You are about to walk into a door.") was both alarming
+/// and wrong about what had happened - it hid the arrival (reported on device 2026-10-17).
+/// The phrasing is driven by the destination node's `NodeKind`, so it works for any kind of
+/// destination, not just doors.
+public enum ArrivalSpeech {
+
+    /// A door/stairs/elevator is a thing standing in front of you and worth naming; a room or a
+    /// corridor node is just the place itself, which `label` already names.
+    static func feature(_ kind: NodeKind?) -> String? {
+        switch kind {
+        case .door: return "door"
+        case .stairs: return "stairs"
+        case .elevator: return "elevator"
+        case .room, .corridor, .junction, nil: return nil
+        }
+    }
+
+    public static func text(kind: NodeKind?, label: String?) -> String {
+        let name = label?.trimmingCharacters(in: .whitespaces)
+        let place = (name?.isEmpty == false) ? name : nil
+
+        switch (feature(kind), place) {
+        case let (feature?, place?):
+            // "You have arrived at Room 204. The door is right in front of you."
+            let verb = (kind == .stairs) ? "are" : "is"
+            return "You have arrived at \(place). The \(feature) \(verb) right in front of you."
+        case let (feature?, nil):
+            return "You have arrived at the \(feature)."
+        case let (nil, place?):
+            return "You have arrived at \(place)."
+        case (nil, nil):
+            return "You have arrived."
+        }
+    }
+}

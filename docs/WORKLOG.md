@@ -19,6 +19,43 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Arrival vs obstacle, route start race, speech clipping   [tags: BUILD, CONTRACT CHANGE]
+Area: B (Navigation/Feedback) + shared core. Branch `guidance-arrival-and-start` off `main` (7fbcb76).
+Trigger: three issues found testing on the iPhone 15 Pro.
+
+CONTRACT CHANGE: `GuidanceInstruction` gains `targetKind: NodeKind?` (optional, defaulted last in the initializer, so
+every existing call site and the on-disk map JSON are unaffected; `BuildingMap.schemaVersion` NOT bumped - no JSON change).
+`RouteFollower` fills it from the target node.
+
+Files created (WaypointCore): `Routing/StartGate.swift` (pure logic: N consecutive ticks within maxJump before the
+first route may be computed).
+Files edited (WaypointCore): `Routing/GuidanceInstruction.swift` (+targetKind), `Routing/RouteFollower.swift` (sets it on
+both the arrival and the normal instruction), `Guidance/SpokenPhrases.swift` (+`ArrivalSpeech`, phrasing driven by
+NodeKind, plural agreement for stairs), `Guidance/FeedbackPlanner.swift` (new step 1b: arrival is handled before
+obstacles and returns; the old `.arrived` case in step 4b is now unreachable and says so).
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (StartGate gates follower creation + reset in
+`begin`; `perform` coalesces a tick's `.speak` actions into one utterance at the highest priority).
+Tests added: `ArrivalAndStartGateTests` in RoutingTests - arrival wording per NodeKind, arrival announced at STOP range,
+said once not per tick, obstacle warnings unchanged while walking, gate waits out a jumping pose, lost tracking restarts
+the count, non-finite rejected, and a routing test showing the converging pose picks the scan-origin node (4-node route)
+while the settled pose picks the right one (2-node route).
+Verified: `make test` -> **91 tests, 0 failures** (was 81); `make typecheck` OK (22 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has heard the new arrival wording or confirmed the gate fixes the
+walk-back-to-the-scan-origin behaviour on a phone. `StartGate` defaults (10 ticks, 0.35 m) are a guess and want tuning
+in a real corridor - at ARKit's ~60 Hz that is ~0.17 s, at the simulator's 10 Hz it is 1 s.
+Open / handoff:
+1. Re-test the original two reports on a phone: arrive at a labelled door, and start navigation from a spot far from
+   where the scan began.
+2. Still open, NOT in this branch: the third report (mesh detail / "polygon calcs") - no mesh is stored anywhere and
+   ARKit's reconstruction resolution is not tunable, so the question back to the team is which symptom was actually
+   seen (overlay density, frame rate/heat, or a reported size).
+3. Still open: the dual-synthesizer overlap on `app-ui-workflows` (Announcer + SpeechGuide), and off-route re-routing
+   (U2.5), which would also recover from a bad start node rather than only preventing one.
+4. My earlier account-auth work is still in `stash@{0}` and its ADR must be renumbered (it claims D-019, which is taken; the next free id after this entry is D-024).
+
+---
+
 ## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
 Area: shared (integration check requested by U1 before committing)
 Branches: `origin/U3` = no own commits (old pointer, 3 behind main). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
