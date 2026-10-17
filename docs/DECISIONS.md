@@ -1,5 +1,7 @@
 # Decisions log
 
+**Update 2026-10-17 (Codex, user-directed):** D-015's contributor-copy approach is superseded for updated clients by one canonical shared map per building UUID. Migration 0002 adds canonical_buildings and an atomic additive extension RPC. Signed-in users can see and extend it; private publication is removed from the cloud UI. Existing records/data remain in place for old clients. See `supabase/CANONICAL_MAPS.md` for deployment, identity, and verification limits. This cloud change is UNVERIFIED on live Supabase and iOS; full scan-extension capture remains separate.
+
 Short ADRs. Add new ones at the bottom with the next id. Do not rewrite history; supersede instead.
 
 ## D-001 — Native iOS, Swift + SwiftUI, iOS 17+

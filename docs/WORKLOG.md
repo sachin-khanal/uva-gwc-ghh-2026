@@ -1,5 +1,27 @@
 # Work log
 
+## 2026-10-17 — Codex for U3 — Shared-map verification and branch handoff
+Area: D (cloud/backend).
+Files edited: `docs/WORKLOG.md` (this entry); committing the canonical-map files listed in the entry below at U3's request.
+User-reported verification: U3 ran the full migration `0002_canonical_maps.sql` and the full `supabase/tests/canonical_maps.sql` in the Supabase SQL Editor; both returned success. This updates the earlier unverified SQL status below; the agent did not directly observe the dashboard.
+Commands run: `git status --short --branch`, `git diff --check`; commit and push to `origin/U3` requested. No main merge.
+Verified: whitespace check passed. Earlier Python regression suite: 9 PASS.
+NOT verified: Swift tests/typecheck still require a Mac (prior attempts failed because make is unavailable); live concurrent requests and app integration remain unverified; UNVERIFIED ON DEVICE.
+Handoff: Mac teammate should run make test and make typecheck, then device cloud checks. Full extend-existing-map capture flow remains separate.
+
+
+## 2026-10-17 — Codex for U3 — Canonical shared building map [tags: CONTRACT CHANGE]
+Area: D cloud/backend; user explicitly requested one main map per building that other users can extend and see.
+Files created: `supabase/migrations/0002_canonical_maps.sql`, `supabase/tests/canonical_maps.sql`, `supabase/CANONICAL_MAPS.md`.
+Files edited: core `Cloud/{SupabaseClient,CloudModels,SyncEngine}.swift`, `CloudTests.swift`, app `CloudController.swift`, `SyncView.swift`; docs WORKLOG/MODULES/DECISIONS (additive notes). App UI edits are necessary for the requested cloud behavior (remove private publish option, review every shared download).
+CONTRACT CHANGE: cloud endpoint now uses canonical_buildings and rpc/extend_building; optional segment_owners column tracks contributor scan paths. BuildingMap JSON unchanged, so no schemaVersion bump or sample change. Apply migration 0002 before using this client. Original 0001 data remains; existing maps must be republished.
+Behavior: one unique map UUID per building; all authenticated users can read; atomic additive merges preserve concurrent/stale contributions; existing-node/edge edits rejected. Different names are not a building identity mechanism. Scan alignment and unique segment IDs remain the capture owner's responsibility.
+Commands: `git diff --check`; Python validator tests (9 PASS); `make test` and `make typecheck` attempted, both unavailable because make is not installed on Windows.
+Verified: existing Python suite passes, diff whitespace checks pass. Updated Swift request assertions and added contributor-file-path regression; added transactional SQL functional test.
+NOT verified: SQL migration/test execution (no PostgreSQL here), Swift tests/typecheck (Mac required), concurrency on live server; UNVERIFIED ON DEVICE. No remote database changed, no dependencies added, no commit/push.
+Handoff: apply 0002 and run supabase/tests/canonical_maps.sql in dashboard; Mac owner runs required make checks. Full extend-existing-map capture UI is still a separate roadmap task. Prior D-015 contributor-row behavior is superseded for updated clients, retained for old-client data.
+
+
 ## 2026-10-17 — Codex for U3 — Windows map validator (U3.4)
 Area: D (U3 tooling)
 Files created: `tools/validate_map.py`, `tools/test_validate_map.py`, `tools/README.md`.

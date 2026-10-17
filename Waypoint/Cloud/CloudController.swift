@@ -3,14 +3,14 @@
 // Owner:    D (App/Sync/Integration)
 // Purpose:  UI-facing wrapper around WaypointCore's `SyncEngine` / `SupabaseClient`:
 //             * reads the project URL + anon key from Info.plist (set in Config/Local.xcconfig),
-//             * upload ("push") a local map, optionally shared with everyone,
+//             * publish an extension to the one shared canonical building map,
 //             * refresh the remote library, download a map.
-//           Your own maps import straight away; maps owned by SOMEONE ELSE are held in
-//           `pendingDownload` until the user taps Import (decisions D-012 / D-015: cloud data is untrusted).
+//           All shared downloads are held in `pendingDownload` until the user taps Import,
+//           because other people can extend even a map the current user first published.
 // Offline:  every method fails soft with a message in `status`; navigation never depends on this class.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE and UNVERIFIED AGAINST A REAL SUPABASE PROJECT. The HTTP layer
 //           itself is covered by CloudTests (mock transport). First real test: enable Anonymous Sign-Ins,
-//           run supabase/migrations/0001_init.sql, set the two xcconfig values, tap Upload.
+//           run migrations 0001 and 0002, set the two xcconfig values, tap Upload.
 //
 import Foundation
 import WaypointCore
@@ -61,7 +61,7 @@ final class CloudController: ObservableObject {
     func push(mapId: UUID, name: String, share: Bool) {
         run("Uploading \(name)...") { engine in
             try await engine.push(mapId: mapId, share: share)
-            return "Uploaded \(name)" + (share ? " (shared)" : " (private)")
+            return "Updated shared map: \(name)"
         }
     }
 
@@ -89,12 +89,9 @@ final class CloudController: ObservableObject {
             defer { self.isBusy = false }
             do {
                 let bundle = try await engine.fetchBundle(item)
-                if item.isMine {
-                    self.finishImport(bundle)
-                } else {
+                // Even the first publisher must review later contributions from other users.
                     self.pendingDownload = PendingDownload(remote: item, bundle: bundle)
                     self.status = "Review \(item.row.name) before importing"
-                }
             } catch {
                 self.status = Self.describe(error)
                 Log.sync.error("cloud download failed: \(error.localizedDescription)")

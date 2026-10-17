@@ -4,7 +4,7 @@
 // Owner:    D (App/Sync/Integration)
 // Purpose:  Moves maps between the local `MapStore` and Supabase.
 //             push(mapId:)   uploads each ARWorldMap segment to the private `worldmaps` bucket, then
-//                            upserts this user's `buildings` row (map JSON + metadata).
+//                            atomically extends the canonical building map (migration 0002).
 //             listRemote()   rows visible to this user (own + shared), flagged `isMine`.
 //             fetchBundle()  downloads the world maps for a row and returns a VALIDATED `MapBundle`.
 //           It never writes to the local store by itself on fetch: the app decides (own maps import
@@ -34,7 +34,7 @@ public final class SyncEngine {
         return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
     }
 
-    /// Uploads the local map `mapId`. `share == true` makes the row readable by every signed-in user.
+    /// Publishes an additive extension. All canonical maps are shared; share is retained for API compatibility.
     public func push(mapId: UUID, share: Bool) async throws {
         let bundle = try store.makeBundle(id: mapId)
         try bundle.validate() // never upload something we would refuse to import
@@ -68,7 +68,8 @@ public final class SyncEngine {
 
         var worldMaps: [String: Data] = [:]
         for segment in remote.row.map.segmentIds {
-            let path = try Self.worldMapPath(owner: owner, mapId: remote.row.mapId, segment: segment)
+            let segmentOwner = remote.row.segmentOwners?[segment] ?? owner
+            let path = try Self.worldMapPath(owner: segmentOwner, mapId: remote.row.mapId, segment: segment)
             do {
                 worldMaps[segment] = try await client.download(bucket: Self.worldMapBucket, path: path)
             } catch CloudError.http(let status, _) where status == 400 || status == 404 {

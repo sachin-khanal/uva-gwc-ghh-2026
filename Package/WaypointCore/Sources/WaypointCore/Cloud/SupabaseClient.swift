@@ -4,12 +4,12 @@
 // Owner:    D (App/Sync/Integration)
 // Purpose:  Minimal Supabase REST client (decision D-014: no Supabase SDK, plain HTTP):
 //             * GoTrue   anonymous sign-in + refresh        POST /auth/v1/signup, /auth/v1/token
-//             * PostgREST upsert/list `buildings`             /rest/v1/buildings
+//             * PostgREST canonical list + atomic extension  /rest/v1/canonical_buildings, rpc/extend_building
 //             * Storage  upload/download private files       /storage/v1/object/...
 //           Every call carries the public `apikey` header and the user's JWT as Bearer token, so Row
 //           Level Security sees `auth.uid()`.
 // Setup:    In the Supabase dashboard enable Authentication > Providers > Anonymous Sign-Ins, then run
-//           supabase/migrations/0001_init.sql in the SQL editor.
+//           migrations 0001 and 0002 in the SQL editor. Status: UNVERIFIED against live migration 0002.
 // Actor:    all mutable state (the session) is isolated; safe to call from any task.
 //
 import Foundation
@@ -90,20 +90,19 @@ public actor SupabaseClient {
 
     // MARK: Buildings (PostgREST)
 
-    /// Insert or update this user's row for `row.mapId` (unique on owner + map_id).
+    /// Atomically add to the building's shared map (requires migration 0002).
     public func upsertBuilding(_ row: BuildingRow) async throws {
-        let body = try JSONEncoder().encode(row)
+        let body = try JSONEncoder().encode(["incoming": row.map])
         _ = try await authed(
-            "POST", "rest/v1/buildings",
-            query: [URLQueryItem(name: "on_conflict", value: "owner,map_id")],
-            headers: ["Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal"],
+            "POST", "rest/v1/rpc/extend_building",
+            headers: ["Content-Type": "application/json"],
             body: body)
     }
 
-    /// Every building row this user may see (their own + shared ones), newest first.
+    /// One shared map per building, newest first.
     public func listBuildings() async throws -> [BuildingRow] {
         let data = try await authed(
-            "GET", "rest/v1/buildings",
+            "GET", "rest/v1/canonical_buildings",
             query: [URLQueryItem(name: "select", value: "*"), URLQueryItem(name: "order", value: "updated_at.desc")])
         do { return try JSONDecoder().decode([BuildingRow].self, from: data) }
         catch { throw CloudError.decoding("buildings: \(error.localizedDescription)") }
