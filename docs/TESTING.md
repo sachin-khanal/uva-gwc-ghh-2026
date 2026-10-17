@@ -170,3 +170,20 @@ Add to docs/WORKLOG.md: which check number, phone model + iOS version, pass/fail
 is only "verified" once someone has done it on a device and written it down.
 
 **Update 2026-10-17 (Claude):** **Docs hook:** `make test-hooks` (or `sh scripts/test-docs-sync.sh`) runs 15 cases of `scripts/docs-sync.sh` in a throwaway git repo (no phone, no Mac needed).
+## Level 4 — new interface (added 2026-10-17, U3; docs/UI_PLAN.md §10)
+
+Turn it on: Home → gear → Interface **New**. Data source: Demo data / Simulated walk / Live.
+
+| # | Check | Phone | Expected |
+|---|---|---|---|
+| 4.0 | `make test` and `make typecheck` on a Mac | – | FlowTests pass (new); the 50 existing tests still pass; typecheck OK |
+| 4.1 | Interface **Classic** (default): repeat Level 2 checks | any | exactly the same behaviour as before the change |
+| 4.2 | New + Demo data: Scanner end to end (New scan → wait ~15 s → tag a labelled Room → Finish → Review → rename → Share → Try it in Navigate) | any | Finish stays disabled with a reason until mapped + a labelled tag; map with "· demo" appears; rename persists after relaunch |
+| 4.3 | New + Demo data: Navigator with **VoiceOver on and eyes closed** | any | can pick a place, start, hear every instruction, reach "You have arrived" without looking; back gesture never ends the route; Stop needs confirmation |
+| 4.4 | New + Demo data: Navigator with VoiceOver **off** | any | each screen is introduced aloud ("Spoken prompts"); tap anywhere on the guiding screen repeats; Stop needs a 1 s hold |
+| 4.5 | New + Simulated walk, headphones | any | real cues from NavigationController; the UI does NOT speak the same instruction a second time |
+| 4.6 | New + Live on a Pro iPhone: scan a hallway, review, navigate it | Pro | live mesh + box in the new scan screen; save works; guidance as in Level 3 |
+| 4.7 | Regular iPhone (no LiDAR), New + Live | regular | scanner falls back to demo data with a banner; no crash |
+| 4.8 | Settings → Larger Text (AX5), Bold Text, Increase Contrast, Reduce Motion | any | no clipped instructions; no pulsing/animation with Reduce Motion |
+| 4.9 | Escort panel during a demo walk: inject obstacle, position lost, fail, skip | any | STOP / lost screens take over; closing the panel clears injected states |
+
