@@ -90,8 +90,11 @@ final class NavigationController: ObservableObject {
     private var follower: RouteFollower?
     /// Holds the first route back until the relocalized pose has settled (see StartGate).
     private var startGate = StartGate()
-    /// Consecutive ticks spent far from the route; drives re-routing.
-    private var offRouteTicks = 0
+    /// How often the route is recomputed from the CURRENT position. A* over a few hundred nodes is
+    /// microseconds; this interval is about not thrashing the published route, not about cost.
+    private static let routeRecomputeSeconds: TimeInterval = 0.5
+    private var lastRouteComputation: TimeInterval = -.greatestFiniteMagnitude
+    private var lastRerouteAnnouncement: TimeInterval = -.greatestFiniteMagnitude
     /// Recent positions, for working out whether the user is actually walking.
     private var lastMovementSample: (position: SIMD3<Float>, time: TimeInterval)?
     private var isMoving = true
@@ -105,21 +108,13 @@ final class NavigationController: ObservableObject {
     /// ignored, but 5 m meant walking the wrong way for several seconds before anything happened
     /// (device report 2026-10-17).
     private static let rerouteMeters: Float = 3
-    /// ~1 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
-    private static let rerouteTicks = 10
-    /// Walking AWAY from the route is caught sooner than simply being far from it: if the distance has
-    /// grown by this much while moving, we are heading somewhere else and the route is already wrong.
-    private static let rerouteDriftMeters: Float = 1.5
-    /// Distance from the route a moment ago, for that drift test.
-    private var routeDistanceHistory: [(distance: Float, time: TimeInterval)] = []
     /// A position change larger than this between ticks is not walking - it is relocalization
     /// correcting itself. Treating it as walking made the app think the user had left the route and
     /// re-route, over and over (device report 2026-10-17). 3 m in a 0.1 s tick is 30 m/s.
     private static let poseJumpMeters: Float = 3
-    /// Re-routes are rate limited: without this, a jumping pose produced a burst of recalculations,
-    /// each resetting the planner and so bypassing the cooldown that spaces out spoken directions.
+    /// How often we are willing to SAY "Recalculating". The computation is continuous now; the
+    /// SPEECH is what must not machine-gun.
     private static let minimumSecondsBetweenReroutes: TimeInterval = 5
-    private var lastRerouteTime: TimeInterval = -.greatestFiniteMagnitude
     private var lastTickPosition: SIMD3<Float>?
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
@@ -208,12 +203,11 @@ final class NavigationController: ObservableObject {
         headingRadians = nil
         self.destination = destination
         follower = nil
-        offRouteTicks = 0
         lastMovementSample = nil
         isMoving = true
-        routeDistanceHistory.removeAll()
         lastTickPosition = nil
-        lastRerouteTime = -.greatestFiniteMagnitude
+        lastRouteComputation = -.greatestFiniteMagnitude
+        lastRerouteAnnouncement = -.greatestFiniteMagnitude
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
@@ -306,62 +300,51 @@ final class NavigationController: ObservableObject {
                 routeNodeIds = follower?.route.map(\.id) ?? []
             }
             // A position change larger than a person can walk between ticks is relocalization
-            // correcting itself, not movement. Decide this FIRST, so nothing downstream reads the
-            // jump as walking.
+            // correcting itself, not movement. It must not be read as walking.
             let jumped = lastTickPosition.map {
                 Geometry.horizontalDistance($0, mapPosition) > Self.poseJumpMeters
             } ?? false
             lastTickPosition = mapPosition
-            if jumped {
-                // The pose correcting itself is not the user walking - but the route WAS computed in
-                // the old frame, so it is now stale. Rebuild it quietly from the corrected position.
-                // Suppressing the rebuild (the first version of this) left the user following a route
-                // that started somewhere they had never been (device report 2026-10-17).
-                Log.nav.info("pose jumped; rebuilding the route from the corrected position")
-                offRouteTicks = 0
-                routeDistanceHistory.removeAll()
-                lastMovementSample = nil
-                if follower != nil, let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
-                    follower = rebuilt
-                    routeNodeIds = rebuilt.route.map(\.id)
-                    lastRouteWorldKey = ""
-                    // Deliberately NOT `planner.reset()` and NOT "Recalculating": nothing changed for
-                    // the user, only our idea of where they are. Re-briefing here is what produced
-                    // bursts of contradictory speech.
-                }
-            }
+            if jumped { lastMovementSample = nil }
 
             self.mapPosition = mapPosition
             headingRadians = atan2(mapForward.x, -mapForward.z)
             if !jumped { updateMovement(position: mapPosition, time: time) }
             updateRouteWorldPositions(mapToWorld: mapToWorld)
-            // Re-route when the user is genuinely somewhere else. The route used to be computed once
-            // and kept for the whole session, so walking a different (often shorter) way than the one
-            // the volunteer scanned left the app insisting on its original path (device report
-            // 2026-10-17).
-            if let current = follower, !jumped {
-                let offRoute = current.distanceFromRoute(position: mapPosition)
-                routeDistanceHistory.append((offRoute, time))
-                routeDistanceHistory.removeAll { time - $0.time > 2 }
-                // Two ways to notice: far from the route for a while, OR steadily walking away from it.
-                let farForAWhile: Bool = {
-                    if offRoute > Self.rerouteMeters { offRouteTicks += 1 } else { offRouteTicks = 0 }
-                    return offRouteTicks >= Self.rerouteTicks
-                }()
-                let drifting = isMoving
-                    && (routeDistanceHistory.first.map { offRoute - $0.distance >= Self.rerouteDriftMeters } ?? false)
 
-                if (farForAWhile || drifting), time - lastRerouteTime >= Self.minimumSecondsBetweenReroutes {
-                    lastRerouteTime = time
-                    offRouteTicks = 0
-                    routeDistanceHistory.removeAll()
-                    if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
-                        follower = rebuilt
+            // ROUTE CONTINUOUSLY, rather than deciding when the old route has gone stale.
+            //
+            // Three attempts at that decision each fixed one case and broke another - off-route
+            // counters, drift detection, pose-jump suppression - and the user still ended up following
+            // a route that started where they had never been (device reports, 2026-10-17). A* over a
+            // few hundred nodes is cheap, so the route is simply recomputed from the CURRENT position
+            // a couple of times a second. It cannot be stale, whatever the pose does.
+            //
+            // Speech is what needs rationing, not computation: a new route is adopted silently, and
+            // "Recalculating" is said only when the user had genuinely wandered off the old one.
+            if follower != nil, time - lastRouteComputation >= Self.routeRecomputeSeconds {
+                lastRouteComputation = time
+                let strayed = follower.map { $0.distanceFromRoute(position: mapPosition) > Self.rerouteMeters } ?? false
+                if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
+                    let changed = rebuilt.route.map(\.id) != routeNodeIds
+                    follower = rebuilt
+                    if changed {
                         routeNodeIds = rebuilt.route.map(\.id)
                         lastRouteWorldKey = ""
-                        planner.reset()
-                        speech.say("Recalculating.", priority: .high)
-                        Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
+                        // Diagnostic: if the route ever starts somewhere the user is not, these two
+                        // numbers say so immediately instead of needing another walk to guess from.
+                        if let first = rebuilt.route.first {
+                            Log.nav.info(String(format: "route from (%.1f, %.1f) starts at (%.1f, %.1f), %.1f m away, %d waypoints",
+                                                mapPosition.x, mapPosition.z,
+                                                first.position.x, first.position.z,
+                                                Geometry.horizontalDistance(mapPosition, first.position),
+                                                rebuilt.route.count))
+                        }
+                        if strayed, time - lastRerouteAnnouncement >= Self.minimumSecondsBetweenReroutes {
+                            lastRerouteAnnouncement = time
+                            speech.say("Recalculating.", priority: .high)
+                            Log.nav.info("re-routed: \(rebuilt.route.count) waypoints, user was off route")
+                        }
                     }
                 }
             }

@@ -486,3 +486,23 @@ Making keyframes actually accelerate a world-mapped session means allowing guida
 decision, not a tweak, and not taken here. The log line "using world map for segment X" versus "no world map on disk"
 says which case a given map is in.
 **Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-041 — Route continuously instead of deciding when the route has gone stale (2026-10-17)
+After three attempts, the user reported the same fault again: standing at Start while the route began across the
+building, never rebuilding.
+Each attempt added machinery to DECIDE when the existing route was stale - off-route tick counters (D-029), a drift
+test (D-036), pose-jump suppression and then pose-jump rebuilding (D-039, D-040). Each fixed one case and exposed
+another, and after three rounds the fault was unchanged. That is a signal about the approach, not about the thresholds.
+**The decision has been deleted.** A* over a few hundred nodes is microseconds, so the route is now recomputed from the
+CURRENT position twice a second, unconditionally. It cannot be stale, whatever relocalization does to the pose, and
+there is no longer any state to get wrong: no counters, no drift history, no jump suppression, no rate limiter on the
+computation.
+What still needs rationing is SPEECH, not computation. A newly computed route is adopted silently; "Recalculating" is
+said only when the user had genuinely strayed more than 3 m from the previous route, and at most once every 5 s. The
+planner is never reset by a recompute, which is what used to bypass the direction cooldown and produce bursts.
+Removed with it: `offRouteTicks`, `routeDistanceHistory`, `rerouteDriftMeters`, `rerouteTicks`, `lastRerouteTime`.
+Pose-jump detection survives for ONE purpose only - not feeding a jump to the movement detector as if the user had
+sprinted.
+Added a diagnostic: when the route changes, the log prints the user's position, the first waypoint's position and the
+distance between them. If this fault ever recurs, that line identifies it without another walk.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.

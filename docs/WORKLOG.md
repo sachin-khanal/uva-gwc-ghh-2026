@@ -93,6 +93,32 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Route continuously; delete the staleness machinery   [tags: BUILD, BUG]
+Area: B (Navigation). Branch `continuous-routing` off `navigation-overhaul`. See D-041.
+
+Fourth report of the same fault: the user at Start, the route starting across the building, 5 waypoints / 14.3 m
+unchanged across every screenshot. My three previous fixes all added logic to decide WHEN the route had gone stale;
+each fixed one case and exposed another.
+Change: `NavigationController` recomputes the route from the current position every 0.5 s, unconditionally, and adopts
+it silently when it differs. "Recalculating" is spoken only if the user had strayed >3 m from the previous route, at
+most once per 5 s. `planner.reset()` is no longer called on a recompute - that was what bypassed the direction
+cooldown and caused bursts of contradictory speech.
+Deleted: `offRouteTicks`, `routeDistanceHistory`, `rerouteDriftMeters`, `rerouteTicks`, `lastRerouteTime` and the
+whole off-route/drift decision. Pose-jump detection remains for one job: keeping a relocalization correction out of
+the movement detector.
+Added: a log line when the route changes - user position, first waypoint position, distance between them, waypoint
+count. If this ever recurs, that line diagnoses it without another walk.
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED. No leftover references to the removed machinery.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched.
+Open / handoff:
+1. If the route STILL starts away from the user after this, the fault is not in when we recompute but in the position
+   itself - the new log line will show the user's position and the route's first waypoint and settle it.
+2. Still unknown whether keyframes run at all on a map with a saved world map (D-040); the console says
+   "using world map for segment X" or "no world map on disk".
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Clear the coarse alignment; rebuild the route after a correction   [tags: BUILD, BUG]
 Area: A (relocalization) + B (navigation). Branch `route-rebuild-on-fix` off `navigation-overhaul`. See D-040.
 
