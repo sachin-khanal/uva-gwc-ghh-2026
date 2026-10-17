@@ -59,6 +59,18 @@ public final class SyncEngine {
     /// Downloads the world maps and returns a validated bundle. World maps that are missing in
     /// storage are skipped (the map is still usable via the marker fallback), other errors propagate.
     public func fetchBundle(_ remote: RemoteMap) async throws -> MapBundle {
+        try await fetchBundleChecked(remote).bundle
+    }
+
+    /// A downloaded map and the scan segments whose files could NOT be downloaded (missing in storage, or hidden by a storage access rule).
+    /// A map without its scan file imports fine but can never relocalize, so callers must tell the user (live test 2026-10-17: a second
+    /// user got the map but 0 bytes of every scan because the storage read rule was not active).
+    public struct FetchedBundle: Sendable {
+        public var bundle: MapBundle
+        public var missingSegments: [String]
+    }
+
+    public func fetchBundleChecked(_ remote: RemoteMap) async throws -> FetchedBundle {
         guard let owner = remote.row.owner?.uuidString else {
             throw CloudError.rejected("Remote map has no owner.")
         }
@@ -67,17 +79,19 @@ public final class SyncEngine {
         catch MapStoreError.rejected(let reason) { throw CloudError.rejected(reason) }
 
         var worldMaps: [String: Data] = [:]
+        var missing: [String] = []
         for segment in remote.row.map.segmentIds {
             let segmentOwner = remote.row.segmentOwners?[segment] ?? owner
             let path = try Self.worldMapPath(owner: segmentOwner, mapId: remote.row.mapId, segment: segment)
             do {
                 worldMaps[segment] = try await client.download(bucket: Self.worldMapBucket, path: path)
             } catch CloudError.http(let status, _) where status == 400 || status == 404 {
+                missing.append(segment)
                 continue
             }
         }
         let bundle = MapBundle(map: remote.row.map, worldMaps: worldMaps)
         do { try bundle.validate() } catch MapStoreError.rejected(let reason) { throw CloudError.rejected(reason) }
-        return bundle
+        return FetchedBundle(bundle: bundle, missingSegments: missing)
     }
 }

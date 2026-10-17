@@ -276,6 +276,23 @@ final class CloudTests: XCTestCase {
             .fetchBundle(RemoteMap(row: decoded, isMine: false))
         XCTAssertTrue(t.requests.last!.url.path.contains(contributor.uuidString.lowercased()))
     }
+
+    func testMissingScanFilesAreReportedNotSilentlyDropped() async throws {
+        let map = try loadSampleMap()
+        let row = BuildingRow(rowId: UUID(), mapId: map.id, owner: UUID(), name: map.name, version: 1, map: map, isShared: true)
+        let t = MockTransport { req in
+            if req.url.path.hasPrefix("/auth/") { return HTTPResponse(status: 200, body: authJSON()) }
+            // what Supabase answers when a storage rule hides the object
+            return HTTPResponse(status: 400, body: Data(#"{"statusCode":"404","error":"not_found","message":"Object not found"}"#.utf8))
+        }
+        let engine = SyncEngine(client: makeClient(t), store: tempStore())
+        let fetched = try await engine.fetchBundleChecked(RemoteMap(row: row, isMine: false))
+        XCTAssertEqual(fetched.missingSegments, map.segmentIds)
+        XCTAssertTrue(fetched.bundle.worldMaps.isEmpty)
+        // the old entry point keeps working (map still usable via the marker fallback)
+        let legacy = try await engine.fetchBundle(RemoteMap(row: row, isMine: false))
+        XCTAssertTrue(legacy.worldMaps.isEmpty)
+    }
 }
 
 // MARK: Test helpers

@@ -27,3 +27,6 @@ edge distances, connectivity, or unique edges are invented here.
 This is a developer check, not proof that a map matches a real building or that
 a route is safe. It does not implement the store's existing-map merge checks.
 CI wiring (INF-2) is a separate task; this change does not add a workflow.
+
+## supabase_check.py (added 2026-10-17)
+`python3 tools/supabase_check.py` checks the real Supabase project the way the app uses it: keys (refuses a service_role key), anonymous sign-in, the shared map list, the `extend_building` function, and whether a brand-new user can download the scan files of the existing test building. Read-only. `--write` also runs the two-user publish / share / extend / stale-upload round trip and leaves one building named `ZZ CONNECTION TEST ...` (delete it in the SQL editor, see the script header). Reads `Config/Local.xcconfig` or `SUPABASE_URL` / `SUPABASE_ANON_KEY`; never prints keys.

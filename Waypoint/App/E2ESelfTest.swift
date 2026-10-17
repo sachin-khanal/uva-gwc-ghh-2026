@@ -215,6 +215,12 @@ enum E2ESelfTest {
                 let rows = try await client.listBuildings()
                 pass("cloud.listBuildings", "\(rows.count) visible row(s)")
             } catch { fail("cloud", "\(error)") }
+            // Opt-in WRITE test (two users, publish, share, extend, stale upload, reliability). See CloudRoundTripTest.
+            if CloudRoundTripTest.requested {
+                await CloudRoundTripTest.run(config: config) { name, ok, detail in check(name, ok, detail) }
+            } else {
+                skip("cloudrt", "write round-trip not requested (add -e2eCloudWrite YES to run it; it leaves one clearly named test building)")
+            }
         } else {
             skip("cloud", "Supabase not configured (SUPABASE_URL / SUPABASE_ANON_KEY in Config/Local.xcconfig)")
         }

@@ -88,10 +88,16 @@ final class CloudController: ObservableObject {
         Task { @MainActor in
             defer { self.isBusy = false }
             do {
-                let bundle = try await engine.fetchBundle(item)
+                let fetched = try await engine.fetchBundleChecked(item)
+                let bundle = fetched.bundle
                 // Even the first publisher must review later contributions from other users.
                     self.pendingDownload = PendingDownload(remote: item, bundle: bundle)
                     self.status = "Review \(item.row.name) before importing"
+                    if !fetched.missingSegments.isEmpty {
+                        // The map imports, but a map without its scan file can never find its position. Say so instead of staying silent.
+                        self.status += ". Warning: \(fetched.missingSegments.count) scan file(s) could not be downloaded (\(fetched.missingSegments.joined(separator: ", "))), so this phone cannot locate itself in that part until they are shared again."
+                        Log.sync.error("download of \(item.row.name): missing scan files \(fetched.missingSegments)")
+                    }
             } catch {
                 self.status = Self.describe(error)
                 Log.sync.error("cloud download failed: \(error.localizedDescription)")
