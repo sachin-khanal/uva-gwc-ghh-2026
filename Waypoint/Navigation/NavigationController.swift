@@ -52,6 +52,16 @@ final class NavigationController: ObservableObject {
     /// Current phone-position problem in words, or "" when fine.
     @Published private(set) var postureText = ""
 
+    // MARK: Debug telemetry (for the on-screen debug overlay; see NavDebugView)
+    /// The map being navigated, so the overlay can draw the floor plan.
+    @Published private(set) var activeMap: BuildingMap?
+    /// The computed route, start first. Empty until the route exists.
+    @Published private(set) var routeNodeIds: [UUID] = []
+    /// Where we think the user is, in the MAP frame. nil until relocalized.
+    @Published private(set) var mapPosition: SIMD3<Float>?
+    /// Which way they face in the map frame: radians, 0 = -z, positive = toward +x.
+    @Published private(set) var headingRadians: Float?
+
     // MARK: Collaborators
     private let relocalizer = Relocalizer()
     private let audio = SpatialAudioGuide()
@@ -104,6 +114,7 @@ final class NavigationController: ObservableObject {
             return
         }
         follower = RouteFollower(route: route, graph: graph)
+        routeNodeIds = route.map(\.id)
         var facing: SIMD3<Float>?
         if startFacingAway, route.count > 1 { facing = route[0].position - route[1].position }
         simulator = PoseSimulator(route: route, startFacing: facing)
@@ -135,6 +146,10 @@ final class NavigationController: ObservableObject {
     private func begin(map: BuildingMap, destination: MapNode) {
         stop() // clean slate if a previous session is still running
         graph = WaypointGraph(map: map)
+        activeMap = map
+        routeNodeIds = []
+        mapPosition = nil
+        headingRadians = nil
         self.destination = destination
         follower = nil
         startGate.reset()
@@ -224,7 +239,10 @@ final class NavigationController: ObservableObject {
             // 2026-10-17). Wait for the pose to hold still, then route from where they really are.
             if follower == nil, startGate.update(position: mapPosition, trackingOK: trackingOK) {
                 follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
+                routeNodeIds = follower?.route.map(\.id) ?? []
             }
+            self.mapPosition = mapPosition
+            headingRadians = atan2(mapForward.x, -mapForward.z)
             instruction = follower?.update(position: mapPosition, forward: mapForward)
             if let i = instruction, i.kind != lastLoggedKind {
                 lastLoggedKind = i.kind

@@ -25,10 +25,21 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(graph.nearestNode(to: [0.1, 0, -8.7])?.id, id("A4"))
     }
 
+    /// A* itself, on the raw graph: every breadcrumb in order.
     func testRouteToRoom204() throws {
         let graph = WaypointGraph(map: try loadSampleMap())
-        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1")))
+        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1"), simplify: false))
         XCTAssertEqual(route.map(\.id), [id("A1"), id("A2"), id("A3"), id("A4"), id("B1")])
+    }
+
+    /// What navigation actually walks: the same path with the straight run of breadcrumbs collapsed,
+    /// so the user hears one "continue straight" instead of one per breadcrumb.
+    func testRouteToRoom204IsSimplifiedForWalking() throws {
+        let graph = WaypointGraph(map: try loadSampleMap())
+        let route = try XCTUnwrap(Router.route(in: graph, from: id("A1"), to: id("B1")))
+        XCTAssertEqual(route.map(\.id), [id("A1"), id("A4"), id("B1")])
+        XCTAssertEqual(route.first?.id, id("A1"), "start is kept")
+        XCTAssertEqual(route.last?.id, id("B1"), "destination is kept")
     }
 
     func testRouteSameNodeAndUnknownNode() throws {
@@ -288,8 +299,9 @@ final class ArrivalAndStartGateTests: XCTestCase {
 
         let badRoute = try XCTUnwrap(Router.route(in: graph, from: fromConverging.id, to: room.id))
         let goodRoute = try XCTUnwrap(Router.route(in: graph, from: fromSettled.id, to: room.id))
-        XCTAssertEqual(badRoute.count, 4, "walks back to the start of the scan first")
-        XCTAssertEqual(goodRoute.count, 2, "goes straight to the destination")
+        XCTAssertEqual(badRoute.first?.id, origin.id, "starts back at the scan origin and walks the length of it")
+        XCTAssertGreaterThan(badRoute.count, goodRoute.count)
+        XCTAssertEqual(goodRoute.map(\.id), [far.id, room.id], "goes straight to the destination")
     }
 }
 
@@ -482,5 +494,97 @@ final class NaturalGuidanceTests: XCTestCase {
         XCTAssertTrue(cue(.turnLeft, at: 10.3).isEmpty, "a second direction 0.3 s later is held back")
         XCTAssertTrue(cue(.turnLeft, at: 11.0).isEmpty, "still inside the cooldown")
         XCTAssertFalse(cue(.turnLeft, at: 12.0).isEmpty, "announced once the cooldown has passed, not dropped")
+    }
+}
+
+// MARK: - RouteSimplifier: walk the route, not the volunteer's footsteps (device report, 2026-10-17)
+
+final class RouteSimplifierTests: XCTestCase {
+
+    private func corridor(_ x: Float, _ z: Float) -> MapNode {
+        MapNode(kind: .corridor, position: SIMD3(x, 0, z))
+    }
+
+    /// The reported symptom: "straight, turn right, turn around, straight" where the real route was
+    /// "straight then left". The volunteer had walked past the turn and come back.
+    func testThereAndBackIsRemoved() {
+        let route = [
+            corridor(0, 0), corridor(0, -2), corridor(0, -4),
+            corridor(2, -4), corridor(4, -4),      // overshoot to the right...
+            corridor(2, -4), corridor(0.3, -4),    // ...and back again
+            corridor(-2, -4), corridor(-4, -4),    // the real continuation: left
+        ]
+        let simplified = RouteSimplifier.simplify(route)
+        let xs = simplified.map(\.position.x)
+        XCTAssertFalse(xs.contains { $0 > 1 }, "the overshoot to the right is gone: \(xs)")
+        XCTAssertEqual(simplified.first?.position.x, 0)
+        XCTAssertEqual(simplified.last?.position.x, -4, "destination kept")
+    }
+
+    func testStraightRunCollapsesToItsEndpoints() {
+        let route = (0..<9).map { corridor(0, Float($0) * -1.5) }
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertEqual(simplified.count, 2, "one straight leg, so one instruction")
+        XCTAssertEqual(simplified.first?.id, route.first?.id)
+        XCTAssertEqual(simplified.last?.id, route.last?.id)
+    }
+
+    func testARealCornerIsKept() {
+        let route = [corridor(0, 0), corridor(0, -3), corridor(0, -6), corridor(3, -6), corridor(6, -6)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertEqual(simplified.count, 3, "start, the corner, the end")
+        XCTAssertEqual(simplified[1].position, SIMD3<Float>(0, 0, -6), "the corner itself survives")
+    }
+
+    /// SAFETY: simplification must never move the path outside the corridor that was walked.
+    func testSimplifiedPathStaysCloseToTheWalkedPath() {
+        // A gently curving corridor.
+        let route = (0..<20).map { i -> MapNode in
+            let t = Float(i)
+            return corridor(sin(t / 6) * 0.4, t * -1.0)
+        }
+        let simplified = RouteSimplifier.simplify(route)
+        for original in route {
+            let nearest = (0..<(simplified.count - 1)).map {
+                RouteSimplifier.perpendicularDistance(original.position,
+                                                      from: simplified[$0].position,
+                                                      to: simplified[$0 + 1].position)
+            }.min() ?? .greatestFiniteMagnitude
+            XCTAssertLessThan(nearest, RouteSimplifier.defaultTolerance + 0.01,
+                              "every walked point stays within tolerance of the simplified route")
+        }
+    }
+
+    /// Found by an earlier version of this change: thinning removed a stairs node and the hazard
+    /// warning vanished with it.
+    func testTaggedAndProtectedNodesAreNeverRemoved() {
+        let stairs = MapNode(kind: .stairs, label: "Stairs up", position: SIMD3(0, 0, -3))
+        let door = MapNode(kind: .door, label: "Side door", position: SIMD3(0, 0, -6))
+        let route = [corridor(0, 0), corridor(0, -1.5), stairs, corridor(0, -4.5), door, corridor(0, -7.5), corridor(0, -9)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertTrue(simplified.contains { $0.id == stairs.id }, "a stairs node carries a hazard warning")
+        XCTAssertTrue(simplified.contains { $0.id == door.id })
+    }
+
+    func testADetourPastSomethingTaggedIsNotCollapsed() {
+        let stairs = MapNode(kind: .stairs, label: "Stairs", position: SIMD3(3, 0, 0))
+        // Out to the stairs and back to almost the same spot.
+        let route = [corridor(0, 0), stairs, corridor(0.2, 0), corridor(0, -3)]
+        let simplified = RouteSimplifier.simplify(route)
+        XCTAssertTrue(simplified.contains { $0.id == stairs.id },
+                      "collapsing this detour would silently drop the stairs")
+    }
+
+    func testShortRoutesAreUntouched() {
+        let a = corridor(0, 0), b = corridor(0, -2)
+        XCTAssertEqual(RouteSimplifier.simplify([a]).map(\.id), [a.id])
+        XCTAssertEqual(RouteSimplifier.simplify([a, b]).map(\.id), [a.id, b.id])
+    }
+
+    func testPerpendicularDistanceMeasuresToTheSegmentNotTheInfiniteLine() {
+        let a = SIMD3<Float>(0, 0, 0), b = SIMD3<Float>(0, 0, -10)
+        XCTAssertEqual(RouteSimplifier.perpendicularDistance(SIMD3(2, 0, -5), from: a, to: b), 2, accuracy: 1e-4)
+        // Beyond the end: distance to the endpoint, not a perpendicular to an imaginary extension.
+        XCTAssertEqual(RouteSimplifier.perpendicularDistance(SIMD3(0, 0, -14), from: a, to: b), 4, accuracy: 1e-4)
     }
 }

@@ -12,6 +12,10 @@
 import WaypointCore
 
 protocol GuidanceService: AnyObject {
+    /// The real navigation controller, when this service has one. ONLY for the sighted debug overlay
+    /// (NavDebugView), which needs the live route and position that `GuidanceSnapshot` deliberately
+    /// does not carry. Mock services return nil and the overlay is simply not shown.
+    var debugController: NavigationController? { get }
     var onUpdate: ((GuidanceSnapshot) -> Void)? { get set }
     var snapshot: GuidanceSnapshot { get }
     /// True when the service speaks instructions itself (live / simulated).
@@ -35,4 +39,9 @@ protocol GuidanceService: AnyObject {
     func forceLost(_ on: Bool)
     func forceFailure()
     func skipToArrival()
+}
+
+extension GuidanceService {
+    /// Most services (the mock) have no controller, so the debug overlay is simply absent.
+    var debugController: NavigationController? { nil }
 }

@@ -16,6 +16,7 @@ struct SettingsView: View {
 
     @AppStorage(UIPrefs.newInterface) private var newInterface = false
     @AppStorage(UIPrefs.serviceMode) private var serviceModeRaw = ServiceMode.mock.rawValue
+    @AppStorage(UIPrefs.debugOverlay) private var debugOverlay = false
     @AppStorage(UIPrefs.spokenPrompts) private var spokenPrompts = true
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
 
@@ -57,6 +58,9 @@ struct SettingsView: View {
                 Section {
                     Toggle("Spoken prompts when VoiceOver is off", isOn: $spokenPrompts)
                     Toggle("Open in Navigate on launch", isOn: $openInNavigate)
+                    Toggle("Show debug overlay while guiding", isOn: $debugOverlay)
+                    Text("Sighted debugging: the camera and the route the app computed. Not for the blind user.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 } header: {
                     Text("Accessibility")
                 } footer: {

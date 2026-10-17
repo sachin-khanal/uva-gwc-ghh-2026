@@ -57,6 +57,8 @@ final class NavigatorModel: ObservableObject {
 
     var isActive: Bool { flow.step == .active }
     var speaksForItself: Bool { service?.speaksForItself ?? false }
+    /// Live navigation controller, when there is one. Debug overlay only (NavDebugView).
+    var debugController: NavigationController? { service?.debugController }
     var supportsPause: Bool { service?.supportsPause ?? false }
     var supportsObstacleInjection: Bool { service?.supportsObstacleInjection ?? false }
     var supportsDebugControls: Bool { service?.supportsDebugControls ?? false }

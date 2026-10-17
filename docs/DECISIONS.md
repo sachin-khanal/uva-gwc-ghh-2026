@@ -204,3 +204,26 @@ turning on the spot.
 dropped: `lastKey` is left alone so it is announced on a later tick. Obstacles and lost tracking are never delayed.
 **Status:** accepted; 136 tests pass. All six are **UNVERIFIED ON DEVICE** - every threshold here (3 m lookahead,
 45/22 degrees, 3 ticks, 1.0 m revisit, 1.5 s cooldown, the arrival radii) is a considered guess that wants a real walk.
+
+## D-026 — A* result is simplified before it is walked; sighted debug overlay (2026-10-17)
+Report from Rice Hall: "it keeps making me do weird turns - I had to walk straight then turn left, but it made me walk
+straight, turn right, turn around, then walk straight. Isn't the pathfinding supposed to be doing it normally?"
+**A* was never wrong.** It returns the optimal path over the graph, but the graph is a trail of where the VOLUNTEER
+walked, including every detour and every time they stepped back to tag something. Optimal-on-that-graph still contains
+their U-turns. The missing piece was a step between "shortest path on the trail" and "a path a person would walk".
+`RouteSimplifier` (run by `Router.route` by default; pass `simplify: false` for the raw path) does two passes:
+detour removal (if the path returns within 1.2 m of somewhere it has already been, the round trip in between is
+dropped) and thinning (a node goes if leaving it out moves the path less than 0.6 m, so a straight run of breadcrumbs
+becomes one leg and the user hears one instruction instead of six).
+**Safety:** both passes stay inside the walked path - thinning never moves the route more than the tolerance, well
+under a corridor's width, and detour removal only collapses a return to a place the volunteer stood. We never cut a
+corner we have no evidence is walkable. Nodes that MEAN something are never removed: anything tagged, anything
+labelled, and both endpoints of a hazard edge (passed in by `Router`). An earlier version of this change thinned a
+stairs node away and the hazard warning vanished with it - caught by an existing test, and now covered directly.
+Consequence for drawing: `PlanView` can no longer show the route by highlighting map edges, because consecutive route
+nodes often have no direct edge after simplification. It draws the route as its own polyline.
+**Debug overlay:** `NavDebugView` (Settings > "Show debug overlay while guiding", default OFF) shows the camera the
+session is tracking with, the floor plan with the computed route and the user's position/heading, and the raw status.
+It is for the sighted escort, never the blind user, and it reads `NavigationController` directly through
+`GuidanceService.debugController` because `GuidanceSnapshot` deliberately carries no geometry.
+**Status:** accepted; 145 tests pass. UNVERIFIED ON DEVICE; 1.2 m and 0.6 m are guesses that want a real walk.

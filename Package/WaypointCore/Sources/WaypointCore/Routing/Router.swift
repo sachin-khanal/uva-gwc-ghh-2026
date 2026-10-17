@@ -20,11 +20,16 @@ public enum Router {
     public static let stairsPenalty: Float = 1000
 
     /// Returns the ordered nodes from `start` to `goal` inclusive, or nil if unreachable / unknown ids.
+    ///
+    /// The result is passed through `RouteSimplifier` by default. A* is optimal over the graph, but the
+    /// graph is a trail of where the volunteer WALKED, so the optimal path on it still contains their
+    /// detours and doubling-back. Pass `simplify: false` to see the raw graph path (debugging).
     public static func route(
         in graph: WaypointGraph,
         from start: UUID,
         to goal: UUID,
-        allowStairs: Bool = false
+        allowStairs: Bool = false,
+        simplify: Bool = true
     ) -> [MapNode]? {
         guard let startNode = graph.node(id: start), let goalNode = graph.node(id: goal) else { return nil }
         if start == goal { return [startNode] }
@@ -37,7 +42,18 @@ public enum Router {
 
         while let current = open.min(by: { (fScore[$0] ?? .infinity) < (fScore[$1] ?? .infinity) }) {
             if current == goal {
-                return reconstruct(cameFrom: cameFrom, current: current, graph: graph)
+                let path = reconstruct(cameFrom: cameFrom, current: current, graph: graph)
+                guard simplify else { return path }
+                // Both ends of a hazard edge must survive simplification, or the stairs warning is
+                // thinned away with the node that carried it.
+                var protected: Set<UUID> = []
+                for i in 0..<max(0, path.count - 1) {
+                    if graph.edge(between: path[i].id, path[i + 1].id)?.hazard != nil {
+                        protected.insert(path[i].id)
+                        protected.insert(path[i + 1].id)
+                    }
+                }
+                return RouteSimplifier.simplify(path, protecting: protected)
             }
             open.remove(current)
             closed.insert(current)

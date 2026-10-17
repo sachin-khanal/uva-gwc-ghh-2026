@@ -19,6 +19,43 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Route simplification + sighted debug overlay   [tags: BUILD]
+Area: B (Routing/Navigation) + U3 (UI). Branch `route-simplify-and-debug` off `main` (cdd8331).
+Trigger: Rice Hall walk - "weird turns: straight, turn right, turn around, then straight" where the route was
+"straight then left"; and "the blind user tryout should show the camera and the pathfinding being calculated".
+
+Diagnosis: A* is correct. The GRAPH is a trail of the volunteer's footsteps, so the optimal path over it still
+contains their detours. See D-026.
+Files created: `Routing/RouteSimplifier.swift` (detour removal + thinning, with a protected-node rule),
+`Waypoint/UI/Navigator/NavDebugView.swift` (camera + plan + raw status).
+Files edited: `Routing/Router.swift` (`simplify:` parameter, default true; passes hazard-edge endpoints as protected),
+`Waypoint/Navigation/NavigationController.swift` (+debug telemetry: activeMap, routeNodeIds, mapPosition,
+headingRadians), `Waypoint/UI/DesignSystem/PlanView.swift` (user position/heading arrow; route drawn as its own
+polyline - highlighting edges no longer works once straight runs are collapsed), `Waypoint/Services/GuidanceService.swift`
+(+`debugController`, nil by default), `LiveGuidanceService.swift` (exposes its controller), `ServiceMode.swift`
+(+`ui.debugOverlay`), `SettingsView.swift` (toggle), `GuidingView.swift` (shows the overlay),
+`NavigatorModel.swift` (passes the controller through).
+Tests added: `RouteSimplifierTests` (8) - there-and-back removed, straight run collapses to its endpoints, a real
+corner survives, the simplified path stays within tolerance of every walked point, tagged/protected nodes are never
+removed, a detour PAST something tagged is not collapsed, short routes untouched, and segment-vs-infinite-line distance.
+A test caught a real safety bug I introduced: the first version of thinning removed a stairs node and its hazard
+warning disappeared. Fixed with the protected-node rule, then covered directly.
+Three existing tests were updated because the behaviour deliberately changed: `testRouteToRoom204` now pins RAW A*
+(`simplify: false`) and a new test pins the simplified walk; the FlowTests route summary expects the collapsed node
+list; my own start-gate test asserts the starting node rather than a node count.
+Verified: `make test` -> **145 tests, 0 failures** (was 136); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nobody has seen the overlay or walked a simplified route. 1.2 m shortcut
+radius and 0.6 m tolerance are guesses.
+Open / handoff:
+1. NOT addressed: the mesh is one blob rather than separated walls/objects, so there is still no notion of being
+   "inside a room" - the app drives you to the exact tagged point. This needs room geometry derived from the
+   classified mesh and is a bigger change; see the reply to the user, nothing was built for it.
+2. Loop closure (D-025) still only applies to maps scanned after that change - old maps remain chains.
+3. Still open: off-route re-routing (U2.5).
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Natural path following, loop closure, doors as doors, turn angles   [tags: BUILD]
 Area: B (Navigation/Feedback) + A (MapBuilder). Branch `guidance-path-and-graph` off `main` (73b189c).
 Trigger: six findings from walking Rice Hall. Full reasoning in D-025.

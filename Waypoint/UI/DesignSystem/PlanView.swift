@@ -16,14 +16,26 @@ struct PlanView: View {
     let map: BuildingMap
     /// Node ids of a route to highlight, start first.
     var route: [UUID] = []
+    /// Where the user is now, MAP frame. Drawn as a heading arrow. nil = not localized / not navigating.
+    var userPosition: SIMD3<Float>?
+    /// Which way they face: radians, 0 = -z, positive toward +x.
+    var userHeading: Float?
     var dark = false
+
+    /// Stable id for the synthetic node used to project `userPosition` through the same transform
+    /// as the map's nodes.
+    private static let userPointId = UUID(uuidString: "00000000-0000-4000-8000-00000000FFFF")!
 
     @State private var scale: CGFloat = 1
     @GestureState private var pinch: CGFloat = 1
 
     var body: some View {
         GeometryReader { geo in
-            let points = PlanLayout.project(map.nodes, width: Float(geo.size.width), height: Float(geo.size.height), padding: 32)
+            // The user's position is projected through the SAME transform by being laid out with the nodes.
+            let laidOut = map.nodes + (userPosition.map {
+                [MapNode(id: Self.userPointId, kind: .corridor, position: $0)]
+            } ?? [])
+            let points = PlanLayout.project(laidOut, width: Float(geo.size.width), height: Float(geo.size.height), padding: 32)
             Canvas { context, _ in
                 draw(in: context, points: points)
             }
@@ -45,6 +57,31 @@ struct PlanView: View {
         .accessibilityAddTraits(.isImage)
     }
 
+    /// A triangle at the user's position pointing where they face. Map +x is right on screen and map
+    /// -z is up, which is how PlanLayout projects, so heading 0 points up.
+    private func drawUser(in context: GraphicsContext, points: [UUID: PlanPoint],
+                          cg: (PlanPoint) -> CGPoint) {
+        guard let p = points[Self.userPointId] else { return }
+        let c = cg(p)
+        let r: CGFloat = 9
+        guard let heading = userHeading else {
+            context.fill(Path(ellipseIn: CGRect(x: c.x - r / 2, y: c.y - r / 2, width: r, height: r)),
+                         with: .color(.green))
+            return
+        }
+        let angle = CGFloat(heading)
+        func point(_ offsetAngle: CGFloat, _ radius: CGFloat) -> CGPoint {
+            CGPoint(x: c.x + sin(angle + offsetAngle) * radius,
+                    y: c.y - cos(angle + offsetAngle) * radius)
+        }
+        var arrow = Path()
+        arrow.move(to: point(0, r))
+        arrow.addLine(to: point(2.5, r * 0.8))
+        arrow.addLine(to: point(-2.5, r * 0.8))
+        arrow.closeSubpath()
+        context.fill(arrow, with: .color(.green))
+    }
+
     private var accessibilitySummary: String {
         let names = map.destinations.compactMap(\.label)
         if names.isEmpty { return "\(map.nodes.count) path points, no labelled places" }
@@ -57,7 +94,22 @@ struct PlanView: View {
 
     private func draw(in context: GraphicsContext, points: [UUID: PlanPoint]) {
         func cg(_ p: PlanPoint) -> CGPoint { CGPoint(x: CGFloat(p.x), y: CGFloat(p.y)) }
+        defer { drawUser(in: context, points: points, cg: cg) }
         let onRoute = Set(route)
+
+        // The route is drawn as its OWN polyline through the route nodes. It cannot be drawn by
+        // highlighting map edges any more: RouteSimplifier collapses straight runs, so consecutive
+        // route nodes often have no direct edge between them.
+        if route.count > 1 {
+            var line = Path()
+            var started = false
+            for id in route {
+                guard let p = points[id] else { continue }
+                if started { line.addLine(to: cg(p)) } else { line.move(to: cg(p)); started = true }
+            }
+            context.stroke(line, with: .color(accent),
+                           style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+        }
 
         for edge in map.edges {
             guard let a = points[edge.from], let b = points[edge.to] else { continue }

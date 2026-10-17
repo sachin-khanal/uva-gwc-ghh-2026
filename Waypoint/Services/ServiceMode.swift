@@ -25,6 +25,8 @@ enum UIPrefs {
     static let openInNavigate = "ui.openInNavigate"
     /// One-shot: map id the Navigator should preselect ("Try it in Navigate" from the scanner).
     static let pendingMapId = "ui.pendingMapId"
+    /// Show the sighted debug overlay (camera + computed route) during guidance. Default false.
+    static let debugOverlay = "ui.debugOverlay"
     static func recentsKey(mapId: UUID) -> String { "ui.recents.\(mapId.uuidString)" }
 }
 

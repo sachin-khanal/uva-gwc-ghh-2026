@@ -21,12 +21,19 @@ struct GuidingView: View {
     @State private var showEscort = false
     @State private var confirmStop = false
     @AccessibilityFocusState private var mainFocused: Bool
+    @AppStorage(UIPrefs.debugOverlay) private var debugOverlay = false
 
     private var g: GuidanceSnapshot { model.guidance }
 
     var body: some View {
         VStack(spacing: Theme.Space.l) {
             header
+
+            // Sighted debugging only (Settings > Show debug overlay): the camera the app is tracking
+            // with and the route it actually computed. Absent in mock mode, which has no controller.
+            if debugOverlay, let controller = model.debugController {
+                NavDebugView(controller: controller)
+            }
 
             Button(action: model.repeatInstruction) {
                 VStack(spacing: Theme.Space.l) {
