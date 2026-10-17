@@ -6,6 +6,12 @@
 --          depends on `storage.foldername()` / `storage.filename()` behaving as assumed (0002's SQL test ran only against STUBBED
 --          storage functions). This migration re-creates the rule using plain string functions only. Safe to re-run.
 --
+-- ROOT CAUSE (found 2026-10-17, reproduced in a local Postgres, see supabase/tests/storage_read_policy.sql): inside the
+-- `exists (select ... from public.canonical_buildings c ...)` subquery a BARE `name` means c.name, the BUILDING's name, not the
+-- file's path. The original rule in 0002 (`storage.foldername(name)`) and the first version of this file both compared the wrong
+-- thing, so no signed-in user could ever read someone else's scan file. The fix is to say `objects.name` (the storage object).
+-- Re-run this file even if you ran an earlier version of it: it drops and re-creates the rule.
+--
 -- BEFORE running, optionally look at what is there (SQL editor):
 --     select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' order by policyname;
 -- The list should contain: canonical_worldmaps_read (select), waypoint_files_insert/update/delete/select.
@@ -20,8 +26,8 @@ create policy canonical_worldmaps_read on storage.objects for select to authenti
   bucket_id = 'worldmaps'
   and exists (
     select 1 from public.canonical_buildings c
-    where c.map_id::text = split_part(name, '/', 2)
-      and c.segment_owners ->> split_part(split_part(name, '/', 3), '.', 1) = split_part(name, '/', 1)
+    where c.map_id::text = split_part(objects.name, '/', 2)
+      and c.segment_owners ->> split_part(split_part(objects.name, '/', 3), '.', 1) = split_part(objects.name, '/', 1)
   )
 );
 

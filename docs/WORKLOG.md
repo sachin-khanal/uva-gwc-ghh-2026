@@ -1,5 +1,14 @@
 # Work log
 
+## 2026-10-17 23:58 — Claude (agent, for Sachin) — Retry: scan-file sharing still failed; ROOT CAUSE found (name shadowing in the storage rule) and 0004 corrected   [tags: BUG]
+Area: U3 (backend) / D. `python3 tools/supabase_check.py` was re-run after Sachin opened 0004: still FAIL `storage.otherUserCanDownloadScanFiles` (HTTP 400 for both files) - either 0004 had not been run or it was wrong. Reading the SQL again: in `exists (select ... from public.canonical_buildings c ...)` a BARE `name` is `c.name` (the building's name), not the storage object's path. The 0002 rule (`storage.foldername(name)`) and my first 0004 both had this bug, so NO user could ever read another user's scan file.
+Reproduced in a local throwaway Postgres (supabase image, stand-in table, `set role authenticated`): bare `name` -> 0 readable objects; `objects.name` -> exactly 1 (the listed segment of the right contributor; a file of the wrong contributor and an unlisted segment stay hidden). Saved as `supabase/tests/storage_read_policy.sql` (run instructions inside).
+~~The earlier entry (23:45) says the cause might be a missing policy or the `storage.foldername()` helpers~~ **Update 2026-10-17 (Claude):** it is the name shadowing described above, not a missing policy.
+Files edited: `supabase/migrations/0004_storage_read_policy.sql` (uses `objects.name`; idempotent, re-run even if an older 0004 was run), new `supabase/tests/storage_read_policy.sql`. 0002 is left as applied history; 0004 supersedes its storage rule.
+Verified: local reproduction + fix (above); `python3 tools/supabase_check.py` still shows the live failure (the live project has NOT been changed).
+NOT verified: the fix on the real project (needs the SQL editor); everything downstream (phone round trip, 5x reliability).
+Open problems / handoff: Sachin/U3 run the corrected 0004 in the Supabase SQL editor, then `python3 tools/supabase_check.py` (must PASS `storage.otherUserCanDownloadScanFiles`), then the phone round trip, then delete the ZZ test rows.
+
 ## 2026-10-17 23:45 — Claude (agent, for Sachin) — Supabase connected; LIVE two-user test of shared map data; scan-file bug found; fix + tools   [tags: BUG, BUILD]
 Area: D / U3 (cloud). Sachin put the keys in `Config/Local.xcconfig`; I fixed the URL line (plain `https://` is read as a comment in xcconfig; now `https:/$()/`), key checked: anon role, 208 chars, git-ignored; never printed.
 Ran on Sachin's iPhone 16 Pro Max (build installed): `make selftest-e2e` -> 23 passed, 0 failed (cloud.anonymousSignIn, cloud.listBuildings: 0 rows, so migrations are applied). With Sachin's explicit OK, ran the opt-in write test `-autoE2E YES -e2eCloudWrite YES` (new `Waypoint/App/CloudRoundTripTest.swift`): two different anonymous users A and B.
