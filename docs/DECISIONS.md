@@ -1,5 +1,7 @@
 # Decisions log
 
+**Update 2026-10-17 (Codex, user-directed):** D-015's contributor-copy approach is superseded for updated clients by one canonical shared map per building UUID. Migration 0002 adds canonical_buildings and an atomic additive extension RPC. Signed-in users can see and extend it; private publication is removed from the cloud UI. Existing records/data remain in place for old clients. See `supabase/CANONICAL_MAPS.md` for deployment, identity, and verification limits. This cloud change is UNVERIFIED on live Supabase and iOS; full scan-extension capture remains separate.
+
 Short ADRs. Add new ones at the bottom with the next id. Do not rewrite history; supersede instead.
 
 ## D-001 — Native iOS, Swift + SwiftUI, iOS 17+
@@ -136,7 +138,21 @@ but obstacle warnings stay on (a wall outranks the coaching). Distinct 3-tap hap
 `Geometry.cameraLocalToUser` converts for the audio engine; the depth detector's corridor was also the wrong shape on a portrait phone and now unprojects to world points and ignores floor/ceiling (`ObstacleBand`). **All of this is derived from Apple's documented axes and proven only by synthetic poses: it MUST be confirmed on a real phone** (docs/TESTING.md, "Accessibility checks on a real phone").
 Not done yet: side obstacles ("chair on your left" needs a left/right scan), stairs-down/ledge detection, low objects under 15 cm, temporal voting for object names, calibration of thresholds, blind-user review of the wording. **Status:** accepted; implemented; device behaviour UNVERIFIED.
 
-## D-023 — Arrival outranks obstacle warnings, and the first route waits for the pose to settle (2026-10-17)
+## D-023 — One canonical shared map per building UUID; additive, atomic extensions (2026-10-17)
+Recorded retroactively by Claude from the Codex/U3 WORKLOG entries; the decision was user-directed (U3).
+**Decision:** the cloud keeps ONE record per building id (`canonical_buildings`). Anyone signed in can read it and extend it through the `extend_building` RPC, which merges atomically under an advisory lock. Extensions are additive: existing nodes and edges cannot be edited, and (migration 0003) a new edge joining two PRE-EXISTING nodes is rejected, matching the local `MapStore` import rule. `segment_owners` records which user contributed each scan segment so scan files from all contributors can be downloaded. The internal merge function has no API grants; only the checked wrapper is callable.
+**Supersedes** for updated clients: the per-contributor copies of D-015 (kept for old-client data). `BuildingMap` JSON is unchanged (no schemaVersion bump).
+**Consequences:** SETUP.md must run migrations 0001, 0002, 0003; different building names are NOT an identity mechanism; the capture side must keep segment ids unique and attach a new segment to an existing corridor/junction within 2 m / 0.75 m vertical (`MapBuilder`). Open: live concurrency and AR alignment across phones are unverified.
+
+## D-024 — Docs are enforced on every commit: pre-commit hook + CI backstop (2026-10-17)
+**Decision:** a commit that changes code must also add a new `docs/WORKLOG.md` entry (AGENTS.md rules 1 and 12). Enforced in three layers: (1) `scripts/githooks/pre-commit` -> `scripts/docs-sync.sh check`, activated per clone by `core.hooksPath` (`make hooks`, `make setup`, or automatically at Claude Code session start via `.claude/settings.json`); (2) `.github/workflows/docs-check.yml` re-checks pull requests and pushes to main, because local hooks can be skipped; (3) `make doctor` warns when the hook is missing.
+**Why not auto-write the docs:** a hook cannot know what was verified on a device; invented text would be worse than none. So it blocks the omission, scaffolds the entry (`docs-sync.sh stub`, pre-filled with branch/author/changed files) and refuses leftover `<FILL: ...>` placeholders. It only ever appends to markdown, so rule 11 holds. Rule-11 rewrites, missing file headers, un-listed new files and `Model/*` edits without `CONTRACT CHANGE` are warnings, not blocks (typo fixes are legal).
+**Limits (honest):** git hooks are not cloned, so each developer must install once (documented in AGENTS.md); agents that do not read `.claude/` (e.g. Codex) rely on AGENTS.md + the git hook; a determined `--no-verify` is only caught by CI. Docs-only commits are never blocked. No `make test` in the hook (needs a Mac, too slow).
+
+> **Numbering note (2026-10-17):** the decisions below were written on a branch while D-023 and
+> D-024 were taken on `main` for other decisions. They were renumbered +2 on merge (the old
+> D-023..D-029 are now D-025..D-031); the content is unchanged.
+## D-025 — Arrival outranks obstacle warnings, and the first route waits for the pose to settle (2026-10-17)
 Both from testing on a phone (WORKLOG entry below this one).
 1. **Arrival.** The destination is usually a thing you can walk into - a door - so the depth sensor sees it at STOP range
 and `FeedbackPlanner` spoke "Stop. You are about to walk into a door." and `return`ed, which meant the arrival was never
@@ -156,7 +172,7 @@ highest priority present. (This is NOT the separate dual-synthesizer problem on 
 and `SpeechGuide` own different `AVSpeechSynthesizer`s and genuinely talk over each other; that one is still open.)
 **Status:** accepted; 91 tests pass. Arrival wording and the gate are UNVERIFIED ON DEVICE.
 
-## D-024 — One voice: a single AVSpeechSynthesizer for the whole app (2026-10-17)
+## D-026 — One voice: a single AVSpeechSynthesizer for the whole app (2026-10-17)
 Reported on device: two voices speaking at once, worst at arrival. Cause: `SpeechGuide` (guidance) and `Announcer`
 (the new UI) each owned an `AVSpeechSynthesizer`, and neither could see the other - SpeechGuide's "don't pile up"
 check (`synthesizer.isSpeaking`) and Announcer's `stopSpeaking` each only applied to their own. At arrival both fired.
@@ -169,11 +185,11 @@ both cases. VoiceOver still reads focused elements in its own voice (we do not c
 chatter still goes to VoiceOver only via `Announcer.voiceOverOnly`. If a real VoiceOver user tests this and prefers
 their own voice for state changes, the alternative is to route Announcer through VoiceOver ONLY while no guidance is
 running - more code, revisit if someone asks for it.
-Related but separate: a single tick emitting several `.speak` lines used to clip itself; that was fixed in D-023 by
+Related but separate: a single tick emitting several `.speak` lines used to clip itself; that was fixed in D-025 by
 coalescing them in `NavigationController.perform`.
 **Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
 
-## D-025 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
+## D-027 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
 Six findings from walking Rice Hall. All of them came from the same root idea being wrong: the app treated the
 breadcrumb chain as the path to follow, rather than as a description of where it is possible to walk.
 1. **Steering.** The follower classified the raw bearing to the NEXT breadcrumb (~1.5 m away) every tick with a single
@@ -205,7 +221,7 @@ dropped: `lastKey` is left alone so it is announced on a later tick. Obstacles a
 **Status:** accepted; 136 tests pass. All six are **UNVERIFIED ON DEVICE** - every threshold here (3 m lookahead,
 45/22 degrees, 3 ticks, 1.0 m revisit, 1.5 s cooldown, the arrival radii) is a considered guess that wants a real walk.
 
-## D-026 — A* result is simplified before it is walked; sighted debug overlay (2026-10-17)
+## D-028 — A* result is simplified before it is walked; sighted debug overlay (2026-10-17)
 Report from Rice Hall: "it keeps making me do weird turns - I had to walk straight then turn left, but it made me walk
 straight, turn right, turn around, then walk straight. Isn't the pathfinding supposed to be doing it normally?"
 **A* was never wrong.** It returns the optimal path over the graph, but the graph is a trail of where the VOLUNTEER
@@ -228,7 +244,7 @@ It is for the sighted escort, never the blind user, and it reads `NavigationCont
 `GuidanceService.debugController` because `GuidanceSnapshot` deliberately carries no geometry.
 **Status:** accepted; 145 tests pass. UNVERIFIED ON DEVICE; 1.2 m and 0.6 m are guesses that want a real walk.
 
-## D-027 — Rooms have a floor AREA, derived from the mesh's wall faces (2026-10-17)   [CONTRACT CHANGE]
+## D-029 — Rooms have a floor AREA, derived from the mesh's wall faces (2026-10-17)   [CONTRACT CHANGE]
 Report: "it's one cohesive mesh rather than actual wall and object boundaries... it doesn't really detect whether I'm
 in a room, it tries to get me to the exact spot I labelled something." The team called this critical.
 The information was already being captured - D-020 made per-face classification on-by-default precisely so it would not
@@ -244,7 +260,7 @@ classified wall or door between knee and head height, where a wall is reliably a
 schema-1 maps decode unchanged and simply have no extents; `schemaVersion` is declarative (nothing validates it on
 load), so nothing rejects an older map. A test decodes a hand-written schema-1 map to prove it.
 Arrival now means CONTAINMENT when an extent exists: you have arrived when you are inside the room, anywhere in it,
-with a 0.5 m margin so a doorway counts. Without an extent it falls back to `ArrivalRadius` (D-025).
+with a 0.5 m margin so a doorway counts. Without an extent it falls back to `ArrivalRadius` (D-027).
 Honest limits: a rectangle, not a polygon (an L-shaped room is covered by its bounding rectangle, and
 `areaSquareMeters` records the real enclosed area so the difference is visible); an OPEN door leaks the fill into the
 corridor, bounded by the search radius and usually caught by the escape test; and this finds the room you are standing
@@ -253,11 +269,11 @@ only walls and doors are read.
 **Status:** accepted; 155 tests pass. **UNVERIFIED ON DEVICE** - no real mesh has been through `wallPoints` yet, which
 is the part most likely to need tuning (height band, face stride, grid resolution).
 
-## D-028 — Progress is measured ALONG the route; turns are announced from the route's geometry (2026-10-17)
+## D-030 — Progress is measured ALONG the route; turns are announced from the route's geometry (2026-10-17)
 From a Rice Hall walk: "it tells me to turn around, after a few steps it tells me to turn around again, on and on",
 and separately "when I go to the room myself it doesn't realise I'm inside - but on one test it did".
 **One bug caused both.** `RouteFollower.targetIndex` only advanced when the user came within 1 m of each route
-waypoint. Route simplification (D-026) spaced waypoints further apart, so walking a corridor 1.5 m to one side never
+waypoint. Route simplification (D-028) spaced waypoints further apart, so walking a corridor 1.5 m to one side never
 "reached" one: the follower kept aiming at a point BEHIND the user -> "turn around" -> they comply, come within 1 m,
 it advances, the next target is behind them again. The same stuck index meant arrival was never evaluated (it is only
 checked when the current target IS the destination), so standing in the room did nothing - unless the walk happened to
@@ -277,7 +293,7 @@ on the plan, and the scan review screen lists each room's measured boundary so a
 rather than during a walk.
 **Status:** accepted; 160 tests pass. UNVERIFIED ON DEVICE.
 
-## D-029 — Route from where you STAND, and re-route when you are not on it (2026-10-17)
+## D-031 — Route from where you STAND, and re-route when you are not on it (2026-10-17)
 From a Rice Hall walk around the central core: "it makes me go the long way even though there is clearly a shorter way;
 it only corrects it when getting close enough to the path after walking down."
 Two causes, both in how the route was chosen rather than in A*:

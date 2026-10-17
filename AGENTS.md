@@ -63,6 +63,13 @@ Full design: `Architecture.md`. Original goal: `objective.txt`.
     - To correct an old WORKLOG entry, strike the wrong line and add an `Update` line under it; never rewrite history.
     - **This rule is for markdown only.** Code files (`.swift`, `.sql`, `Makefile`, `project.yml`, ...) are edited normally;
       git history is their record. Their explanations go in the WORKLOG as before.
+12. **Docs travel with the code, enforced on every commit (**Update 2026-10-17 (Claude):** rule added, see D-024).** A commit that changes code (`.swift`, `.sql`, `.py`, `.sh`, `.yml`, `.json`, `Makefile`, ...) MUST also add a NEW entry at the top of `docs/WORKLOG.md`
+    with real `Verified:` and `NOT verified:` lines, and update `docs/MODULES.md` / `TESTING.md` / `ROADMAP.md` / `DECISIONS.md` when status changed (strike + Update, rule 11).
+    - **Install once per clone: `make hooks`** (or `sh scripts/docs-sync.sh install` where `make` is missing, e.g. Windows Git Bash). `make setup` does it too; `make doctor` warns if it is missing; Claude Code installs it at session start (`.claude/settings.json`).
+    - Commit blocked? `sh scripts/docs-sync.sh stub` prepends a pre-filled entry skeleton; replace every `<FILL: ...>`, `git add docs/WORKLOG.md`, commit again.
+    - The hook only blocks code-without-log (docs-only commits pass); rule-11 rewrites, missing file headers, un-listed new files and Model/* changes without `CONTRACT CHANGE` are warnings.
+    - A GitHub Action (`.github/workflows/docs-check.yml`) re-checks pull requests, so skipping the local hook does not help. `WAYPOINT_SKIP_DOCS=1 git commit` is for emergencies only; log why. Never use `--no-verify` to dodge it.
+    - Agents (Claude, Codex, ...) cannot invent the content for you: the hook makes the omission impossible to miss. Write the entry from what you actually ran.
 
 ## 4. File conventions (so every file explains itself)
 
@@ -91,6 +98,7 @@ right of the user's facing. See `Geometry.swift` and its tests.
 | `make team-id` | **Update 2026-10-17:** print your Apple team id from your signing certificate | no |
 | `DEVICE=<id> make run` | build + sign + install + launch + stream console | yes |
 | `make doctor` | diagnose the machine | no |
+| `make hooks` | **Update 2026-10-17 (Claude):** install the docs pre-commit hook (rule 12); `make test-hooks` self-tests it | no |
 
 ## 6. Working simultaneously (Live Share or git)
 

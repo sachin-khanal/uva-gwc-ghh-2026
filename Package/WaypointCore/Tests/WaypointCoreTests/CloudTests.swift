@@ -94,14 +94,13 @@ final class CloudTests: XCTestCase {
         try await client.upsertBuilding(BuildingRow(mapId: map.id, name: map.name, version: 1, map: map, isShared: true))
         let req = try XCTUnwrap(t.requests.last)
         XCTAssertEqual(req.method, "POST")
-        XCTAssertEqual(req.url.path, "/rest/v1/buildings")
-        XCTAssertTrue(req.url.query?.contains("on_conflict=owner,map_id") == true || req.url.query?.contains("on_conflict=owner%2Cmap_id") == true)
+        XCTAssertEqual(req.url.path, "/rest/v1/rpc/extend_building")
+        XCTAssertNil(req.url.query)
         XCTAssertEqual(req.headers["Authorization"], "Bearer tok1")
         XCTAssertEqual(req.headers["apikey"], "ANON")
-        XCTAssertEqual(req.headers["Prefer"], "resolution=merge-duplicates,return=minimal")
+        XCTAssertNil(req.headers["Prefer"])
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(req.body)) as? [String: Any])
-        XCTAssertEqual(json["is_shared"] as? Bool, true)
-        XCTAssertNotNil(json["map_json"] as? [String: Any])
+        XCTAssertNotNil(json["incoming"] as? [String: Any])
         XCTAssertNil(json["id"], "server generates the row id")
         XCTAssertNil(json["owner"], "server fills owner from auth.uid()")
     }
@@ -118,6 +117,7 @@ final class CloudTests: XCTestCase {
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].map, map)
         XCTAssertEqual(t.requests.last?.method, "GET")
+        XCTAssertEqual(t.requests.last?.url.path, "/rest/v1/canonical_buildings")
     }
 
     func testHTTPErrorsAndSingle401Retry() async throws {
@@ -168,7 +168,7 @@ final class CloudTests: XCTestCase {
         XCTAssertTrue(data[0].url.path.hasPrefix("/storage/v1/object/worldmaps/\(userId)/\(map.id.uuidString.lowercased())/seg1.arworldmap"))
         XCTAssertEqual(data[0].headers["x-upsert"], "true")
         XCTAssertEqual(data[0].body, Data([1, 2, 3]))
-        XCTAssertEqual(data[1].url.path, "/rest/v1/buildings", "row is written AFTER its files")
+        XCTAssertEqual(data[1].url.path, "/rest/v1/rpc/extend_building", "extension is published AFTER its files")
     }
 
     func testPushRefusesInvalidMap() async throws {
@@ -258,6 +258,23 @@ final class CloudTests: XCTestCase {
         }
         let bundle = try await SyncEngine(client: makeClient(t), store: tempStore()).fetchBundle(RemoteMap(row: row, isMine: false))
         XCTAssertTrue(bundle.worldMaps.isEmpty)
+    }
+
+    func testCanonicalScanUsesContributorStorageFolder() async throws {
+        let map = try loadSampleMap()
+        let contributor = UUID()
+        var row = BuildingRow(mapId: map.id, owner: UUID(), name: map.name,
+                              version: 1, map: map, isShared: true)
+        row.segmentOwners = ["seg1": contributor.uuidString]
+        let decoded = try JSONDecoder().decode(BuildingRow.self, from: JSONEncoder().encode(row))
+        let t = MockTransport { req in
+            req.url.path.hasPrefix("/auth/")
+                ? HTTPResponse(status: 200, body: authJSON())
+                : HTTPResponse(status: 200, body: Data([1]))
+        }
+        _ = try await SyncEngine(client: makeClient(t), store: tempStore())
+            .fetchBundle(RemoteMap(row: decoded, isMine: false))
+        XCTAssertTrue(t.requests.last!.url.path.contains(contributor.uuidString.lowercased()))
     }
 }
 

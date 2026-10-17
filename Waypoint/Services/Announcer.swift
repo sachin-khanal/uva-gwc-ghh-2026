@@ -2,7 +2,7 @@
 // File:     Waypoint/Services/Announcer.swift
 // Owner:    U3 (UI flows)
 // Purpose:  The one place the new UI talks to the user (docs/UI_PLAN.md §7.1). Everything audible goes
-//           through `Speaker`, the app's SINGLE voice (D-024, 2026-10-17): this class used to own its
+//           through `Speaker`, the app's SINGLE voice (D-026, 2026-10-17): this class used to own its
 //           own AVSpeechSynthesizer and talked over guidance speech at arrival, in a second voice.
 //             * `say`    = state changes ("Position found"). Spoken aloud whether or not VoiceOver is
 //                          running. It is deliberately NOT posted as a VoiceOver announcement any

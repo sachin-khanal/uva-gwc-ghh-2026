@@ -1,5 +1,79 @@
 # Work log
 
+## 2026-10-17 16:20 — Claude (agent, for Sachin) — Docs-on-every-commit hook for agents and humans (AGENTS.md rule 12)   [tags: BUILD, DOCS]
+Area: D (build system/docs), shared; also touches `.github/` (U3's lane per ROADMAP, did not exist yet) at U1's request that every dev follows this.
+Files created: `scripts/docs-sync.sh` (check | stub | install | status | session), `scripts/githooks/pre-commit`, `scripts/test-docs-sync.sh`, `.claude/settings.json` (SessionStart auto-installs the hook for Claude Code users), `.gitattributes` (LF for scripts so Git Bash on Windows works), `.github/workflows/docs-check.yml` (PR + push-to-main backstop).
+Files edited: `Makefile` (+`hooks`, +`test-hooks`, `setup` installs the hook), `scripts/doctor.sh` (warns if not installed), `AGENTS.md` (rule 12 + `make hooks` row), `docs/DECISIONS.md` (D-024), `docs/WORKFLOW.md`, `docs/SETUP.md`, `docs/TESTING.md`, `docs/MODULES.md` (additive Update notes).
+Behavior: a commit touching code files (swift/sql/py/sh/yml/json/plist/xcconfig/Makefile) is refused unless the same commit adds a NEW `## YYYY-MM-DD` entry at the top of docs/WORKLOG.md that has `Verified` and `NOT verified` lines and no leftover FILL placeholders. `docs-sync.sh stub` scaffolds the entry from `git status`. Docs-only commits, merges, rebases and cherry-picks pass. Warnings only: markdown lines removed without ~~strikethrough~~ (rule 11), new Swift files without a header or missing from MODULES.md, Model/* edits without CONTRACT CHANGE. Escape: `WAYPOINT_SKIP_DOCS=1` (CI still checks).
+Commands run: `sh scripts/test-docs-sync.sh` -> 15 passed, 0 failed (throwaway repo); `sh scripts/docs-sync.sh install` and `status` in this clone; `make help`, `./scripts/doctor.sh` (hook line PASS).
+NOT verified: the GitHub Action has never run (no push yet; it also needs Actions enabled and, to block merges, "required status check" set in repo settings); Claude Code's first-run trust prompt for project hooks in `.claude/settings.json`; behavior on Windows Git Bash (U3/U4) and with Codex (it ignores `.claude/`, so it depends on AGENTS.md + `make hooks`); not run in a worktree.
+Limits: git hooks are not cloned. Each dev must run `make hooks` once (or open a Claude Code session here); teammates only get this after they pull. Tell U2, U3, U4 and the Codex/UI agents.
+Open problems / handoff: decide whether to mark `docs-check` a required status check; U3 may fold this workflow into INF-2.
+
+## 2026-10-17 16:16 — Claude (agent, for Sachin) — Test run of U3, merge sync, repo-wide docs reconciliation   [tags: DOCS, BUILD]
+Area: shared (docs) + two Swift header comments. Requested by U1 ("full depth scan", then "yes" to fixing the findings).
+Branch work: checked out `U3`, ran tests, fast-forwarded local `main` to U3 (0fc02d5), then to `origin/main` e22e5cb (rishyam1's docs-only commit). Nothing pushed by this entry.
+Verified (I ran these): `make test` -> 85 tests, 0 failures (includes MapExtensionTests x3 and CloudTests); `make typecheck` -> OK (22 app files, 1 UI test file); `python3 tools/validate_map.py` -> sample PASS; Python unit tests -> 9 PASS (Python 3.9.6).
+  SQL: throwaway Docker container from the cached `public.ecr.aws/supabase/postgres:17.6.1.136` image (the running `supabase_*_intakeu` stack was NOT touched; container removed afterwards). The image has `auth` but no `storage` schema, so `storage.buckets/objects/foldername/filename` were STUBBED. Migrations 0001, 0002, 0003 applied in order without errors; `supabase/tests/canonical_maps.sql` and `extension_connections.sql` both printed PASS and left no rows. Grants: `authenticated` -> `merge_building_internal` = permission denied; `anon` -> `extend_building` = permission denied; `authenticated` -> `extend_building` runs ("Sign in first").
+NOT verified: the storage RLS policy in 0002 (stubbed schema); live Supabase concurrency; any phone behavior (UNVERIFIED ON DEVICE); a merge of `app-ui-workflows` (only a dry-run `git merge-tree`: conflict in `Waypoint/UI/RootView.swift`, docs auto-merge; nothing was compiled).
+Docs updated (strike-through + labelled Update, nothing deleted): `docs/SETUP.md` (run migrations 0002 and 0003; test count), `README.md` (counts, canonical maps), `docs/TESTING.md` (closed the "not verified" note; counts 45 -> 85, UI tests 5 -> 7), `docs/MODULES.md` (verification note, Supabase row, layout additions), `Architecture.md` (migration status), `docs/ROADMAP.md` (two stale cells + a status snapshot against Revision 3), `docs/WORKFLOW.md` (branch naming conflict), `docs/DECISIONS.md` (new D-023), this WORKLOG (22:45 entry's stale `origin/U3` statement struck).
+Code (comments only): header Status lines in `Cloud/SupabaseClient.swift` and `Model/MapBuilder.swift`.
+Known leftover: the "Newest entry at the TOP" header and the entry template further down this file sit below the first U3 entries (they were inserted above it); moving them would rewrite history, so it is only noted here.
+Open problems / handoff: ROADMAP snapshot shows Gate G2 (relocalization x5) has not been run, which blocks the critical path; decide on the `app-ui-workflows` merge and who owns `Waypoint/UI/{Scanner,Navigator}` and `Waypoint/Services`; ask U2 what the MacBook Air is working on (no commits or entries from U2).
+
+## 2026-10-17 — Codex for U3 — Main integration authorized after reported checks
+Area: shared integration; user explicitly authorized merging U3 into main.
+Files edited: `docs/WORKLOG.md` (this verification/handoff entry only).
+User-reported verification: make test, make typecheck, and make check all passed on the Mac; migration 0003 and both SQL test scripts also reported success in Supabase. These update earlier pending-check notes; agent did not directly run the Mac or dashboard checks.
+Commands: git fetch origin; ancestry and diff whitespace checks; git switch main; git merge --ff-only U3 (0fc02d5, no conflicts); documentation commit and push to origin/main.
+NOT verified: real-device scan extension and cross-phone alignment remain UNVERIFIED ON DEVICE. No claim that compile/SQL checks prove AR behavior.
+Handoff: teammates pull main; perform the extension checklist in docs/TESTING.md on LiDAR phones before relying on it for navigation.
+
+
+## 2026-10-17 — Codex for U3 — Align extension rules and add existing-building scan flow
+Area: D (SQL/UI), A (capture and MapBuilder); U3 explicitly requested BOTH integration fixes, authorizing these A-owned edits.
+Files created: `supabase/migrations/0003_extension_connections.sql`, `supabase/tests/extension_connections.sql`, `Package/WaypointCore/Tests/WaypointCoreTests/MapExtensionTests.swift`.
+Files edited: `Model/MapBuilder.swift` (bounded first-breadcrumb attachment), `Waypoint/Capture/CaptureController.swift` (load selected ARWorldMap before recording, preserve building ID, unique segment ID, gate tagging/saving, merge saved snapshot), `Waypoint/UI/VolunteerView.swift` (existing building and scan segment pickers, explicit attachment, cancel/done), `supabase/CANONICAL_MAPS.md`, docs WORKLOG/MODULES/ROADMAP/TESTING.
+Behavior: new SQL wrapper rejects previously absent edges joining two pre-existing canonical nodes, preserving the local import protection; internal merge RPC loses API execution grants. Original already-applied 0002 remains unchanged. New segments attach only to corridor/junction nodes within 2 m and 0.75 m vertical offset; missing saved world maps cannot start an extension. No marker-only or new-origin fallback. New scans also get unique segment IDs. Save merges with the current local map and retains existing scan files; acquisition freezes during save and stops on success.
+Commands run: `git diff --check`; `python -B tools/validate_map.py` (sample PASS); `python -B -m unittest discover -s tools -p "test_*.py" -q` (9 PASS); `make test` and `make typecheck` (both fail to launch: make not installed on Windows).
+Verified: Python regression suite and whitespace check only. Added 3 Swift tests for attachment/identity/route reachability/local import, bounded failure/no mutation, and one-time attachment; SQL test checks shortcut rejection, legitimate new-node path, and repeat/reversed existing edges. New Swift/SQL tests NOT executed here; no Swift/Xcode/PostgreSQL available.
+NOT verified: iOS compilation, new Swift tests, new migration/tests, world-map relocalization and cross-phone scan alignment; UNVERIFIED ON DEVICE. Earlier user-reported 0002 test success does not cover 0003.
+Handoff: apply 0003 then run both SQL test files; Mac teammate runs make test/typecheck and the new extension device checklist in docs/TESTING.md. No JSON contract changes, dependencies, commit, push, or remote database writes by the agent.
+
+
+## 2026-10-17 — Codex for U3 — Shared-map verification and branch handoff
+Area: D (cloud/backend).
+Files edited: `docs/WORKLOG.md` (this entry); committing the canonical-map files listed in the entry below at U3's request.
+User-reported verification: U3 ran the full migration `0002_canonical_maps.sql` and the full `supabase/tests/canonical_maps.sql` in the Supabase SQL Editor; both returned success. This updates the earlier unverified SQL status below; the agent did not directly observe the dashboard.
+Commands run: `git status --short --branch`, `git diff --check`; commit and push to `origin/U3` requested. No main merge.
+Verified: whitespace check passed. Earlier Python regression suite: 9 PASS.
+NOT verified: Swift tests/typecheck still require a Mac (prior attempts failed because make is unavailable); live concurrent requests and app integration remain unverified; UNVERIFIED ON DEVICE.
+Handoff: Mac teammate should run make test and make typecheck, then device cloud checks. Full extend-existing-map capture flow remains separate.
+
+
+## 2026-10-17 — Codex for U3 — Canonical shared building map [tags: CONTRACT CHANGE]
+Area: D cloud/backend; user explicitly requested one main map per building that other users can extend and see.
+Files created: `supabase/migrations/0002_canonical_maps.sql`, `supabase/tests/canonical_maps.sql`, `supabase/CANONICAL_MAPS.md`.
+Files edited: core `Cloud/{SupabaseClient,CloudModels,SyncEngine}.swift`, `CloudTests.swift`, app `CloudController.swift`, `SyncView.swift`; docs WORKLOG/MODULES/DECISIONS (additive notes). App UI edits are necessary for the requested cloud behavior (remove private publish option, review every shared download).
+CONTRACT CHANGE: cloud endpoint now uses canonical_buildings and rpc/extend_building; optional segment_owners column tracks contributor scan paths. BuildingMap JSON unchanged, so no schemaVersion bump or sample change. Apply migration 0002 before using this client. Original 0001 data remains; existing maps must be republished.
+Behavior: one unique map UUID per building; all authenticated users can read; atomic additive merges preserve concurrent/stale contributions; existing-node/edge edits rejected. Different names are not a building identity mechanism. Scan alignment and unique segment IDs remain the capture owner's responsibility.
+Commands: `git diff --check`; Python validator tests (9 PASS); `make test` and `make typecheck` attempted, both unavailable because make is not installed on Windows.
+Verified: existing Python suite passes, diff whitespace checks pass. Updated Swift request assertions and added contributor-file-path regression; added transactional SQL functional test.
+NOT verified: SQL migration/test execution (no PostgreSQL here), Swift tests/typecheck (Mac required), concurrency on live server; UNVERIFIED ON DEVICE. No remote database changed, no dependencies added, no commit/push.
+Handoff: apply 0002 and run supabase/tests/canonical_maps.sql in dashboard; Mac owner runs required make checks. Full extend-existing-map capture UI is still a separate roadmap task. Prior D-015 contributor-row behavior is superseded for updated clients, retained for old-client data.
+
+
+## 2026-10-17 — Codex for U3 — Windows map validator (U3.4)
+Area: D (U3 tooling)
+Files created: `tools/validate_map.py`, `tools/test_validate_map.py`, `tools/README.md`.
+Files edited: `docs/WORKLOG.md` (this entry), `docs/MODULES.md` and `docs/ROADMAP.md` (additive status notes).
+Files deleted: none. No Swift, schema, sample, dependencies, or CI workflow changed.
+Commands run: `py --version` (launcher reports no installed Python); `python --version` (3.14.0); `make help`, `make test`, `make typecheck` (all unavailable: make not installed on Windows); `python -B tools/validate_map.py`; `python -B -m unittest discover -s tools -p "test_*.py" -v`; `git diff --check`.
+Verified: sample PASS; 9 Python tests PASS, including hostile segment ids, nonfinite/overflow coordinates, duplicate UUIDs with different case, bad references, self-loops, distance tolerance, size limits, malformed bundles, required fields, and CLI failure exit codes. Whitespace check passed.
+NOT verified: Swift unit tests and iOS typecheck require a Mac; UNVERIFIED ON DEVICE. Python float math approximates SIMD and may differ at rounding boundaries; marker finite-number checking is intentionally stricter. Real-world map truth and existing-map merge checks are outside this tool's scope.
+Open problems / handoff: INF-2 CI wiring is still separate, as requested by U3. Mac teammate should run required make checks before merging. No commit or push performed.
+
+
 **Newest entry at the TOP.** Every human and agent adds an entry when they finish a block of work.
 This is how four people plus LLM agents stay in sync, so be explicit and complete.
 
@@ -19,8 +93,39 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul`; decisions renumbered   [tags: DOCS, BUILD]
+Area: shared. Branch `navigation-overhaul` (all nine guidance/scan commits from this session), merged with the six
+commits that landed on `origin/main` in the meantime (docs enforcement + hook, map validator, canonical shared maps,
+scan extensions and merge rules, U3 integration).
+
+Swift merged cleanly - including `Model/MapBuilder.swift`, where their `attachExtension` and my loop closure both
+touch breadcrumb creation. They compose rather than clash: `attachExtension` joins a NEW scan to an existing map, and
+it calls the same `dropBreadcrumb` that now also closes loops, so an extension gets loop closure for free. Worth a
+second pair of eyes from whoever owns the extension work.
+Conflicts (3, all markdown, all "both sides appended"): `docs/DECISIONS.md`, `docs/MODULES.md`, `docs/TESTING.md`.
+**DECISION IDS RENUMBERED.** D-023 and D-024 were taken on `main` (canonical shared maps; docs enforcement) while this
+branch used the same two ids for other decisions. Theirs are already published, so MINE moved +2: the old D-023..D-029
+are now **D-025..D-031**, content unchanged. A numbering note records this at the top of the renumbered block. Every
+reference was updated with it - in `docs/WORKLOG.md`, `Waypoint/Guidance/SpeechGuide.swift`,
+`Waypoint/Services/Announcer.swift`, `FeedbackAndVisionTests.swift` and `AccessibilityGuidanceTests.swift` - and their
+D-023/D-024 references in `AGENTS.md` and `docs/WORKFLOW.md` were deliberately left alone.
+Also corrected two statements that the merge made false: MODULES still said the new UI flow logic was "NOT YET RUN by
+`make test`" and the screens "not compiled yet"; TESTING row 4.0 still said "the 50 existing tests still pass". Struck
+through with labelled Updates per rule 11, nothing deleted.
+Verified AFTER the merge: `make test` -> **171 tests, 0 failures** (167 from this branch + 4 of theirs);
+`make typecheck` OK (60 app files, 1 UI test file); `make check` -> BUILD SUCCEEDED.
+NOT verified: nothing was run on a phone in this block; everything already marked UNVERIFIED ON DEVICE stays so.
+Note: `core.hooksPath` is NOT set in this clone, so their pre-commit docs hook did not run here - this entry was
+written to satisfy AGENTS.md rule 12 by hand. Run `make hooks` once per clone to activate it.
+Open / handoff:
+1. Someone who owns the extension work should sanity-check `MapBuilder` now that `attachExtension` and loop closure
+   share `dropBreadcrumb`.
+2. This branch is NOT merged to `main`; under ROADMAP Revision 3 that is U1's call.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Route from the user's position; re-route when off it   [tags: BUILD, BUG]
-Area: B (Routing/Navigation). Branch `routing-start-and-reroute` off `main`. See D-029.
+Area: B (Routing/Navigation). Branch `routing-start-and-reroute` off `main`. See D-031.
 
 Reported with screenshots: the route went the long way round the central core while the user walked the short way, and
 only "corrected" later. Causes: (1) the route started from the single nearest NODE, which on a loop can be on the wrong
@@ -47,10 +152,10 @@ Open / handoff:
 ---
 
 ## 2026-10-17 — Claude (agent, for Anmol) — Route progress by projection; corner cues; AR path overlay   [tags: BUILD, BUG]
-Area: B (Routing/Navigation) + U3 (UI). Branch `follower-progress-and-overlay` off `main` (6c892a1). See D-028.
+Area: B (Routing/Navigation) + U3 (UI). Branch `follower-progress-and-overlay` off `main` (6c892a1). See D-030.
 
 THE BUG (both reported symptoms, one cause): `RouteFollower.targetIndex` advanced only on coming within 1 m of a
-waypoint. After D-026 made waypoints sparse, walking past one slightly off to the side never advanced it, so the
+waypoint. After D-028 made waypoints sparse, walking past one slightly off to the side never advanced it, so the
 follower aimed behind the user ("turn around", repeatedly) AND arrival was never evaluated, so standing inside the
 room did nothing.
 Files edited (WaypointCore): `Routing/RouteFollower.swift` (progress by nearest route SEGMENT in a windowed, monotonic
@@ -75,14 +180,14 @@ progressWindow 4 segments, maxOffRouteMeters 8, cornerDistanceMeters 1.2, corner
 Open / handoff:
 1. NOT done: the CarPlay-style multi-card Navigator layout. The debug overlay was extended instead; the guiding screen
    itself is unchanged.
-2. Room extents still only exist for rooms tagged after D-027, so a rescan is needed to see boundaries at all.
+2. Room extents still only exist for rooms tagged after D-029, so a rescan is needed to see boundaries at all.
 3. Still open: off-route re-routing (U2.5) - we now DETECT >8 m off route but only decline to skip ahead; we do not
    recompute the route.
 
 ---
 
 ## 2026-10-17 — Claude (agent, for Anmol) — Rooms have a floor area, from the mesh's wall faces   [tags: BUILD, CONTRACT CHANGE]
-Area: A (maps/scan) + B (arrival). Branch `room-extents` off `main` (4e278e2). Reasoning in D-027.
+Area: A (maps/scan) + B (arrival). Branch `room-extents` off `main` (4e278e2). Reasoning in D-029.
 
 CONTRACT CHANGE: `MapNode.extent: RoomExtent?`; `BuildingMap.schemaVersion` 1 -> 2. Optional field, so schema-1 maps
 decode unchanged (there is a test that decodes hand-written schema-1 JSON). `Samples/rice-hall-sample.json` left as is.
@@ -117,7 +222,7 @@ Trigger: Rice Hall walk - "weird turns: straight, turn right, turn around, then 
 "straight then left"; and "the blind user tryout should show the camera and the pathfinding being calculated".
 
 Diagnosis: A* is correct. The GRAPH is a trail of the volunteer's footsteps, so the optimal path over it still
-contains their detours. See D-026.
+contains their detours. See D-028.
 Files created: `Routing/RouteSimplifier.swift` (detour removal + thinning, with a protected-node rule),
 `Waypoint/UI/Navigator/NavDebugView.swift` (camera + plan + raw status).
 Files edited: `Routing/Router.swift` (`simplify:` parameter, default true; passes hazard-edge endpoints as protected),
@@ -143,14 +248,14 @@ Open / handoff:
 1. NOT addressed: the mesh is one blob rather than separated walls/objects, so there is still no notion of being
    "inside a room" - the app drives you to the exact tagged point. This needs room geometry derived from the
    classified mesh and is a bigger change; see the reply to the user, nothing was built for it.
-2. Loop closure (D-025) still only applies to maps scanned after that change - old maps remain chains.
+2. Loop closure (D-027) still only applies to maps scanned after that change - old maps remain chains.
 3. Still open: off-route re-routing (U2.5).
 
 ---
 
 ## 2026-10-17 — Claude (agent, for Anmol) — Natural path following, loop closure, doors as doors, turn angles   [tags: BUILD]
 Area: B (Navigation/Feedback) + A (MapBuilder). Branch `guidance-path-and-graph` off `main` (73b189c).
-Trigger: six findings from walking Rice Hall. Full reasoning in D-025.
+Trigger: six findings from walking Rice Hall. Full reasoning in D-027.
 
 Files created (WaypointCore): `Routing/HeadingCue.swift` (turn classification with hysteresis + debounce; also holds
 `ArrivalRadius`).
@@ -203,7 +308,7 @@ Files created: `Waypoint/Guidance/Speaker.swift` (the app's only synthesizer), `
 (the rules: interrupt on `.high`, drop `.normal` while busy, drop identical text inside 3 s - pure logic so it is testable).
 Files edited: `Waypoint/Guidance/SpeechGuide.swift` (now a thin forwarder; same API, so `NavigationController` is untouched),
 `Waypoint/Services/Announcer.swift` (forwards to Speaker; no longer posts a VoiceOver announcement for `say` - see the
-trade-off in D-024), `docs/DECISIONS.md` (+D-024).
+trade-off in D-026), `docs/DECISIONS.md` (+D-026).
 Tests added: `SpeechGateTests` (8) - interrupt vs drop, repeat window, different text never suppressed, empty text,
 reset, and that a DROPPED line does not reserve the repeat window.
 Verified: `make test` -> **120 tests, 0 failures**; `make typecheck` OK (59 app files, 1 UI test file); `make check` ->
@@ -250,13 +355,13 @@ Open / handoff:
    seen (overlay density, frame rate/heat, or a reported size).
 3. Still open: the dual-synthesizer overlap on `app-ui-workflows` (Announcer + SpeechGuide), and off-route re-routing
    (U2.5), which would also recover from a bad start node rather than only preventing one.
-4. My earlier account-auth work is still in `stash@{0}` and its ADR must be renumbered (it claims D-019, which is taken; the next free id after this entry is D-024).
+4. My earlier account-auth work is still in `stash@{0}` and its ADR must be renumbered (it claims D-019, which is taken).
 
 ---
 
 ## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
 Area: shared (integration check requested by U1 before committing)
-Branches: `origin/U3` = no own commits (old pointer, 3 behind main). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
+Branches: ~~`origin/U3` = no own commits (old pointer, 3 behind main).~~ **Update 2026-10-17 (Claude):** `origin/U3` now holds 3 commits (map validator, canonical maps, scan extensions) that were fast-forwarded into `main` (0fc02d5). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
   WaypointCore `Flows/*` + 21 `FlowTests`, `Waypoint/Services/*` (mock + live adapters around CaptureController/NavigationController), design system. Based on 27365ec (older than main), written on Windows, never compiled before this check.
 Method: throwaway git worktree outside the repo = main + ALL of Sachin's uncommitted work, then `git merge origin/app-ui-workflows`; nothing in the real working tree was touched except the fix below; worktree and its build folders deleted afterwards.
 Findings: (1) no duplicate type names in WaypointCore or the app; (2) their logging, CaptureController and NavigationController calls are all still valid (APIs only gained defaulted params);

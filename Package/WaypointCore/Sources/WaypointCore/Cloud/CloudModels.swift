@@ -3,7 +3,7 @@
 // Module:   WaypointCore
 // Owner:    D (App/Sync/Integration)
 // Purpose:  Config, session and row types for the Supabase backend. These mirror
-//           supabase/migrations/0001_init.sql - if you change one, change the other and note it in
+//           supabase/migrations/0002_canonical_maps.sql - if you change one, change the other and note it in
 //           docs/WORKLOG.md.
 //
 import Foundation
@@ -11,7 +11,6 @@ import Security
 
 /// Project URL + PUBLIC anon key. The anon key ships inside the app, so it is not a secret and ALL
 /// authorization is enforced by Row Level Security in the database. NEVER put the service-role key
-/// anywhere in this repo or app.
 public struct SupabaseConfig: Equatable, Sendable {
     public var url: URL
     public var anonKey: String
@@ -108,9 +107,8 @@ public enum CloudError: Error, Equatable {
     case rejected(String)
 }
 
-/// One row of the `buildings` table. A building is identified by (owner, mapId): every contributor
-/// has their OWN row for the same logical map (`mapId`), and clients merge them locally. That is how
-/// "anyone can extend a building's map" works without anyone editing someone else's row.
+/// One canonical building map (migration 0002). Owner records the first publisher;
+/// extensions are merged atomically by the server. Segment owners locate scan files.
 public struct BuildingRow: Codable, Equatable, Sendable {
     public var rowId: UUID?          // server generated; omitted on insert
     public var mapId: UUID
@@ -120,6 +118,7 @@ public struct BuildingRow: Codable, Equatable, Sendable {
     public var map: BuildingMap
     public var isShared: Bool
     public var updatedAt: String?
+    public var segmentOwners: [String: String]? = nil
 
     public init(rowId: UUID? = nil, mapId: UUID, owner: UUID? = nil, name: String, version: Int,
                 map: BuildingMap, isShared: Bool, updatedAt: String? = nil) {
@@ -136,6 +135,7 @@ public struct BuildingRow: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case rowId = "id", mapId = "map_id", owner, name, version
         case map = "map_json", isShared = "is_shared", updatedAt = "updated_at"
+        case segmentOwners = "segment_owners"
     }
 }
 

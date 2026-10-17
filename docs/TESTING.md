@@ -1,10 +1,39 @@
 # Testing — what is proven, and the device test plan
 
+## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
+
+First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
+In Supabase, apply `0003_extension_connections.sql` after 0002, then run both
+`supabase/tests/extension_connections.sql` and `supabase/tests/canonical_maps.sql`.
+Expected: success, with PASS notices, and no persistent fixture data. These new
+~~checks are NOT yet verified in this Windows session.~~
+**Update 2026-10-17 (Claude):** on a Mac, `make test` (85 tests incl. the 3 MapExtensionTests) and `make typecheck` pass. Migrations 0001-0003 applied in order and BOTH SQL test files printed PASS (fixtures rolled back) on a throwaway local Postgres 17 container with a STUBBED `storage` schema; function grants checked as `anon`/`authenticated`. U3 separately reported the same SQL passing in the Supabase dashboard. The device checklist below is still UNVERIFIED ON DEVICE.
+
+On a LiDAR phone, with an escort for navigation checks:
+
+1. Scan and save a new building; note its ID, nodes and segment. Publish it.
+2. Select that building under Scan, choose its saved scan area, and start there.
+   Before relocalization/explicit attachment, node count must stay unchanged and
+   tagging/save must be disabled. Missing world-map bytes must show an error.
+3. After normal tracking returns, stand in a known corridor and tap begin extension.
+   More than 2 m from an old corridor/junction (or on a different floor) must reject
+   attachment without changing the graph. At a known corridor, one new breadcrumb
+   connects to the closest corridor/junction; existing rooms/edges remain intact.
+4. Walk into new space, tag a room, save. Same building ID/name, new unique segment,
+   old scan files unchanged. Save stops recording. Cancel before save must leave
+   the stored map unchanged. A tracking interruption must pause tagging/recording.
+5. Publish the extension. On a second phone, refresh and download/import: one shared
+   building entry, original and new rooms present, scan files from both contributors
+   download. Route to the new room must connect through the old corridor. Re-open
+   the building and relocalize from each saved scan area.
+
+All AR alignment, tagging, save, audio and cross-phone behavior: UNVERIFIED ON DEVICE.
+
 Three levels. Always run level 1 before handing off; levels 2-3 are for people with a phone.
 
 ## Level 1 — automated, no phone (`make test`, `make typecheck`, `make check`)
 
-`make test` runs 45 XCTest cases in `Package/WaypointCore/Tests/` in about a second. They prove:
+`make test` runs ~~45~~ **Update 2026-10-17 (Claude):** 85 XCTest cases in `Package/WaypointCore/Tests/` in about a second. They prove:
 data model + JSON + merge + validation (hostile maps), routing (A*, stairs), bearings, the feedback rules,
 obstacle hysteresis, room-number parsing, the scan bounding box, export budget, the simulated walker
 (an END-TO-END walk to Room 204 that must end in "You have arrived"), and the whole Supabase client
@@ -118,7 +147,7 @@ Everything saved (map JSON, ARWorldMap, mesh) is identical in all four runs; onl
 
 ## UI tests that tap and take screenshots on the phone — added 2026-10-17
 
-`DEVICE=<id> make uitest` builds the app + a UI-test runner, installs both on the phone, and runs `WaypointUITests/WaypointUITests.swift` (5 tests: home screen, full simulated walk to arrival,
+`DEVICE=<id> make uitest` builds the app + a UI-test runner, installs both on the phone, and runs `WaypointUITests/WaypointUITests.swift` (~~5 tests~~ **Update 2026-10-17 (Claude):** 7 tests: home screen, full simulated walk to arrival,
 injected obstacle shows STOP and clears, scan screen shows the live HUD, Share-maps sheet shows the Cloud section). Then it exports every screenshot, screen recording and text note to
 `~/Library/Caches/Waypoint/uitest-screens/` (`manifest.json` there maps each file to its test and name). `make uitest ONLY=testSimulatedWalkFinishesAndShowsArrival` runs one test;
 `make uitest-shots` re-exports the last run. Screenshots live outside the repo on purpose (they can show your room).
@@ -140,13 +169,15 @@ Limits: cannot move the phone, cannot judge audio/haptics/visual quality of the 
 Add to docs/WORKLOG.md: which check number, phone model + iOS version, pass/fail, console excerpt. A check
 is only "verified" once someone has done it on a device and written it down.
 
+**Update 2026-10-17 (Claude):** **Docs hook:** `make test-hooks` (or `sh scripts/test-docs-sync.sh`) runs 15 cases of `scripts/docs-sync.sh` in a throwaway git repo (no phone, no Mac needed).
+
 ## Level 4 — new interface (added 2026-10-17, U3; docs/UI_PLAN.md §10)
 
 Turn it on: Home → gear → Interface **New**. Data source: Demo data / Simulated walk / Live.
 
 | # | Check | Phone | Expected |
 |---|---|---|---|
-| 4.0 | `make test` and `make typecheck` on a Mac | – | FlowTests pass (new); the 50 existing tests still pass; typecheck OK |
+| 4.0 | `make test` and `make typecheck` on a Mac | – | FlowTests pass (new); ~~the 50 existing tests still pass~~ **Update 2026-10-17:** the whole suite is 167 tests and passes; typecheck OK |
 | 4.1 | Interface **Classic** (default): repeat Level 2 checks | any | exactly the same behaviour as before the change |
 | 4.2 | New + Demo data: Scanner end to end (New scan → wait ~15 s → tag a labelled Room → Finish → Review → rename → Share → Try it in Navigate) | any | Finish stays disabled with a reason until mapped + a labelled tag; map with "· demo" appears; rename persists after relaunch |
 | 4.3 | New + Demo data: Navigator with **VoiceOver on and eyes closed** | any | can pick a place, start, hear every instruction, reach "You have arrived" without looking; back gesture never ends the route; Stop needs confirmation |

@@ -310,6 +310,6 @@ supabase/migrations/   SQL schema + RLS                                 (D)
 | Mesh export to USDZ, in-app 3D viewer, per-surface colouring | NOT BUILT |
 | Simulated walker (`PoseSimulator`, Simulate mode in Navigator) | DONE in logic (end-to-end test); UI UNVERIFIED ON DEVICE |
 | Supabase REST client + `SyncEngine` | DONE against a mock server (`CloudTests`) |
-| `supabase/migrations/0001_init.sql` (tables, RLS, buckets) | WRITTEN, never run on a real project |
+| `supabase/migrations/0001_init.sql` (tables, RLS, buckets) | WRITTEN, ~~never run on a real project~~ **Update 2026-10-17 (Claude):** migrations 0002 and 0003 (canonical shared maps) reported applied in U3's Supabase project and pass local SQL tests; 0001's real-project run is not recorded in the WORKLOG |
 | Cloud UI (`CloudController`, Share maps -> Cloud library) | SCAFFOLD, UNVERIFIED |
 | ~~Anonymous accounts~~ -> anonymous auth only, no accounts | as designed |

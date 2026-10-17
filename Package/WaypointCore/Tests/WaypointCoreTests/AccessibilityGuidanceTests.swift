@@ -318,7 +318,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         }
         // 10/5/2 m warnings, then the turn ITSELF at the corner with the route's real angle, then the
         // new leg. The corner cue was added after a walk where easing into a corner meant the live
-        // bearing never tripped the heading cue and a real turn went unannounced (D-028).
+        // bearing never tripped the heading cue and a real turn went unannounced (D-030).
         XCTAssertEqual(said, ["Walk straight about 14 meters, then turn right.",
                               "In 10 meters, turn right.", "In 5 meters, turn right.", "In 2 meters, turn right.",
                               "Turn right 85 degrees.", "Continue straight."])

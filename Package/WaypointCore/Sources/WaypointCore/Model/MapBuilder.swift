@@ -20,6 +20,9 @@
 //                                    joining them would route a blind user into a wall.
 // Why pure: ARKit (CaptureController) only supplies positions, so the graph-building rules can be
 //           unit tested without a phone. See MapBuilderTests.
+// Status:   Extension attachment implemented; tested by MapExtensionTests (3 tests, pass in `make test`);
+//           real-world attachment on a phone is UNVERIFIED ON DEVICE.
+//           Caller must supply already relocalized MAP-frame positions, in meters.
 //
 import Foundation
 import simd
@@ -58,6 +61,29 @@ public final class MapBuilder {
         self.segmentId = segmentId
         self.deviceName = deviceName
         self.breadcrumbSpacing = breadcrumbSpacing
+    }
+
+    /// Attach the first new breadcrumb to a nearby existing corridor/junction.
+    /// Call only after AR relocalization. A small radius and same-floor check avoid
+    /// joining another floor, a tagged room, or a staircase just because it is close.
+    /// Failure leaves the map untouched, so the caller can ask the volunteer to move.
+    @discardableResult
+    public func attachExtension(at position: SIMD3<Float>, maximumDistance: Float = 2) -> Bool {
+        guard lastBreadcrumb == nil, SegmentID.isValid(segmentId),
+              !map.segmentIds.contains(segmentId),
+              position.x.isFinite, position.y.isFinite, position.z.isFinite,
+              maximumDistance.isFinite, maximumDistance > 0 else { return false }
+        let candidates = map.nodes.filter {
+            ($0.kind == .corridor || $0.kind == .junction)
+                && abs($0.position.y - position.y) <= 0.75
+                && simd_distance($0.position, position) <= maximumDistance
+        }
+        guard let anchor = candidates.min(by: {
+            simd_distance($0.position, position) < simd_distance($1.position, position)
+        }) else { return false }
+        _ = dropBreadcrumb(at: position, linkedTo: anchor)
+        map.version += 1
+        return true
     }
 
     /// Feed the camera's current map-frame position. Returns the new node if one was dropped.

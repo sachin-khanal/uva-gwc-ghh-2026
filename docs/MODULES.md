@@ -1,5 +1,13 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-17 (Claude):** the Codex/U3 notes below that say tests or SQL are "pending" or "UNVERIFIED" are partly closed: Swift 85/85, typecheck OK, SQL migrations 0001-0003 + both SQL tests PASS locally (stubbed storage schema), Python 9/9. Still open: live-server concurrency and everything on a phone (UNVERIFIED ON DEVICE). New unmerged work: branch `app-ui-workflows` (new Scanner/Navigator UI, `Flows/`, `Services/`).
+
+**Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.
+
+**Update 2026-10-17 (Codex, U3):** cloud canonical-map extension implemented in migration 0002 plus Swift client/controller wiring, pending SQL and Mac verification. One building UUID has one shared record; contributors add to it. Previous mock-tested contributor-row status below applies to the old endpoint. See `supabase/CANONICAL_MAPS.md`; scan extension UI remains unfinished.
+
+**Update 2026-10-17 (Codex, U3):** developer map validation tool added at `tools/validate_map.py` with `tools/test_validate_map.py` (9 Python tests passing on Windows). U3 owns it; standalone implementation complete, CI wiring pending (INF-2). No Swift module status changed. See `tools/README.md` for commands and validation limits.
+
 Status legend: **DONE** (works and tested as far as possible) · **SCAFFOLD** (compiles, wired, logic
 sketched; needs real work/device testing) · **TODO** (not started).
 "Tested" means automated tests in `make test`. Nothing involving ARKit/audio/haptics/Multipeer has
@@ -30,6 +38,7 @@ Config/  project.yml  Makefile  scripts/    build system
 supabase/migrations/0001_init.sql  database + storage schema with RLS (run in the Supabase SQL editor)
 docs/  AGENTS.md  Architecture.md           documentation
 ```
+**Update 2026-10-17 (Claude):** the block above is missing (code blocks cannot be struck): `supabase/migrations/0002_canonical_maps.sql`, `0003_extension_connections.sql`; `supabase/tests/*.sql`; `supabase/CANONICAL_MAPS.md`; `tools/` (`validate_map.py` + tests); core `Guidance/PhonePosture.swift`, `SpokenPhrases.swift`, `Vision/ObstacleKind.swift`, `Scan/ConvexHull2D.swift`; and tests `AccessibilityGuidanceTests`, `MapExtensionTests` (85 tests total). `Flows/` exists only on branch `app-ui-workflows`.
 
 ## Ownership table
 
@@ -42,7 +51,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Live LiDAR scan view + bounding box** | A | `Waypoint/Scan/LiveScanView.swift`, `MeshSampler.swift`, `Capture/CaptureController.swift` (stats, box) · core `Scan/OrientedBox.swift` | box math DONE · view SCAFFOLD | `ScanAndSimulationTests` (box) |
 | **Mesh export (USDZ) + 3D viewer** | C | core `Scan/ExportBudget.swift` (budget math) | budget DONE · exporter/viewer TODO | budget tested |
 | **Simulated walker / Simulate mode** | B | core `Simulation/PoseSimulator.swift`, `Navigation/NavigationController.swift` (`startSimulation`), `UI/NavigatorView.swift` | logic DONE (end-to-end test) · UI SCAFFOLD | `testEndToEndWalkProducesExpectedCues` |
-| **Supabase client + sync engine** | D | core `Cloud/*`, `supabase/migrations/0001_init.sql` | client DONE vs mock · SQL + live server UNVERIFIED | `CloudTests` |
+| **Supabase client + sync engine** | D | core `Cloud/*`, `supabase/migrations/0001_init.sql` | client DONE vs mock · ~~SQL + live server UNVERIFIED~~ **Update 2026-10-17 (Claude):** SQL 0001-0003 + tests PASS locally and reported OK in U3's Supabase; live-server concurrency + phone use UNVERIFIED | `CloudTests` |
 | **Cloud UI** | D | `Waypoint/Cloud/CloudController.swift`, `UI/SyncView.swift` (Cloud section) | SCAFFOLD | – (needs a Supabase project) |
 | **Relocalization** | A | `Waypoint/Relocalization/Relocalizer.swift` | SCAFFOLD | – (device) |
 | **Routing** | B | `Routing/WaypointGraph.swift`, `Router.swift`, `RouteFollower.swift`, `GuidanceInstruction.swift` | DONE (logic) | `RoutingTests` |
@@ -53,10 +62,10 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Sign reading (OCR)** | C | `Vision/RoomNumberParser.swift` (logic), `Waypoint/Vision/SignReader.swift` | logic DONE · reader SCAFFOLD, NOT wired into any screen | parser tested |
 | **Map sync** | D | `Waypoint/Sync/MapSync.swift`, `UI/SyncView.swift` | SCAFFOLD | – (needs 2 phones) |
 | **App shell & screens** | D | `Waypoint/App/*`, `Waypoint/UI/*` | SCAFFOLD | – |
-| **Build system & docs** | D | `project.yml`, `Makefile`, `Config/`, `scripts/`, `docs/`, `AGENTS.md` | DONE | – |
-| **New UI flow logic** (added 2026-10-17, U3) | U3 | core `Flows/*` (ScanFlow, NavigateFlow, GuidanceState, RouteSummary, MapHealth, PlanLayout, SpokenText) | DONE (logic) · NOT YET RUN by `make test` | `FlowTests` |
-| **New UI services** (added 2026-10-17, U3) | U3 (live adapters reviewed by U1/U2) | `Waypoint/Services/*` (mock + observe-only live adapters, Announcer, settings) | SCAFFOLD · not compiled yet | – |
-| **New Scanner + Navigator screens** (added 2026-10-17, U3) | U3 (Navigator with U2) | `Waypoint/UI/DesignSystem/*`, `Waypoint/UI/Scanner/*`, `Waypoint/UI/Navigator/*`, `Waypoint/UI/SettingsView.swift`; switch in `RootView.swift` (default Classic) | SCAFFOLD · not compiled yet · UNVERIFIED ON DEVICE | – (see TESTING "Level 4") |
+| **Build system & docs** | D | `project.yml`, `Makefile`, `Config/`, `scripts/`, `docs/`, `AGENTS.md` | DONE | – **Update 2026-10-17 (Claude):** + docs enforcement: `scripts/docs-sync.sh`, `scripts/githooks/pre-commit`, `.claude/settings.json`, `.github/workflows/docs-check.yml` (DONE, tested by `make test-hooks`) |
+| **New UI flow logic** (added 2026-10-17, U3) | U3 | core `Flows/*` (ScanFlow, NavigateFlow, GuidanceState, RouteSummary, MapHealth, PlanLayout, SpokenText) | DONE (logic) · ~~NOT YET RUN by `make test`~~ **Update 2026-10-17 (Claude):** now compiled and run (`FlowTests` in the 167-test suite) | `FlowTests` |
+| **New UI services** (added 2026-10-17, U3) | U3 (live adapters reviewed by U1/U2) | `Waypoint/Services/*` (mock + observe-only live adapters, Announcer, settings) | SCAFFOLD · ~~not compiled yet~~ **Update 2026-10-17 (Claude):** now compiled and run | – |
+| **New Scanner + Navigator screens** (added 2026-10-17, U3) | U3 (Navigator with U2) | `Waypoint/UI/DesignSystem/*`, `Waypoint/UI/Scanner/*`, `Waypoint/UI/Navigator/*`, `Waypoint/UI/SettingsView.swift`; switch in `RootView.swift` (default Classic) | SCAFFOLD · ~~not compiled yet~~ **Update 2026-10-17 (Claude):** now compiled and run · UNVERIFIED ON DEVICE | – (see TESTING "Level 4") |
 
 ## Interfaces between areas (the things that must not drift)
 

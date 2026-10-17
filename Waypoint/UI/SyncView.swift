@@ -2,7 +2,7 @@
 // File:     Waypoint/UI/SyncView.swift
 // Owner:    D (App/Sync/Integration)
 // Purpose:  Sheet for sharing maps: (1) nearby phones via Multipeer, (2) the Supabase cloud library (upload
-//           private/shared, refresh, download), (3) share-sheet export per map (AirDrop / Files) as the
+//           shared canonical maps, refresh, download), (3) share-sheet export per map (AirDrop / Files) as the
 //           offline fallback. Anything that arrives from another person needs a tap to import.
 // Status:   SCAFFOLD. Syncing runs only while this sheet is open (start on appear, stop on disappear).
 //
@@ -84,8 +84,7 @@ private struct CloudSection: View {
             Text(cloud.status).font(.footnote)
             if cloud.isConfigured {
                 ForEach(maps) { map in
-                    Button("Upload \"\(map.name)\" (private)") { cloud.push(mapId: map.id, name: map.name, share: false) }
-                    Button("Upload \"\(map.name)\" and share with everyone") { cloud.push(mapId: map.id, name: map.name, share: true) }
+                    Button("Upload \"\(map.name)\" (shared building map)") { cloud.push(mapId: map.id, name: map.name, share: true) }
                 }
                 Button("Refresh library") { cloud.refresh() }
                 ForEach(cloud.remote) { item in

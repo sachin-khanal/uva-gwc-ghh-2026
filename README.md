@@ -55,3 +55,5 @@ ARKit, LiDAR, audio, haptics or Multipeer compiles but has **not yet run on a de
 [docs/WORKLOG.md](docs/WORKLOG.md) for the exact state.
 
 **Update 2026-10-17 (build block 1):** added a live LiDAR scan view with a bounding box, a Simulate mode for testing guidance without a scan, and a Supabase client + SQL schema. Tests: 45 passing. Still untested on a phone and against a real Supabase project. Next steps per person: [docs/ROADMAP.md](docs/ROADMAP.md); device test plan: [docs/TESTING.md](docs/TESTING.md).
+
+**Update 2026-10-17 (Claude):** test counts above (~~45~~) are now 85 Swift tests in `make test`, 9 Python tests for `tools/validate_map.py`, and 7 on-device UI tests. Cloud now uses one shared map per building (migrations 0002 and 0003, see `supabase/CANONICAL_MAPS.md`) and a volunteer can extend an existing building's map. All AR/audio/haptic/cross-phone behavior remains UNVERIFIED ON DEVICE where the WORKLOG says so.

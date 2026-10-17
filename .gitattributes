@@ -1,0 +1,4 @@
+# Hooks and scripts must keep LF line endings or they break in Git Bash on Windows (U3/U4 machines).
+*.sh                 text eol=lf
+scripts/githooks/*   text eol=lf
+Makefile             text eol=lf

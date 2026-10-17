@@ -127,7 +127,7 @@ final class FeedbackAndVisionTests: XCTestCase {
     }
 }
 
-// MARK: - SpeechGate: the rules behind the app's single voice (D-024)
+// MARK: - SpeechGate: the rules behind the app's single voice (D-026)
 
 final class SpeechGateTests: XCTestCase {
 
