@@ -481,3 +481,36 @@ final class OneMoveAtATimeTests: XCTestCase {
         XCTAssertEqual([SpeechPriority.normal, .critical, .high].sorted(by: >), [.critical, .high, .normal])
     }
 }
+
+// MARK: - The arrow must agree with the voice (device report, 2026-10-17)
+
+final class ArrowMatchesSpeechTests: XCTestCase {
+
+    private func snapshot(instruction: String, spoken: String?) -> GuidanceSnapshot {
+        var s = GuidanceSnapshot.derive(status: "Navigating", instruction: instruction,
+                                        obstacle: .clear, destinationLabel: "Room 402")
+        s.lastSpoken = spoken
+        return s
+    }
+
+    /// The reported contradiction: the voice says "Right." while the arrow points left, because the
+    /// instruction had already moved on and speech is rate limited.
+    func testArrowFollowsTheSpokenDirectionNotTheLatestInstruction() {
+        XCTAssertEqual(snapshot(instruction: "turnLeft, 4.8 m", spoken: "Right.").spokenKind, .turnRight)
+        XCTAssertEqual(snapshot(instruction: "turnRight, 2.0 m", spoken: "Slightly left 20 degrees.").spokenKind, .turnLeft)
+    }
+
+    func testTurnAroundAndStraightAreRecognised() {
+        XCTAssertEqual(snapshot(instruction: "continueStraight, 5 m", spoken: "Turn around.").spokenKind, .turnAround)
+        XCTAssertEqual(snapshot(instruction: "turnLeft, 5 m", spoken: "Continue straight.").spokenKind, .continueStraight)
+        XCTAssertEqual(snapshot(instruction: "turnLeft, 5 m", spoken: "Walk straight about 8 meters.").spokenKind, .continueStraight)
+    }
+
+    /// Lines that are not directions must not steer the arrow.
+    func testNonDirectionsLeaveTheArrowAlone() {
+        XCTAssertNil(snapshot(instruction: "continueStraight, 5 m", spoken: "You have arrived at Room 402.").spokenKind)
+        XCTAssertNil(snapshot(instruction: "continueStraight, 5 m", spoken: "Recalculating.").spokenKind)
+        XCTAssertNil(snapshot(instruction: "continueStraight, 5 m", spoken: nil).spokenKind)
+        XCTAssertNil(snapshot(instruction: "continueStraight, 5 m", spoken: "").spokenKind)
+    }
+}

@@ -506,3 +506,22 @@ sprinted.
 Added a diagnostic: when the route changes, the log prints the user's position, the first waypoint's position and the
 distance between them. If this fault ever recurs, that line identifies it without another walk.
 **Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-042 — Visual fingerprints are OFF by default, and align the map exactly once (2026-10-17)
+The user asked the right question: "what could be the reason that the pathfinding could break while the only changes
+were the embeddings?" Because a keyframe match sets `mapToWorld`, and EVERY position, route, instruction and spoken
+cue is computed through that transform. A wrong or changing alignment does not look like a relocalization fault - it
+looks like the pathfinder going mad. Screenshots showed the recomputed route swinging between 0.7 m and 13.3 m from
+one half-second to the next: the router was fine, it was being asked from a different place each time.
+Cause: D-039 latched the fix, but then re-armed it whenever tracking dipped to `.limited(.relocalizing)`. ARKit dips
+into that constantly in a corridor, so a DIFFERENT keyframe re-anchored the world every few seconds.
+1. **One alignment per session.** The re-arm is gone. If tracking is truly lost, ARKit recovers and carries the pose;
+re-anchoring from a second guess is worse than waiting.
+2. **Off by default**, behind Settings > "Use visual fingerprints to find you". The feature is genuinely promising -
+relocalization was much faster with it - but its distance threshold has never been calibrated on hardware, and an
+uncalibrated match silently corrupts everything downstream. The default is the behaviour that has been walked
+successfully. This also makes the A/B deliberate instead of accidental.
+3. **The arrow follows the words.** The on-screen arrow came from `kind`, which updates every tick, while speech is
+deliberately rate limited - so the screen could show a left arrow a second after the voice said "Right."
+`GuidanceSnapshot.spokenKind` reads the direction back out of the spoken line and the arrow uses that.
+**Status:** accepted; 216 tests pass. UNVERIFIED ON DEVICE.

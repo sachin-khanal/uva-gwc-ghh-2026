@@ -133,7 +133,9 @@ struct GuidingView: View {
     private var symbol: String {
         switch g.phase {
         case .guiding:
-            switch g.kind ?? .continueStraight {
+            // Follow the WORDS, not the raw instruction: speech is rate limited, so `kind` can be a
+            // second or two ahead of what the user was told, and the arrow then contradicts the voice.
+            switch g.spokenKind ?? g.kind ?? .continueStraight {
             case .continueStraight: return "arrow.up"
             case .turnLeft: return "arrow.turn.up.left"
             case .turnRight: return "arrow.turn.up.right"

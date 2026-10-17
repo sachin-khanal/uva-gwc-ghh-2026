@@ -85,6 +85,21 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         }
     }
 
+    /// The direction the user was actually TOLD, read back out of the spoken line.
+    ///
+    /// The arrow used to come from `kind`, which updates every tick, while speech is deliberately
+    /// rate limited - so the screen could show a left arrow while the voice had just said "Right."
+    /// On a debugging screen that is merely confusing; for anyone trusting both it is contradictory
+    /// (device report 2026-10-17). The arrow now follows the words.
+    public var spokenKind: GuidanceInstruction.Kind? {
+        guard let line = lastSpoken?.lowercased(), !line.isEmpty else { return nil }
+        if line.hasPrefix("turn around") { return .turnAround }
+        if line.contains("left") { return .turnLeft }
+        if line.contains("right") { return .turnRight }
+        if line.hasPrefix("continue straight") || line.hasPrefix("walk straight") { return .continueStraight }
+        return nil
+    }
+
     /// Longest line we are willing to show as a headline before it truncates on a phone.
     static let maxHeadlineCharacters = 30
 

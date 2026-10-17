@@ -93,6 +93,35 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 — Claude (agent, for Anmol) — Fingerprints off by default; align once; arrow follows speech   [tags: BUILD, BUG]
+Area: A (relocalization) + UI. Branch `keyframe-oneshot` off `navigation-overhaul`. See D-042.
+
+The user's question answered the diagnosis: the embeddings set `mapToWorld`, and position, route, instructions and
+speech are all computed through it, so a bad alignment presents as broken pathfinding. Route length swung 0.7 -> 2.2
+-> 10.3 -> 13.3 m between recomputes, i.e. the position was moving, not the router.
+Cause: the re-arm added in D-039 fired on every `.limited(.relocalizing)` dip, which in a corridor is constant, so a
+different keyframe re-anchored the world every few seconds.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` (re-arm removed - one alignment per session; matching also
+gated on the new preference), `Waypoint/Services/ServiceMode.swift` (+`visualFingerprints`, default FALSE, and
+`visualFingerprintsEnabled`), `Waypoint/UI/SettingsView.swift` (toggle + explanation),
+`Package/WaypointCore/Sources/WaypointCore/Flows/GuidanceState.swift` (+`spokenKind`),
+`Waypoint/UI/Navigator/GuidingView.swift` (arrow uses `spokenKind` first).
+Tests added: `ArrowMatchesSpeechTests` (3) - the arrow follows the spoken direction rather than the latest
+instruction, turn-around and straight are recognised, and non-directions ("You have arrived", "Recalculating", empty,
+nil) leave the arrow alone.
+Verified: `make test` -> **216 tests, 0 failures** (was 213); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched - keyframes are still RECORDED on
+every scan, only their USE is now opt-in.
+Open / handoff:
+1. With fingerprints OFF the app should behave as it did before D-038. That is the configuration to demo with.
+2. To make them usable: calibrate `KeyframeIndex.defaultMaxDistance` using the log line
+   "recognised a keyframe (distance X)", then turn the toggle on.
+3. Still unknown: whether the matcher ever runs on a map that HAS a saved world map (D-040). The console says
+   "using world map for segment X" or "no world map on disk".
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Route continuously; delete the staleness machinery   [tags: BUILD, BUG]
 Area: B (Navigation). Branch `continuous-routing` off `navigation-overhaul`. See D-041.
 

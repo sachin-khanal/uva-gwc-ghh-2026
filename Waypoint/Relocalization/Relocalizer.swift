@@ -158,7 +158,8 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
     /// that pose is exact and this one is dropped. We also require ARKit to be tracking normally, so
     /// the live camera transform we align against is trustworthy.
     private func matchKeyframeIfDue(_ frame: ARFrame) {
-        guard let map, !map.keyframes.isEmpty,
+        guard UIPrefs.visualFingerprintsEnabled,
+              let map, !map.keyframes.isEmpty,
               // ONCE only. The first version kept matching while `fix == .keyframe`, so every half
               // second a different keyframe re-anchored `mapToWorld` and the user teleported around
               // the map - which then looked like being off-route, forced a re-route, and produced
@@ -238,9 +239,13 @@ final class Relocalizer: NSObject, ObservableObject, ARSessionDelegate {
                 state = .localized // coarse, but good enough to start guiding
             }
         case .limited(.relocalizing), .limited(.initializing):
-            // Tracking is gone, so the seed we had is no longer being carried forward: allow a
-            // keyframe to re-acquire. An exact fix (world map / marker) is never discarded this way.
-            if fix == .keyframe { fix = .none }
+            // Deliberately do NOT re-arm the keyframe matcher here. ARKit dips into `.limited` all the
+            // time in a corridor, and re-arming meant a DIFFERENT keyframe re-anchored `mapToWorld`
+            // every few seconds. Since every position, route and instruction is computed through that
+            // transform, the user teleported and the route length swung between 0.7 m and 13 m
+            // between recomputes - which read as "the pathfinding broke" (device report 2026-10-17).
+            // One alignment per session. If tracking is truly lost, ARKit recovers and carries the
+            // pose; re-anchoring from a second guess is worse than waiting.
             if state == .localized { state = .lost } else if state == .idle { state = .searching }
         default:
             if state == .localized { state = .lost }
