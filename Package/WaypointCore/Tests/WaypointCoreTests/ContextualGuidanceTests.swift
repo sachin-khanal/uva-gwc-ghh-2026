@@ -40,18 +40,25 @@ final class ContextualGuidanceTests: XCTestCase {
         XCTAssertFalse(spoken(p.plan(instruction: instr(), obstacle: .stop, trackingOK: true, report: ObstacleReport(kind: .chair, distanceMeters: 0.5), time: 50)).isEmpty)
     }
 
-    func testWallAndDoorAlarmsAreMutedInTheLastFewMetersButChairsStillWarn() {
+    func testNearTheDestinationRealObstaclesStillWarnAndStopStillMutesTheBeacon() {
+        // Safety (security review 2026-10-17): no quiet zone before arrival. A wall or glass at a corner 2 m before the room must still alarm.
         let near = Maneuver(kind: .arrive, distanceMeters: 2.0, nodeId: UUID(), label: "Room 204")
-        for kind in [ObstacleKind.wall, .door, .window] {
+        for kind in [ObstacleKind.wall, .window, .chair, .person] {
             var p = FeedbackPlanner()
-            let said = spoken(p.plan(instruction: instr(upcoming: near), obstacle: .stop, trackingOK: true,
-                                     report: ObstacleReport(kind: kind, distanceMeters: 0.6), time: 1))
-            XCTAssertFalse(said.contains { $0.contains("Stop") || $0.contains("Careful") }, "\(kind): \(said)")
+            let actions = p.plan(instruction: instr(upcoming: near), obstacle: .stop, trackingOK: true,
+                                 report: ObstacleReport(kind: kind, distanceMeters: 0.6), time: 1)
+            XCTAssertTrue(spoken(actions).contains { $0.contains("Stop") }, "\(kind): \(spoken(actions))")
+            XCTAssertTrue(actions.contains(.haptic(.obstacleStop)), "\(kind)")
+            XCTAssertTrue(actions.contains(.beacon(nil)), "\(kind): beacon must be muted at STOP")
         }
+    }
+
+    func testTheDoorToTheDestinationRoomIsAnInstructionNotAnAlarm() {
         var p = FeedbackPlanner()
-        let chair = spoken(p.plan(instruction: instr(upcoming: near), obstacle: .stop, trackingOK: true,
-                                  report: ObstacleReport(kind: .chair, distanceMeters: 0.6), time: 1))
-        XCTAssertTrue(chair.contains { $0.contains("Stop") }, "a chair near the door is still a danger")
+        let said = spoken(p.plan(instruction: instr(targetKind: .room), obstacle: .stop, trackingOK: true,
+                                 report: ObstacleReport(kind: .door, distanceMeters: 0.6), time: 1))
+        XCTAssertFalse(said.contains { $0.hasPrefix("Stop") }, "\(said)")
+        XCTAssertTrue(said.contains { $0.contains("open it") }, "\(said)")
     }
 
     func testWallFarFromDestinationStillWarns() {

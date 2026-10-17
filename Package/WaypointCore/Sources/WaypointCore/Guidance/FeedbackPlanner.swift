@@ -74,9 +74,6 @@ public struct FeedbackPlanner {
     /// (device report 2026-10-17). Safety messages (obstacles, lost tracking) are never delayed.
     public static let directionCooldownSeconds: TimeInterval = 1.5
 
-    /// Within this distance of the FINAL destination, alarms about plain architecture (wall / door / window) are not spoken: at a room's
-    /// entrance those ARE the destination, and the arrival message is about to say so. Chairs, people etc. still warn.
-    public static let destinationQuietMeters: Float = 3.0
     /// "Narrow space" is announced at most this often.
     public static let narrowRepeatSeconds: TimeInterval = 20
 
@@ -183,17 +180,11 @@ public struct FeedbackPlanner {
         // Is the thing ahead the way IN rather than something to avoid? (door of the target room,
         // the stairs we routed to). If so it gets instructions, not an alarm, and guidance continues.
         let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
-        // The last few metres: a wall/door/window in front is the room we are walking into, not a danger. Say nothing; the arrival message follows.
-        let atDestination: Bool = {
-            guard let u = instruction?.upcoming, u.kind == .arrive, u.distanceMeters <= Self.destinationQuietMeters,
-                  let kind = report?.kind else { return false }
-            return kind == .wall || kind == .door || kind == .window
-        }()
         let levelChanged = obstacle != lastObstacle
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
         let repeatDue = obstacle == .stop && !levelChanged && !kindChanged
             && time != nil && lastObstacleSpeech != nil && (time! - lastObstacleSpeech!) >= Self.stopRepeatSeconds
-        if obstacle != .clear, levelChanged || kindChanged || repeatDue, !atDestination {
+        if obstacle != .clear, levelChanged || kindChanged || repeatDue {
             if wayThrough {
                 actions.append(.speak(ObstacleSpeech.wayThrough(report, targetLabel: instruction?.targetLabel),
                                       priority: .high))
@@ -216,7 +207,7 @@ public struct FeedbackPlanner {
         lastObstacle = obstacle
         // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
         // the beacon and stops everything else.
-        if obstacle == .stop, !wayThrough, !atDestination {
+        if obstacle == .stop, !wayThrough {
             actions.append(.beacon(nil))
             return actions
         }
