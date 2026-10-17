@@ -1,5 +1,15 @@
 # Work log
 
+## 2026-10-17 16:20 — Claude (agent, for Sachin) — Docs-on-every-commit hook for agents and humans (AGENTS.md rule 12)   [tags: BUILD, DOCS]
+Area: D (build system/docs), shared; also touches `.github/` (U3's lane per ROADMAP, did not exist yet) at U1's request that every dev follows this.
+Files created: `scripts/docs-sync.sh` (check | stub | install | status | session), `scripts/githooks/pre-commit`, `scripts/test-docs-sync.sh`, `.claude/settings.json` (SessionStart auto-installs the hook for Claude Code users), `.gitattributes` (LF for scripts so Git Bash on Windows works), `.github/workflows/docs-check.yml` (PR + push-to-main backstop).
+Files edited: `Makefile` (+`hooks`, +`test-hooks`, `setup` installs the hook), `scripts/doctor.sh` (warns if not installed), `AGENTS.md` (rule 12 + `make hooks` row), `docs/DECISIONS.md` (D-024), `docs/WORKFLOW.md`, `docs/SETUP.md`, `docs/TESTING.md`, `docs/MODULES.md` (additive Update notes).
+Behavior: a commit touching code files (swift/sql/py/sh/yml/json/plist/xcconfig/Makefile) is refused unless the same commit adds a NEW `## YYYY-MM-DD` entry at the top of docs/WORKLOG.md that has `Verified` and `NOT verified` lines and no leftover FILL placeholders. `docs-sync.sh stub` scaffolds the entry from `git status`. Docs-only commits, merges, rebases and cherry-picks pass. Warnings only: markdown lines removed without ~~strikethrough~~ (rule 11), new Swift files without a header or missing from MODULES.md, Model/* edits without CONTRACT CHANGE. Escape: `WAYPOINT_SKIP_DOCS=1` (CI still checks).
+Commands run: `sh scripts/test-docs-sync.sh` -> 15 passed, 0 failed (throwaway repo); `sh scripts/docs-sync.sh install` and `status` in this clone; `make help`, `./scripts/doctor.sh` (hook line PASS).
+NOT verified: the GitHub Action has never run (no push yet; it also needs Actions enabled and, to block merges, "required status check" set in repo settings); Claude Code's first-run trust prompt for project hooks in `.claude/settings.json`; behavior on Windows Git Bash (U3/U4) and with Codex (it ignores `.claude/`, so it depends on AGENTS.md + `make hooks`); not run in a worktree.
+Limits: git hooks are not cloned. Each dev must run `make hooks` once (or open a Claude Code session here); teammates only get this after they pull. Tell U2, U3, U4 and the Codex/UI agents.
+Open problems / handoff: decide whether to mark `docs-check` a required status check; U3 may fold this workflow into INF-2.
+
 ## 2026-10-17 16:16 — Claude (agent, for Sachin) — Test run of U3, merge sync, repo-wide docs reconciliation   [tags: DOCS, BUILD]
 Area: shared (docs) + two Swift header comments. Requested by U1 ("full depth scan", then "yes" to fixing the findings).
 Branch work: checked out `U3`, ran tests, fast-forwarded local `main` to U3 (0fc02d5), then to `origin/main` e22e5cb (rishyam1's docs-only commit). Nothing pushed by this entry.

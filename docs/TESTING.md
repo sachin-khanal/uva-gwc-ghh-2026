@@ -168,3 +168,5 @@ Limits: cannot move the phone, cannot judge audio/haptics/visual quality of the 
 
 Add to docs/WORKLOG.md: which check number, phone model + iOS version, pass/fail, console excerpt. A check
 is only "verified" once someone has done it on a device and written it down.
+
+**Update 2026-10-17 (Claude):** **Docs hook:** `make test-hooks` (or `sh scripts/test-docs-sync.sh`) runs 15 cases of `scripts/docs-sync.sh` in a throwaway git repo (no phone, no Mac needed).

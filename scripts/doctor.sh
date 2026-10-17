@@ -65,6 +65,13 @@ case "$PWD" in
   "$HOME/Desktop"*|"$HOME/Documents"*) pass "Repo is in an iCloud-synced folder; Makefile already builds into ~/Library/Caches/Waypoint to avoid codesign xattr errors" ;;
 esac
 
+# 6b. Docs hook (AGENTS.md rule 12): without it commits can skip the WORKLOG entry
+if sh scripts/docs-sync.sh status 2>/dev/null; then
+  pass "git pre-commit docs hook installed"
+else
+  warn "git docs hook NOT installed: run 'make hooks' (or: sh scripts/docs-sync.sh install). Every code commit needs a docs/WORKLOG.md entry"
+fi
+
 # 7. Devices
 echo "  Connected devices (need 'connected' + Developer Mode on):"
 xcrun devicectl list devices 2>/dev/null | sed 's/^/    /' || warn "could not list devices"

@@ -42,7 +42,7 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 # Lets xcodebuild create/refresh the free provisioning profile and register the phone.
 SIGN_FLAGS := -allowProvisioningUpdates -allowProvisioningDeviceRegistration
 
-.PHONY: help setup doctor team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
+.PHONY: help setup doctor hooks test-hooks team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
 
 help: ## Show this help
 	@echo "Waypoint make targets:"; echo
@@ -54,10 +54,17 @@ setup: ## One-time: install XcodeGen, create Config/Local.xcconfig, run doctor
 	@command -v xcodegen >/dev/null || { echo "Installing xcodegen via Homebrew..."; brew install xcodegen; }
 	@if [ ! -f $(LOCAL_XCCONFIG) ]; then cp Config/Local.xcconfig.example $(LOCAL_XCCONFIG); \
 	  echo "Created $(LOCAL_XCCONFIG). EDIT IT: set DEVELOPMENT_TEAM and WAYPOINT_DEV_SUFFIX."; fi
+	@sh scripts/docs-sync.sh install
 	@./scripts/doctor.sh
 
 doctor: ## Check the toolchain, signing config and connected devices
 	@./scripts/doctor.sh
+
+hooks: ## Install the git pre-commit hook that requires a docs/WORKLOG.md entry with every code commit (AGENTS.md rule 12)
+	@sh scripts/docs-sync.sh install
+
+test-hooks: ## Self-test the docs hook in a throwaway git repo
+	@sh scripts/test-docs-sync.sh
 
 team-id: ## Print your Apple team id from your signing certificate (for Config/Local.xcconfig)
 	@./scripts/team-id.sh

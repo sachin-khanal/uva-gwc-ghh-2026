@@ -1,0 +1,5 @@
+#!/bin/sh
+# File:    scripts/githooks/pre-commit
+# Purpose: Block commits that change code without a docs/WORKLOG.md entry (AGENTS.md rule 12).
+#          Installed per clone by `make hooks` (or `sh scripts/docs-sync.sh install`); the logic lives in scripts/docs-sync.sh.
+exec sh "$(git rev-parse --show-toplevel)/scripts/docs-sync.sh" check

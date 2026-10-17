@@ -59,3 +59,5 @@ within a session. Before leaving a Live Share session, the host commits.
 - [ ] `docs/MODULES.md` status updated if a module moved (TODO → SCAFFOLD → DONE)
 - [ ] Anything half-done is marked `TODO(owner):` in the code header, not silently left
 - [ ] Committed (git mode) or host notified (Live Share mode)
+
+**Update 2026-10-17 (Claude):** **Handoff checklist addition:** run `make hooks` once per clone (Windows without make: `sh scripts/docs-sync.sh install` in Git Bash). From then on a commit that changes code is refused until `docs/WORKLOG.md` has a real new entry; `sh scripts/docs-sync.sh stub` scaffolds it. See AGENTS.md rule 12 and D-024.

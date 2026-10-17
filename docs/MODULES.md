@@ -62,7 +62,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Sign reading (OCR)** | C | `Vision/RoomNumberParser.swift` (logic), `Waypoint/Vision/SignReader.swift` | logic DONE · reader SCAFFOLD, NOT wired into any screen | parser tested |
 | **Map sync** | D | `Waypoint/Sync/MapSync.swift`, `UI/SyncView.swift` | SCAFFOLD | – (needs 2 phones) |
 | **App shell & screens** | D | `Waypoint/App/*`, `Waypoint/UI/*` | SCAFFOLD | – |
-| **Build system & docs** | D | `project.yml`, `Makefile`, `Config/`, `scripts/`, `docs/`, `AGENTS.md` | DONE | – |
+| **Build system & docs** | D | `project.yml`, `Makefile`, `Config/`, `scripts/`, `docs/`, `AGENTS.md` | DONE | – **Update 2026-10-17 (Claude):** + docs enforcement: `scripts/docs-sync.sh`, `scripts/githooks/pre-commit`, `.claude/settings.json`, `.github/workflows/docs-check.yml` (DONE, tested by `make test-hooks`) |
 
 ## Interfaces between areas (the things that must not drift)
 

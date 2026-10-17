@@ -121,3 +121,5 @@ test runner, under your Apple ID (free accounts allow ~10 new app ids per week; 
 | AR/LiDAR features do nothing | You are on a non-Pro phone or the Simulator |
 | Cloud says "not configured" | `SUPABASE_URL` / `SUPABASE_ANON_KEY` missing in `Config/Local.xcconfig`, or you did not rebuild (`make run`) |
 | Sync never finds peers | Both phones need Local Network permission and Wi-Fi/Bluetooth on; use the AirDrop export fallback |
+
+**Update 2026-10-17 (Claude):** **Every developer, once per clone:** `make hooks` (done by `make setup`; on Windows without make run `sh scripts/docs-sync.sh install` in Git Bash). It installs the pre-commit hook that requires a `docs/WORKLOG.md` entry with every code commit (AGENTS.md rule 12). Verify with `make doctor`.

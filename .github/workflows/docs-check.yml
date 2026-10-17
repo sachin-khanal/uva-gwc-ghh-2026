@@ -1,0 +1,23 @@
+# File:    .github/workflows/docs-check.yml
+# Purpose: Server-side backstop for AGENTS.md rule 12: code changes must come with a docs/WORKLOG.md entry.
+#          Local git hooks can be skipped or never installed; this cannot. On pull requests it blocks the merge button
+#          (if you mark the check required); on direct pushes to main it turns the commit red so it is noticed.
+#          No macOS runner, no dependencies, ~10 s. (INF-2, the macOS `make test` workflow, is separate and still open.)
+name: docs-check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  worklog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pull request - code needs a WORKLOG entry
+        if: github.event_name == 'pull_request'
+        run: sh scripts/docs-sync.sh check --range "origin/${{ github.base_ref }}"
+      - name: Push to main - code needs a WORKLOG entry
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: sh scripts/docs-sync.sh check --range "${{ github.event.before }}"
