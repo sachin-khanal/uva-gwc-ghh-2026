@@ -34,7 +34,8 @@ and for mixing them (e.g. Live Share while pairing, git to move work between mac
 ## Mode 2 — Git (each person has their own clone and phone)
 
 - Remote: the GitHub repo `uva-gwc-ghh-2026`. Branch `main` is always green (`make test`, `make typecheck`).
-- **Branch per area:** `a/capture`, `b/guidance`, `c/vision`, `d/sync-ui` (add `/<topic>` for more).
+- **Branch per area:** ~~`a/capture`, `b/guidance`, `c/vision`, `d/sync-ui`~~ (add `/<topic>` for more).
+  **Update 2026-10-17 (Claude):** ROADMAP Revision 3 §6 supersedes the letters with per-person prefixes `u1/`, `u2/`, `u3/`, `u4/`, and says only U1 merges to `main`. In practice branches are named `U3` and `app-ui-workflows`, and `main` has received a direct push from U3's side (e22e5cb). Agree and write down which rule actually applies.
 - **Small commits, rebase onto main daily** (`git pull --rebase origin main`). Merge to `main`
   via PR or fast-forward; never force-push `main`.
 - **Merge-conflict hotspots** and how we avoid them:

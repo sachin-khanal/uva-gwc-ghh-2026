@@ -10,7 +10,8 @@
 //                                    labelled leaf node attached to the most recent breadcrumb.
 // Why pure: ARKit (CaptureController) only supplies positions, so the graph-building rules can be
 //           unit tested without a phone. See MapBuilderTests.
-// Status:   Extension attachment implemented; tested by MapExtensionTests (Mac execution pending).
+// Status:   Extension attachment implemented; tested by MapExtensionTests (3 tests, pass in `make test`);
+//           real-world attachment on a phone is UNVERIFIED ON DEVICE.
 //           Caller must supply already relocalized MAP-frame positions, in meters.
 //
 import Foundation

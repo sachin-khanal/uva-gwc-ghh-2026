@@ -1,5 +1,16 @@
 # Work log
 
+## 2026-10-17 16:16 — Claude (agent, for Sachin) — Test run of U3, merge sync, repo-wide docs reconciliation   [tags: DOCS, BUILD]
+Area: shared (docs) + two Swift header comments. Requested by U1 ("full depth scan", then "yes" to fixing the findings).
+Branch work: checked out `U3`, ran tests, fast-forwarded local `main` to U3 (0fc02d5), then to `origin/main` e22e5cb (rishyam1's docs-only commit). Nothing pushed by this entry.
+Verified (I ran these): `make test` -> 85 tests, 0 failures (includes MapExtensionTests x3 and CloudTests); `make typecheck` -> OK (22 app files, 1 UI test file); `python3 tools/validate_map.py` -> sample PASS; Python unit tests -> 9 PASS (Python 3.9.6).
+  SQL: throwaway Docker container from the cached `public.ecr.aws/supabase/postgres:17.6.1.136` image (the running `supabase_*_intakeu` stack was NOT touched; container removed afterwards). The image has `auth` but no `storage` schema, so `storage.buckets/objects/foldername/filename` were STUBBED. Migrations 0001, 0002, 0003 applied in order without errors; `supabase/tests/canonical_maps.sql` and `extension_connections.sql` both printed PASS and left no rows. Grants: `authenticated` -> `merge_building_internal` = permission denied; `anon` -> `extend_building` = permission denied; `authenticated` -> `extend_building` runs ("Sign in first").
+NOT verified: the storage RLS policy in 0002 (stubbed schema); live Supabase concurrency; any phone behavior (UNVERIFIED ON DEVICE); a merge of `app-ui-workflows` (only a dry-run `git merge-tree`: conflict in `Waypoint/UI/RootView.swift`, docs auto-merge; nothing was compiled).
+Docs updated (strike-through + labelled Update, nothing deleted): `docs/SETUP.md` (run migrations 0002 and 0003; test count), `README.md` (counts, canonical maps), `docs/TESTING.md` (closed the "not verified" note; counts 45 -> 85, UI tests 5 -> 7), `docs/MODULES.md` (verification note, Supabase row, layout additions), `Architecture.md` (migration status), `docs/ROADMAP.md` (two stale cells + a status snapshot against Revision 3), `docs/WORKFLOW.md` (branch naming conflict), `docs/DECISIONS.md` (new D-023), this WORKLOG (22:45 entry's stale `origin/U3` statement struck).
+Code (comments only): header Status lines in `Cloud/SupabaseClient.swift` and `Model/MapBuilder.swift`.
+Known leftover: the "Newest entry at the TOP" header and the entry template further down this file sit below the first U3 entries (they were inserted above it); moving them would rewrite history, so it is only noted here.
+Open problems / handoff: ROADMAP snapshot shows Gate G2 (relocalization x5) has not been run, which blocks the critical path; decide on the `app-ui-workflows` merge and who owns `Waypoint/UI/{Scanner,Navigator}` and `Waypoint/Services`; ask U2 what the MacBook Air is working on (no commits or entries from U2).
+
 ## 2026-10-17 — Codex for U3 — Main integration authorized after reported checks
 Area: shared integration; user explicitly authorized merging U3 into main.
 Files edited: `docs/WORKLOG.md` (this verification/handoff entry only).
@@ -74,7 +85,7 @@ Open problems / handoff: <what the next person must know>
 
 ## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
 Area: shared (integration check requested by U1 before committing)
-Branches: `origin/U3` = no own commits (old pointer, 3 behind main). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
+Branches: ~~`origin/U3` = no own commits (old pointer, 3 behind main).~~ **Update 2026-10-17 (Claude):** `origin/U3` now holds 3 commits (map validator, canonical maps, scan extensions) that were fast-forwarded into `main` (0fc02d5). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
   WaypointCore `Flows/*` + 21 `FlowTests`, `Waypoint/Services/*` (mock + live adapters around CaptureController/NavigationController), design system. Based on 27365ec (older than main), written on Windows, never compiled before this check.
 Method: throwaway git worktree outside the repo = main + ALL of Sachin's uncommitted work, then `git merge origin/app-ui-workflows`; nothing in the real working tree was touched except the fix below; worktree and its build folders deleted afterwards.
 Findings: (1) no duplicate type names in WaypointCore or the app; (2) their logging, CaptureController and NavigationController calls are all still valid (APIs only gained defaulted params);

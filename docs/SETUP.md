@@ -33,6 +33,7 @@ make setup        # installs xcodegen (Homebrew), creates Config/Local.xcconfig,
 make test         # should print "Executed 45 tests, with 0 failures"
 make typecheck    # should print "typecheck OK"
 ```
+**Update 2026-10-17 (Claude):** in the block above, ~~"Executed 45 tests"~~ is now `Executed 85 tests, with 0 failures` (Swift) plus 9 Python tests (`python3 -B -m unittest discover -s tools -p "test_*.py"`).
 
 ## 3. Signing with a free Apple ID (one time, GUI)
 
@@ -76,6 +77,7 @@ A teammate does this ONCE for the whole team (one shared project), then shares t
 1. https://supabase.com -> New project (free tier). Pick any region, save the DB password somewhere safe.
 2. **Authentication -> Providers -> Anonymous Sign-Ins -> enable.** (The app signs in anonymously; there is no signup screen.)
 3. **SQL Editor** -> paste all of `supabase/migrations/0001_init.sql` -> Run. It is safe to re-run.
+   **Update 2026-10-17 (Claude):** ~~0001 alone is enough~~ the app now talks to `canonical_buildings` and `rpc/extend_building`, which only exist after you ALSO run `0002_canonical_maps.sql` and then `0003_extension_connections.sql` (in that order). Optional checks: `supabase/tests/canonical_maps.sql` and `supabase/tests/extension_connections.sql` (expect PASS notices; fixtures roll back).
 4. **Project Settings -> API:** copy the *Project URL* and the **anon public** key.
    **Never** copy the `service_role` key into the app, the repo, a chat or a screenshot.
 5. Each developer adds to their own `Config/Local.xcconfig` (git-ignored):

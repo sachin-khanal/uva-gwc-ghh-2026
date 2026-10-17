@@ -57,7 +57,7 @@ Navigation stays the demo's climax; the scanner is how the map gets made and wha
 | 3 | Simulated walker | DONE in logic + end-to-end test; Simulate UI SCAFFOLD | TESTING.md 2.2-2.6 with headphones |
 | 4 | Mesh export + 3D preview | ONLY the size budget (`ExportBudget`) | build `MeshExporter` (ModelIO -> USDZ) + viewer (C) |
 | 5 | Depth/obstacle calibration | NOT STARTED (detector scaffolded) | TESTING.md 3.7 |
-| 6 | Supabase backend + sync | Client + `SyncEngine` DONE vs mock (11 tests); SQL written; Cloud UI SCAFFOLD; never run on a real project | create project, SETUP.md §5, TESTING.md 2.9 |
+| 6 | Supabase backend + sync | Client + `SyncEngine` DONE vs mock (11 tests); SQL written; Cloud UI SCAFFOLD; ~~never run on a real project~~ **Update 2026-10-17 (Claude):** migrations 0002/0003 reported applied in U3's project | create project, SETUP.md §5, TESTING.md 2.9 |
 | 7 | Demo hardening | NOT STARTED | after 2, 3, 6 |
 
 The table "What an agent can start RIGHT NOW" above is mostly done: ~~Supabase SQL~~ written; ~~REST client~~ done (mock-tested); ~~cloud DTO mapping, size caps, validation~~ done;
@@ -121,7 +121,7 @@ Supersedes the per-letter assignments above (struck through there). Everything e
 
 | Area | State | Evidence |
 |---|---|---|
-| Build system, XcodeGen, Makefile, doctor, typecheck | DONE | `make test` 50 pass; `make typecheck` OK (19 app files); `make check` BUILD SUCCEEDED |
+| Build system, XcodeGen, Makefile, doctor, typecheck | DONE | ~~`make test` 50 pass; `make typecheck` OK (19 app files);~~ **Update 2026-10-17 (Claude):** `make test` 85 pass; `make typecheck` OK (22 app files + 1 UI test file); `make check` BUILD SUCCEEDED |
 | Data model, storage, merge, validation (hostile maps, path-traversal-safe ids) | DONE, unit-tested | ModelTests |
 | Routing (A*), follower, feedback rules, obstacle hysteresis, room-number parser | DONE, unit-tested | RoutingTests, FeedbackAndVisionTests |
 | Bounding-box math, export size budget, pose simulator, end-to-end simulated walk | DONE, unit-tested | ScanAndSimulationTests |
@@ -281,3 +281,24 @@ New tasks, in addition to the Revision 3 tables above (owners follow the existin
 | A11Y-5 | U3 | Run `make selftest-e2e` on every teammate's phone; paste the `vision.labels.*` lines so the label mapper can be tuned for all models | lines in WORKLOG |
 | A11Y-6 | U2 | Stairs-down / ledge detection (a downward depth check) and temporal voting for object names (needs A11Y-3 data) | stretch |
 Cut line: A11Y-1/2/3 are part of the never-cut "guided walk with obstacles" path; A11Y-6 is stretch.
+
+## Update 2026-10-17 — status snapshot against Revision 3 (Claude, evidence = WORKLOG + a test run; the tables above have no done markers)
+
+| Phase / task | Evidence | State |
+|---|---|---|
+| P0 U1.1 signing + run on the Pro Max | WORKLOG 16:20, 17:10 | DONE |
+| P0 other phones (U2/U3/U4) | none recorded | UNKNOWN |
+| P0 Supabase project (U3.1) | U3 ran migrations 0002/0003 and SQL tests in the dashboard (user-reported) | project exists; "Cloud ready" on a phone not recorded (E2E cloud step skipped) |
+| INF-1 `make ipa`, INF-2 CI workflow | no `ipa` target, no `.github/` | NOT STARTED |
+| U3.4 map validator | `tools/validate_map.py`, 9 Python tests pass | DONE |
+| U3.3 RLS suite (`tools/supabase-tests/`) | only `supabase/tests/*.sql` (canonical maps) exist | PARTIAL; the 0001 policy cases are not covered |
+| U1.4-U1.6 live scan, save, relocalization x5 (**Gate G2**) | no real-hallway scan or trial table in the WORKLOG | NOT DONE, and it is the critical path |
+| U2.2/U2.3/U2.6 guidance + obstacle tuning on a phone | simulated-walk E2E 20/0/1 and UI tests 7/7 on the Pro Max; real corridor calibration not done | PARTIAL (software side done, calibration open) |
+| A11Y-1..A11Y-6 | code + tests done; posture axes, beacon ear, real obstacle hits unverified | OPEN |
+| U1.10 extend an existing map | built (MapBuilder + CaptureController + VolunteerView + migration 0003), tests pass | DONE in code; UNVERIFIED ON DEVICE |
+| U1.8 multi-segment relocalization, U2.5 re-routing, U2.7 OCR wiring, U2.9 `.waypointmap` handler | not found in code/WORKLOG | NOT STARTED |
+| U3.7 web viewer, U3.8 mesh export, U3.5 ops scripts | no `web/`, no `MeshExporter` | NOT STARTED |
+| U4.2-U4.6, U4.9-U4.13 field/QA/demo | no `docs/field/` | NOT STARTED (or not in the repo) |
+| New Scanner/Navigator UI | branch `app-ui-workflows` (neehamikki), 1 commit, one conflict in `RootView.swift`, not merged | PENDING merge decision |
+
+Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next step: the real-phone U1.4-U1.6 walk.

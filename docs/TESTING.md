@@ -6,7 +6,8 @@ First run `make test` and `make typecheck` on a Mac (new MapExtensionTests inclu
 In Supabase, apply `0003_extension_connections.sql` after 0002, then run both
 `supabase/tests/extension_connections.sql` and `supabase/tests/canonical_maps.sql`.
 Expected: success, with PASS notices, and no persistent fixture data. These new
-checks are NOT yet verified in this Windows session.
+~~checks are NOT yet verified in this Windows session.~~
+**Update 2026-10-17 (Claude):** on a Mac, `make test` (85 tests incl. the 3 MapExtensionTests) and `make typecheck` pass. Migrations 0001-0003 applied in order and BOTH SQL test files printed PASS (fixtures rolled back) on a throwaway local Postgres 17 container with a STUBBED `storage` schema; function grants checked as `anon`/`authenticated`. U3 separately reported the same SQL passing in the Supabase dashboard. The device checklist below is still UNVERIFIED ON DEVICE.
 
 On a LiDAR phone, with an escort for navigation checks:
 
@@ -32,7 +33,7 @@ Three levels. Always run level 1 before handing off; levels 2-3 are for people w
 
 ## Level 1 — automated, no phone (`make test`, `make typecheck`, `make check`)
 
-`make test` runs 45 XCTest cases in `Package/WaypointCore/Tests/` in about a second. They prove:
+`make test` runs ~~45~~ **Update 2026-10-17 (Claude):** 85 XCTest cases in `Package/WaypointCore/Tests/` in about a second. They prove:
 data model + JSON + merge + validation (hostile maps), routing (A*, stairs), bearings, the feedback rules,
 obstacle hysteresis, room-number parsing, the scan bounding box, export budget, the simulated walker
 (an END-TO-END walk to Room 204 that must end in "You have arrived"), and the whole Supabase client
@@ -146,7 +147,7 @@ Everything saved (map JSON, ARWorldMap, mesh) is identical in all four runs; onl
 
 ## UI tests that tap and take screenshots on the phone — added 2026-10-17
 
-`DEVICE=<id> make uitest` builds the app + a UI-test runner, installs both on the phone, and runs `WaypointUITests/WaypointUITests.swift` (5 tests: home screen, full simulated walk to arrival,
+`DEVICE=<id> make uitest` builds the app + a UI-test runner, installs both on the phone, and runs `WaypointUITests/WaypointUITests.swift` (~~5 tests~~ **Update 2026-10-17 (Claude):** 7 tests: home screen, full simulated walk to arrival,
 injected obstacle shows STOP and clears, scan screen shows the live HUD, Share-maps sheet shows the Cloud section). Then it exports every screenshot, screen recording and text note to
 `~/Library/Caches/Waypoint/uitest-screens/` (`manifest.json` there maps each file to its test and name). `make uitest ONLY=testSimulatedWalkFinishesAndShowsArrival` runs one test;
 `make uitest-shots` re-exports the last run. Screenshots live outside the repo on purpose (they can show your room).

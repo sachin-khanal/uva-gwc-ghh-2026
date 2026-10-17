@@ -9,7 +9,9 @@
 //           Every call carries the public `apikey` header and the user's JWT as Bearer token, so Row
 //           Level Security sees `auth.uid()`.
 // Setup:    In the Supabase dashboard enable Authentication > Providers > Anonymous Sign-Ins, then run
-//           migrations 0001 and 0002 in the SQL editor. Status: UNVERIFIED against live migration 0002.
+//           migrations 0001, 0002 and 0003 in the SQL editor. Status: request shapes tested against a mock; SQL
+//           0001-0003 + supabase/tests PASS on a local Postgres (stubbed storage) and reported OK in
+//           U3's Supabase; this client is still UNVERIFIED against a live project.
 // Actor:    all mutable state (the session) is isolated; safe to call from any task.
 //
 import Foundation
