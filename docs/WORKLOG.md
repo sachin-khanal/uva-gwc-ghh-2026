@@ -108,6 +108,53 @@ Open: none new. If you want the old counts restored as struck text too, say so.
 
 ---
 
+## 2026-10-17 — Claude (agent, for U3) — New Scanner + Navigator interface, mock-first (behind a default-OFF switch)   [tags: BUILD]
+Area: shared (UI). Branch `app-ui-workflows`. Implements docs/UI_PLAN.md §2-§9; status and deviations in UI_PLAN §13.
+Files created - WaypointCore (pure, with tests):
+- `Flows/ScanFlow.swift` (ScanFlow, ScanQuality, ScanTracking.from(summary:), FinishGate), `Flows/NavigateFlow.swift`
+  (NavigateFlow, defaultStart), `Flows/GuidanceState.swift` (GuidancePhase, GuidanceSnapshot, parse/derive of
+  NavigationController strings), `Flows/RouteSummary.swift`, `Flows/MapHealth.swift`, `Flows/PlanLayout.swift`,
+  `Flows/SpokenText.swift`; `Tests/WaypointCoreTests/FlowTests.swift` (21 tests).
+Files created - app:
+- `Waypoint/Services/`: ServiceMode (settings keys, factory, LiDAR check), ScanService + MockScanService + LiveScanService,
+  GuidanceService + MockGuidanceService + LiveGuidanceService, Announcer (VoiceOver / spoken prompts, headphone check).
+- `Waypoint/UI/DesignSystem/`: Theme, HeroButton, CardRow, MockBadge, StatusPill, QualityRing, Banner, TagPalette,
+  PlanView, HoldToConfirmButton.
+- `Waypoint/UI/Scanner/`: ScannerFlowView, ScanSessionModel, ScanLibraryView, ScanSetupView, LiveScanScreen,
+  ScanReviewView, ScanShareView, MockCameraView.
+- `Waypoint/UI/Navigator/`: NavigatorFlowView (+NavScreen, NavInfoRow), NavigatorModel (+Recents), BuildingPickerView,
+  DestinationPickerView, RouteConfirmView, LocalizingView, GuidingView, ArrivedView, EscortPanel.
+- `Waypoint/UI/SettingsView.swift`.
+Files edited:
+- `Waypoint/UI/RootView.swift` (owner D): gear button -> SettingsView; `ui.newInterface` (default false = Classic shows
+  VolunteerView/NavigatorView exactly as before); optional open-in-Navigate on launch (new interface only).
+- Docs (appended only): `docs/UI_PLAN.md` §13, `docs/MODULES.md` (3 rows), `docs/TESTING.md` (Level 4), this entry.
+NOT edited (by design, UI_PLAN R1/R3): CaptureController, NavigationController, Relocalizer, LiveScanView, guides, MapSync,
+  CloudController, VolunteerView, NavigatorView, SyncView, AppState, any existing WaypointCore file, project.yml.
+Data contract: unchanged (no CONTRACT CHANGE). Renaming a place in Review re-saves map.json with version + 1.
+Commands run:   none that compile (written on Windows: no Swift toolchain). Static review only.
+Verified:       NOTHING COMPILED. Checked by reading: every new type defined once, no name clashes with existing app/core
+  types, protocol conformances complete, memberwise-init argument orders, iOS 17 API availability, no `#Preview`
+  macro (PreviewProvider used so plain `swiftc -typecheck` works). FlowTests expectations computed by hand from the
+  sample map.
+NOT verified:   `make test`, `make typecheck`, `make check` - must be run on a Mac first. Everything in Waypoint/ is
+  UNVERIFIED ON DEVICE (VoiceOver flow, spoken prompts, live adapters, plan view, haptics).
+Open problems / handoff:
+1. A Mac owner: pull `app-ui-workflows`, run `make test && make typecheck`, fix any compile errors, log the result here.
+2. U1 review `LiveScanService` mapping; U2 review `LiveGuidanceService` + Navigator accessibility (UI_PLAN §12 Q1).
+3. Run TESTING Level 4 on phones (4.3 with VoiceOver and eyes closed is the important one).
+
+## 2026-10-17 — Claude (agent, for U3) — UI plan for Scanner + Navigator workflows (mock-first)   [tags: DOCS]
+Area: shared (UI). Branch `app-ui-workflows`.
+Files created:  `docs/UI_PLAN.md` (plan only, no code).
+Files edited:   `docs/WORKLOG.md` (this entry).
+Files deleted:  none.
+Commands run:   none (read-only review of the repo).
+Verified:       n/a (documentation).
+NOT verified:   nothing built yet.
+Open problems / handoff: plan proposes new files only plus a default-off switch in `RootView`; needs answers to
+  UI_PLAN.md §12 from U1/U2 (ownership of `Waypoint/UI/Navigator/`, RootView switch) before P1 starts.
+
 ## 2026-10-17 13:30 — Claude (agent, for Sachin) — Build block 1: live scanner, simulate mode, Supabase client + schema   [tags: BUILD, CONTRACT CHANGE]
 Area: A (scan view), B (simulation), D (cloud), C (budget) - scaffolded together; owners should take over each part.
 Why: user said "continue building" and to integrate Supabase while building (ROADMAP.md revision 2).

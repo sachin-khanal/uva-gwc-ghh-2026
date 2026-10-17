@@ -4,20 +4,27 @@
 // Purpose:  Launch screen: choose Volunteer (scan) or Navigator (get guided). Also hosts the
 //           "Share maps" sheet (SyncView). Everything is large-button, VoiceOver-labelled UI.
 // Status:   SCAFFOLD - functional but unstyled. Polish after integration milestone.
+// Update 2026-10-17 (U3): "Interface" setting (gear button, SettingsView). Classic (default) shows the original
+//           VolunteerView / NavigatorView exactly as before; New shows ScannerFlowView / NavigatorFlowView
+//           (docs/UI_PLAN.md §8). "Open in Navigate on launch" only applies to the new interface.
 //
 import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
     @State private var showSync = false
+    @State private var showSettings = false
+    @State private var didAutoOpen = false
+    @AppStorage(UIPrefs.newInterface) private var newInterface = false
+    @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
 
     var body: some View {
         NavigationStack {
             Group {
                 switch app.mode {
                 case .none: modePicker
-                case .volunteer: VolunteerView()
-                case .navigator: NavigatorView()
+                case .volunteer: if newInterface { ScannerFlowView() } else { VolunteerView() }
+                case .navigator: if newInterface { NavigatorFlowView() } else { NavigatorView() }
                 }
             }
             .navigationTitle("Waypoint")
@@ -25,6 +32,9 @@ struct RootView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if app.mode != .none {
                         Button("Home") { app.mode = .none }
+                    } else {
+                        Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                            .accessibilityLabel("Settings")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -33,6 +43,12 @@ struct RootView: View {
                 }
             }
             .sheet(isPresented: $showSync) { SyncView() }
+            .sheet(isPresented: $showSettings) { SettingsView() }
+        }
+        .onAppear {
+            guard !didAutoOpen else { return }
+            didAutoOpen = true
+            if newInterface && openInNavigate && app.mode == .none { app.mode = .navigator }
         }
     }
 
