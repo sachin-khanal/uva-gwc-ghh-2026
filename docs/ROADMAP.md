@@ -329,3 +329,6 @@ Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next 
 6. Cheap housekeeping: U1.2 branch rule, INF-1 `make ipa`, INF-2 CI (the GitHub docs-check Action has run on the main push; check its result in the Actions tab).
 
 **Not on U1's list but open for the team:** mesh export + 3D viewer (U3.8, nothing built), web viewer (U3.7), `.waypointmap` open handler (U2.9), field survey and demo script (U4), real-LiDAR calibration of obstacles and the new side-clearance hints (U2.6).
+
+
+**Update 2026-10-18 (Claude, confirmed by Sachin): who is who.** U1 = Sachin Khanal · U2 = Anmol Thapa (branch `navigation-overhaul`) · U3 = Rishya (GitHub `rishyam1`; branch `U3`, `supabase/`, `tools/`, `web/`) · U4 = Neeha (GitHub `neehamikki`; branch `app-ui-workflows`, the new Scanner/Navigator UI). Git history uses the handles; the docs use U1-U4.
