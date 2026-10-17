@@ -19,7 +19,7 @@ case "$cmd" in
     dest="$ROOT/$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$dest"
     # devicectl cannot copy a whole folder in one go: list the files, then copy each one.
-    xcrun devicectl device info files --device "$DEVICE" --domain-type appDataContainer --domain-identifier "$BUNDLE" --subdirectory Documents/Maps 2>/dev/null \
+    xcrun devicectl device info files --device "$DEVICE" --domain-type appDataContainer --domain-identifier "$BUNDLE" --subdirectory Documents 2>/dev/null \
       | awk '/^Maps\// && $0 !~ /Directory/ {print $1}' > "$dest/.files" || true
     count=0
     while read -r f; do

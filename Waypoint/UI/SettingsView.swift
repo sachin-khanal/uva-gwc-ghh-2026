@@ -14,8 +14,8 @@ import UIKit
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(UIPrefs.newInterface) private var newInterface = false
-    @AppStorage(UIPrefs.serviceMode) private var serviceModeRaw = ServiceMode.mock.rawValue
+    @AppStorage(UIPrefs.newInterface) private var newInterface = UIPrefs.newInterfaceDefault
+    @AppStorage(UIPrefs.serviceMode) private var serviceModeRaw = ServiceMode.defaultMode.rawValue
     @AppStorage(UIPrefs.debugOverlay) private var debugOverlay = false
     @AppStorage(UIPrefs.spokenPrompts) private var spokenPrompts = true
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false

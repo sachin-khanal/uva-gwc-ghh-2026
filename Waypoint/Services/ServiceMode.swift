@@ -16,8 +16,10 @@ import WaypointCore
 
 /// UserDefaults keys (read with @AppStorage in views). Prefixed so they never clash with other code.
 enum UIPrefs {
-    /// false = classic screens (VolunteerView / NavigatorView), true = new flows. Default false (UI_PLAN R2).
+    /// false = classic screens (VolunteerView / NavigatorView), true = new flows. Default TRUE since 2026-10-18 (was false, UI_PLAN R2); a person can
+    /// switch back in Settings, and scripted launches (-autoSimulate, -autoE2E, -autoScan) and the UI tests always use the classic screens.
     static let newInterface = "ui.newInterface"
+    static let newInterfaceDefault = true
     static let serviceMode = "ui.serviceMode"
     /// Speak screen prompts with the phone's voice when VoiceOver is off. Default true.
     static let spokenPrompts = "ui.spokenPrompts"
@@ -51,8 +53,12 @@ enum ServiceMode: String, CaseIterable, Identifiable {
         }
     }
 
+    /// What a fresh install uses: real scanning and positioning on a LiDAR iPhone (a demo scan there would be a trap for a volunteer), demo data
+    /// on a phone that cannot scan (the new screens still run). Anyone can change it in Settings.
+    static var defaultMode: ServiceMode { DeviceCapabilities.hasLiDAR ? .live : .mock }
+
     static var current: ServiceMode {
-        ServiceMode(rawValue: UserDefaults.standard.string(forKey: UIPrefs.serviceMode) ?? "") ?? .mock
+        ServiceMode(rawValue: UserDefaults.standard.string(forKey: UIPrefs.serviceMode) ?? "") ?? defaultMode
     }
 }
 

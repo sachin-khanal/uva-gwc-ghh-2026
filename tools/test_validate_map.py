@@ -107,5 +107,19 @@ class MapValidationTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
 
+class DefaultFolderTests(unittest.TestCase):
+    def test_default_run_passes_with_non_map_json_present_and_explicit_path_still_validates_it(self):
+        samples = Path(__file__).resolve().parents[1] / "Samples"
+        vectors = samples / "route-vectors.json"
+        if not vectors.exists():
+            self.skipTest("no route-vectors.json in this checkout")
+        tool = str(Path(__file__).resolve().parent / "validate_map.py")
+        default = subprocess.run([sys.executable, tool], capture_output=True, text=True)
+        self.assertEqual(default.returncode, 0, default.stdout)
+        self.assertIn("SKIP", default.stdout)
+        explicit = subprocess.run([sys.executable, tool, str(vectors)], capture_output=True, text=True)
+        self.assertEqual(explicit.returncode, 1, "naming a non-map file must still fail")
+
+
 if __name__ == "__main__":
     unittest.main()

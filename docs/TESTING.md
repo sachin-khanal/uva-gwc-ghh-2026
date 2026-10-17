@@ -173,7 +173,7 @@ is only "verified" once someone has done it on a device and written it down.
 
 ## Level 4 — new interface (added 2026-10-17, U3; docs/UI_PLAN.md §10)
 
-Turn it on: Home → gear → Interface **New**. Data source: Demo data / Simulated walk / Live.
+~~Turn it on: Home → gear → Interface **New**.~~ **Update 2026-10-18 (Claude):** the new interface is now the DEFAULT on a fresh install (switch back: Home → gear → Interface **Classic**). Data source default: **Live** on a LiDAR iPhone, **Demo data** on one without. Scripted launches (`-autoSimulate`, `-autoE2E`, `-autoScan`) and `make uitest` always use the classic screens. Data source: Demo data / Simulated walk / Live.
 
 | # | Check | Phone | Expected |
 |---|---|---|---|

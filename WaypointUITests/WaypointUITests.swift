@@ -214,6 +214,20 @@ final class WaypointUITests: XCTestCase {
         shot("81-new-scanner-expanded")
     }
 
+    /// FRESH INSTALL: with no stored preference and no launch arguments the NEW interface must be what a person sees (default since
+    /// 2026-10-18). Only meaningful on a clean install (the simulator); on a phone that already stored a preference it checks that preference.
+    func testNewInterfaceIsTheDefault() throws {
+        app.terminate()
+        app.launchArguments = [] // deliberately no -ui.newInterface argument
+        app.launch()
+        if app.state != .runningForeground { app.activate() }
+        need(app.buttons["mode.scan"], "Scan button missing").tap()
+        let extend = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Extend a map'")).firstMatch
+        XCTAssertTrue(extend.waitForExistence(timeout: 8), "the new Scanner library (with 'Extend a map') should be the default screen")
+        XCTAssertFalse(app.buttons["scan.start"].exists, "the classic scan form must not be the default")
+        shot("90-default-interface")
+    }
+
     func testScanScreenShowsLiveHUD() {
         need(app.buttons["mode.scan"], "Scan button missing").tap()
         need(app.buttons["scan.start"], "Start scanning button missing").tap()

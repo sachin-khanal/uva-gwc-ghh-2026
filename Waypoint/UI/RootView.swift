@@ -15,7 +15,7 @@ struct RootView: View {
     @State private var showSync = false
     @State private var showSettings = false
     @State private var didAutoOpen = false
-    @AppStorage(UIPrefs.newInterface) private var newInterfacePref = false
+    @AppStorage(UIPrefs.newInterface) private var newInterfacePref = UIPrefs.newInterfaceDefault
     /// Scripted launches (-autoSimulate, -autoE2E, -autoScan, UI tests) always use the classic screens: the headless commands live there, and
     /// a leftover "New interface" preference on the phone must not turn `make selftest-sim` into a screen that waits for a human.
     private var newInterface: Bool { newInterfacePref && !app.launchCommand.isActive }

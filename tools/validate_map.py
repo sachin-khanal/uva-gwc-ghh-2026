@@ -163,7 +163,13 @@ def main(argv=None):
         for filename in matches:
             try:
                 with open(filename, encoding="utf-8-sig") as source:
-                    validate(json.load(source))
+                    document = json.load(source)
+                # With no arguments the whole Samples/ folder is checked, and it also holds non-map data (e.g. route-vectors.json
+                # test vectors added by the web viewer). Skip those there; a file named on the command line is always validated.
+                if not args.paths and isinstance(document, dict) and "nodes" not in document and "map" not in document:
+                    print(f"SKIP {filename}: not a map (no nodes)")
+                    continue
+                validate(document)
                 print(f"PASS {filename}")
             except (OSError, ValueError, RecursionError) as error:
                 print(f"FAIL {filename}: {error}")
