@@ -72,6 +72,11 @@ final class NavigationController: ObservableObject {
 
     // MARK: Collaborators
     private let relocalizer = Relocalizer()
+    private var relocalizerPreparing: AnyCancellable?
+
+    /// True while the saved scan is being read and decoded, before the camera starts. The UI shows a
+    /// loading state instead of appearing frozen (device report 2026-10-17).
+    @Published private(set) var isPreparing = false
     private let audio = SpatialAudioGuide()
     private let haptics = HapticsGuide()
     private let speech = SpeechGuide()
@@ -101,6 +106,15 @@ final class NavigationController: ObservableObject {
     private var startGate = StartGate()
     /// Consecutive ticks spent far from the route; drives re-routing.
     private var offRouteTicks = 0
+    /// Recent positions, for working out whether the user is actually walking.
+    private var lastMovementSample: (position: SIMD3<Float>, time: TimeInterval)?
+    private var isMoving = true
+    /// Below this speed we treat the user as standing still. A slow shuffle is ~0.3 m/s; this is well
+    /// under that, so only a genuine stop counts.
+    private static let movingSpeed: Float = 0.15
+    /// How far apart movement samples are taken. Shorter than this and ARKit's pose noise looks like
+    /// walking; longer and we react too slowly.
+    private static let movementSampleSeconds: TimeInterval = 0.6
     /// How far off the route counts as "off route". Wider than a corridor, so normal drift is ignored.
     private static let rerouteMeters: Float = 5
     /// ~1.5 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
@@ -125,6 +139,19 @@ final class NavigationController: ObservableObject {
         routePlanner = RoutePlanner(graph: WaypointGraph(map: map), memory: store.loadRouteMemory(mapId: map.id))
         statusText = "Looking for your position..."
         relocalizer.onFrame = { [weak self] frame in self?.handle(frame) }
+        // Mirror the loading flag and say so out loud: "Looking for your position" is misleading while
+        // we have not even opened the file yet.
+        relocalizerPreparing = relocalizer.$isPreparing
+            .receive(on: RunLoop.main)
+            .sink { [weak self] preparing in
+                guard let self else { return }
+                self.isPreparing = preparing
+                if preparing {
+                    self.setIfChanged(\.statusText, "Opening the saved scan...")
+                } else if self.statusText == "Opening the saved scan..." {
+                    self.setIfChanged(\.statusText, "Looking for your position...")
+                }
+            }
         relocalizer.start(map: map, store: store)
         signReader.reset()
         signReader.onRoomNumberConfirmed = { [weak self] number in self?.handleSign(number) }
@@ -167,6 +194,8 @@ final class NavigationController: ObservableObject {
         simulationPaused = false
         relocalizer.onFrame = nil
         signReader.onRoomNumberConfirmed = nil
+        relocalizerPreparing = nil
+        isPreparing = false
         relocalizer.stop()
         audio.stop()
         speech.stop()
@@ -190,6 +219,8 @@ final class NavigationController: ObservableObject {
         self.destination = destination
         follower = nil
         offRouteTicks = 0
+        lastMovementSample = nil
+        isMoving = true
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
@@ -300,6 +331,7 @@ final class NavigationController: ObservableObject {
             // Only publish real changes (see setIfChanged): at 10 Hz an unconditional assignment keeps the screen redrawing and the UI tests never idle.
             setIfChanged(\.mapPosition, mapPosition)
             setIfChanged(\.headingRadians, atan2(mapForward.x, -mapForward.z))
+            updateMovement(position: mapPosition, time: time)
             updateRouteWorldPositions(mapToWorld: mapToWorld)
             // Re-route when the user is genuinely somewhere else. The route used to be computed once
             // and kept for the whole session, so walking a different (often shorter) way than the one
@@ -345,8 +377,24 @@ final class NavigationController: ObservableObject {
         }
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
-                                   posture: posture, report: report, time: time, context: sceneContext)
+                                   posture: posture, report: report, time: time, context: sceneContext, isMoving: isMoving)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
+    }
+
+    /// Are they walking? Measured from the camera pose, so it needs no extra framework and no motion
+    /// permission - CMPedometer/CMMotionActivity would need `NSMotionUsageDescription` and would tell
+    /// us about the PHONE, while the pose tells us about the user's position in the map.
+    /// Used to stop repeating "stop, there is a door ahead" at somebody who has already stopped.
+    private func updateMovement(position: SIMD3<Float>, time: TimeInterval) {
+        guard let last = lastMovementSample else {
+            lastMovementSample = (position, time)
+            return
+        }
+        let elapsed = time - last.time
+        guard elapsed >= Self.movementSampleSeconds else { return }
+        let travelled = Geometry.horizontalDistance(last.position, position)
+        isMoving = travelled / Float(elapsed) >= Self.movingSpeed
+        lastMovementSample = (position, time)
     }
 
     /// Route waypoints in world space for the AR overlay. Cheap guard: only rebuild when the route or

@@ -21,11 +21,13 @@ import Foundation
 public struct SpeechGate {
 
     public enum Decision: Equatable {
-        /// Say it, interrupting anything in progress first.
+        /// Say it, interrupting anything in progress first. Safety only.
         case interrupt
+        /// Add it to the queue; it is spoken when the current line finishes.
+        case enqueue
         /// Say it; nothing is in progress.
         case speak
-        /// Stay quiet (duplicate, or lower priority than what is already being said).
+        /// Stay quiet (duplicate, or ambient while something else is being said).
         case drop
     }
 
@@ -48,10 +50,16 @@ public struct SpeechGate {
         if text == lastText, now - lastTime < repeatWindow { return .drop }
 
         switch priority {
-        case .high:
+        case .critical:
             lastText = text
             lastTime = now
             return isSpeaking ? .interrupt : .speak
+        case .high:
+            // Queue rather than interrupt: a walking user generates several of these in a row and
+            // cutting each off with the next produced half sentences.
+            lastText = text
+            lastTime = now
+            return isSpeaking ? .enqueue : .speak
         case .normal:
             if isSpeaking { return .drop }
             lastText = text

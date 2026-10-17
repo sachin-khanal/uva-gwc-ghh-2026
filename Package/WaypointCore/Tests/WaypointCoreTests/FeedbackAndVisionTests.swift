@@ -33,7 +33,7 @@ final class FeedbackAndVisionTests: XCTestCase {
     func testObstacleStopOverridesNavigationAndMutesBeacon() {
         var p = FeedbackPlanner()
         let a = p.plan(instruction: instruction(.continueStraight), obstacle: .stop, trackingOK: true)
-        XCTAssertEqual(a.first, .speak("Stop. Obstacle ahead.", priority: .high))
+        XCTAssertEqual(a.first, .speak("Stop. Obstacle ahead.", priority: .critical))
         XCTAssertTrue(a.contains(.haptic(.obstacleStop)))
         XCTAssertEqual(a.last, .beacon(nil))
         XCTAssertFalse(a.contains(.speak("Continue straight.", priority: .normal)))
@@ -42,7 +42,7 @@ final class FeedbackAndVisionTests: XCTestCase {
     func testLostTrackingSilencesAndRecovers() {
         var p = FeedbackPlanner()
         let lost = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: false)
-        XCTAssertEqual(lost, [.speak("Lost my position. Hold still.", priority: .high), .beacon(nil)])
+        XCTAssertEqual(lost, [.speak("Lost my position. Hold still.", priority: .critical), .beacon(nil)])
         let still = p.plan(instruction: nil, obstacle: .clear, trackingOK: false)
         XCTAssertEqual(still, [.beacon(nil)]) // does not nag
         let back = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: true)
@@ -131,9 +131,18 @@ final class FeedbackAndVisionTests: XCTestCase {
 
 final class SpeechGateTests: XCTestCase {
 
-    func testHighPriorityInterruptsWhatIsBeingSaid() {
+    /// Only safety cuts somebody off mid-word.
+    func testCriticalInterruptsWhatIsBeingSaid() {
         var gate = SpeechGate()
-        XCTAssertEqual(gate.decide(text: "Stop. Wall ahead.", priority: .high, isSpeaking: true, now: 1), .interrupt)
+        XCTAssertEqual(gate.decide(text: "Stop. Wall ahead.", priority: .critical, isSpeaking: true, now: 1), .interrupt)
+    }
+
+    /// Turns and arrival QUEUE instead. Interrupting each with the next is what chopped guidance into
+    /// fragments while walking (device report 2026-10-17).
+    func testHighPriorityQueuesBehindWhatIsBeingSaid() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Turn right 45 degrees.", priority: .high, isSpeaking: true, now: 1), .enqueue)
+        XCTAssertEqual(gate.decide(text: "You have arrived.", priority: .high, isSpeaking: false, now: 2), .speak)
     }
 
     func testHighPrioritySpeaksWhenNothingIsBeingSaid() {
@@ -159,7 +168,7 @@ final class SpeechGateTests: XCTestCase {
     func testDifferentTextIsNotSuppressed() {
         var gate = SpeechGate(repeatWindow: 3)
         XCTAssertEqual(gate.decide(text: "Turn left.", priority: .high, isSpeaking: false, now: 10), .speak)
-        XCTAssertEqual(gate.decide(text: "Stop. Stairs directly ahead.", priority: .high, isSpeaking: true, now: 10.1), .interrupt)
+        XCTAssertEqual(gate.decide(text: "Stop. Stairs directly ahead.", priority: .critical, isSpeaking: true, now: 10.1), .interrupt)
     }
 
     func testEmptyTextIsNeverSpoken() {
@@ -182,5 +191,107 @@ final class SpeechGateTests: XCTestCase {
         var gate = SpeechGate(repeatWindow: 3)
         XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: true, now: 1), .drop)
         XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .normal, isSpeaking: false, now: 1.1), .speak)
+    }
+}
+
+// MARK: - Not talking over yourself, and not nagging at a closed door (device report, 2026-10-17)
+
+final class SpeechPacingTests: XCTestCase {
+
+    private func spoken(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    private func instruction(targetKind: NodeKind, label: String?, distance: Float) -> GuidanceInstruction {
+        GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: distance,
+                            targetNodeId: UUID(), targetLabel: label,
+                            targetPosition: SIMD3(0, 0, -distance), hazard: nil, targetKind: targetKind)
+    }
+
+    private func door(_ metres: Float) -> ObstacleReport {
+        ObstacleReport(kind: .door, side: .ahead, distanceMeters: metres, confidence: 0.9)
+    }
+
+    /// The report: standing at a closed door, it repeated "stop, a door ahead" every few seconds
+    /// instead of leaving the one useful line - that the door has to be opened - to stand.
+    func testADoorIsExplainedOnceAndNotRepeated() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .room, label: "Room 442", distance: 1.4)
+
+        let first = spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                        report: door(0.5), time: 1, isMoving: true))
+        XCTAssertEqual(first.filter { $0.contains("open it") }.count, 1, "said once: \(first)")
+        XCTAssertFalse(first.contains { $0.hasPrefix("Stop.") },
+                       "the door you were routed to is not an obstacle: \(first)")
+        // Guidance deliberately carries on toward the door, so another cue here is fine.
+
+        // Several seconds standing in front of it: the stop-repeat timer must not fire.
+        for t in stride(from: 4.0, through: 20.0, by: 4.0) {
+            let later = spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                            report: door(0.5), time: t, isMoving: false))
+            XCTAssertTrue(later.isEmpty, "nothing more to say at t=\(t): \(later)")
+        }
+    }
+
+    /// Standing still in front of a real obstacle is not a reason to keep warning either - the user
+    /// has already stopped, which is what the warning was for.
+    func testStopIsNotRepeatedAtSomeoneWhoHasStopped() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .corridor, label: nil, distance: 6)
+        let wall = ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+
+        XCTAssertEqual(spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                           report: wall, time: 1, isMoving: true)).count, 1)
+        XCTAssertTrue(spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                          report: wall, time: 10, isMoving: false)).isEmpty,
+                      "they have stopped; repeating adds nothing")
+    }
+
+    /// ...but if they are still walking toward it, keep warning. This is the safety case.
+    func testStopIsStillRepeatedWhileWalkingIntoSomething() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .corridor, label: nil, distance: 6)
+        let wall = ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+
+        _ = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, report: wall, time: 1, isMoving: true)
+        let again = spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                        report: wall, time: 10, isMoving: true))
+        XCTAssertEqual(again.count, 1, "still moving toward a wall: say it again")
+    }
+
+    /// Unknown movement (no data yet) must behave as it always did, not go quiet.
+    func testUnknownMovementKeepsTheOldRepeatingBehaviour() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .corridor, label: nil, distance: 6)
+        let wall = ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+        _ = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, report: wall, time: 1)
+        XCTAssertFalse(spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                           report: wall, time: 10)).isEmpty)
+    }
+
+    /// Walking through the door arms the explanation again for the next one.
+    func testTheNextDoorIsExplainedAgain() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .room, label: "Room 442", distance: 1.4)
+        XCTAssertFalse(spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                           report: door(0.5), time: 1, isMoving: true)).isEmpty)
+        _ = planner.plan(instruction: i, obstacle: .clear, trackingOK: true, time: 5, isMoving: true)
+        let next = spoken(planner.plan(instruction: i, obstacle: .stop, trackingOK: true,
+                                       report: door(0.5), time: 9, isMoving: true))
+        XCTAssertTrue(next.contains { $0.contains("open it") }, "a second door is explained too: \(next)")
+    }
+
+    /// Safety interrupts; guidance queues. This is the split that stopped lines being chopped up.
+    func testSafetyInterruptsButGuidanceQueues() {
+        var planner = FeedbackPlanner()
+        let i = instruction(targetKind: .corridor, label: nil, distance: 6)
+        let wall = ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+        let actions = planner.plan(instruction: i, obstacle: .stop, trackingOK: true, report: wall,
+                                   time: 1, isMoving: true)
+        for action in actions {
+            if case .speak(let text, let priority) = action, text.hasPrefix("Stop.") {
+                XCTAssertEqual(priority, .critical)
+            }
+        }
     }
 }

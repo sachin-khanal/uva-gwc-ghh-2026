@@ -84,11 +84,12 @@ public final class RouteFollower {
         // the pin the volunteer dropped. Without an extent (older maps, or an open space) we fall
         // back to a radius that depends on the kind of place.
         let reached: Bool = {
-            if let extent = target.extent {
-                // A small margin so standing in the doorway counts as being in.
-                return extent.contains(position, margin: Self.doorwayMargin)
-            }
-            return distance < ArrivalRadius.meters(for: target.kind)
+            let withinRadius = distance < ArrivalRadius.meters(for: target.kind)
+            guard let extent = target.extent else { return withinRadius }
+            // EITHER inside the room OR near the pin. Extent-only meant that when the scan measured a
+            // room too small - a corner of a big room, say - arrival happened LATER than it used to,
+            // which is the "it makes me walk all the way to where I labelled it" report (2026-10-17).
+            return extent.contains(position, margin: Self.doorwayMargin) || withinRadius
         }()
         if isLast && reached {
             return GuidanceInstruction(

@@ -29,9 +29,14 @@ import Foundation
 import simd
 
 public enum SpeechPriority: Equatable, Sendable {
-    /// Interrupts anything currently being spoken (obstacle, lost position).
+    /// Safety: cuts off whatever is being said, right now. Only an obstacle at STOP range, or losing
+    /// position, earns this - everything else can wait a second.
+    case critical
+    /// Queued behind whatever is being said, and spoken in turn. Turns and arrival live here: while
+    /// walking, several of these can fall due at once, and interrupting each with the next is what
+    /// chopped them into fragments (device report 2026-10-17).
     case high
-    /// Waits its turn / is skipped if the synthesizer is busy.
+    /// Ambient. Skipped entirely if something is already being said; it will come round again.
     case normal
 }
 
@@ -97,6 +102,8 @@ public struct FeedbackPlanner {
     /// swings and the heading cue would announce the SAME turn again with a different angle, so we
     /// stay quiet about that direction until they are going straight again.
     private var turnInProgress: GuidanceInstruction.Kind?
+    /// The "you will need to open it" line has been said for the door we are standing at.
+    private var announcedWayThrough = false
 
     public init() {}
 
@@ -118,6 +125,7 @@ public struct FeedbackPlanner {
         announcedLandmarks = []
         announcedCorners = []
         turnInProgress = nil
+        announcedWayThrough = false
     }
 
     /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
@@ -131,7 +139,8 @@ public struct FeedbackPlanner {
         posture: PostureUpdate? = nil,
         report: ObstacleReport? = nil,
         time: TimeInterval? = nil,
-        context: SceneContext? = nil
+        context: SceneContext? = nil,
+        isMoving: Bool? = nil
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
 
@@ -143,7 +152,7 @@ public struct FeedbackPlanner {
         // 1. Lost tracking: say it once, silence the beacon, issue nothing else.
         guard trackingOK else {
             if lastTrackingOK {
-                actions.append(.speak("Lost my position. Hold still.", priority: .high))
+                actions.append(.speak("Lost my position. Hold still.", priority: .critical))
             }
             lastTrackingOK = false
             actions.append(.beacon(nil))
@@ -182,20 +191,31 @@ public struct FeedbackPlanner {
         let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
         let levelChanged = obstacle != lastObstacle
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
-        let repeatDue = obstacle == .stop && !levelChanged && !kindChanged
+        // Repeating a STOP only helps while the user is still moving toward the thing. Standing in
+        // front of a closed door being told "stop, a door ahead" every three seconds is noise, and it
+        // drowns out the one line that matters - that the door has to be opened (device report
+        // 2026-10-17). `isMoving == false` silences the repeat; nil means "we cannot tell", which
+        // behaves as before.
+        let stillApproaching = (isMoving ?? true)
+        let repeatDue = obstacle == .stop && !levelChanged && !kindChanged && stillApproaching
+            && !wayThrough
             && time != nil && lastObstacleSpeech != nil && (time! - lastObstacleSpeech!) >= Self.stopRepeatSeconds
         if obstacle != .clear, levelChanged || kindChanged || repeatDue {
             if wayThrough {
-                actions.append(.speak(ObstacleSpeech.wayThrough(report, targetLabel: instruction?.targetLabel),
-                                      priority: .high))
-                if levelChanged { actions.append(.haptic(.obstacleCaution)) }
+                // Once per door. It is an instruction ("open it"), not a hazard to keep warning about.
+                if !announcedWayThrough {
+                    announcedWayThrough = true
+                    actions.append(.speak(ObstacleSpeech.wayThrough(report, targetLabel: instruction?.targetLabel),
+                                          priority: .high))
+                    actions.append(.haptic(.obstacleCaution))
+                }
             } else {
                 switch obstacle {
                 case .stop:
-                    actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, context), priority: .high))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, context), priority: .critical))
                     if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
                 case .caution:
-                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, context), priority: .high))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, context), priority: .critical))
                     if levelChanged { actions.append(.haptic(.obstacleCaution)) }
                 case .clear:
                     break
@@ -204,6 +224,7 @@ public struct FeedbackPlanner {
             lastObstacleSpeech = time ?? lastObstacleSpeech
         }
         lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
+        if obstacle == .clear { announcedWayThrough = false } // through it (or it moved): arm for the next one
         lastObstacle = obstacle
         // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
         // the beacon and stops everything else.
