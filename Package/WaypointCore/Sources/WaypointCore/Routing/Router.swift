@@ -6,6 +6,7 @@
 //           Cost of an edge = its `distance`, plus `stairsPenalty` if it is a stairs edge and the
 //           caller did not allow stairs. Stairs are penalised rather than forbidden so a route
 //           still exists when stairs are the only way (the planner will warn about them).
+//           `avoiding` removes edges entirely (live blockages, see RoutePlanner).
 // Heuristic: straight-line distance between nodes. Admissible as long as edge.distance >= the
 //           straight-line distance, which is true for builder-made edges. Hand-written JSON that
 //           violates this can produce a slightly sub-optimal (never invalid) route.
@@ -24,7 +25,8 @@ public enum Router {
         in graph: WaypointGraph,
         from start: UUID,
         to goal: UUID,
-        allowStairs: Bool = false
+        allowStairs: Bool = false,
+        avoiding blocked: Set<EdgeKey> = []
     ) -> [MapNode]? {
         guard let startNode = graph.node(id: start), let goalNode = graph.node(id: goal) else { return nil }
         if start == goal { return [startNode] }
@@ -44,6 +46,8 @@ public enum Router {
 
             for (neighbour, edge) in graph.neighbours(of: current) {
                 if closed.contains(neighbour.id) { continue }
+                // Live-reported blockage (obstacle, closed door...): the edge does not exist for now.
+                if !blocked.isEmpty, blocked.contains(EdgeKey(current, neighbour.id)) { continue }
                 var cost = edge.distance
                 if edge.hazard == .stairs && !allowStairs { cost += stairsPenalty }
                 let tentative = (gScore[current] ?? .infinity) + cost

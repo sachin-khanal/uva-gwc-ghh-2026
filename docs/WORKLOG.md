@@ -1,5 +1,15 @@
 # Work log
 
+## 2026-10-17 17:10 — Claude (agent, for Sachin) — Route memory + live-adaptive RoutePlanner (branch feature/route-memory)   [tags: ROUTING]
+Area: B (Routing). Requested by Sachin: remember shortest paths between any two points, but never defer to memory; stay adaptable (blockages, signs).
+Files created: `Package/WaypointCore/Sources/WaypointCore/Routing/RoutePlanner.swift` (EdgeKey, RouteMemory, RoutePlanner, SignVerdict), `Package/WaypointCore/Tests/WaypointCoreTests/RoutePlannerTests.swift` (10 tests).
+Files edited: `Routing/Router.swift` (new optional `avoiding:` edge set, default empty so existing callers are unchanged), `docs/MODULES.md` (new row).
+Behavior: memory is a Codable cache keyed (from, to, allowStairs), re-validated on EVERY lookup (nodes/edges exist, no stairs if disallowed, no live blockage, map fingerprint unchanged) or it is recomputed with A*. Blockages are temporary (TTL, default 10 min); detours are not stored so memory keeps the undisturbed shortest path. `warm()` precomputes all labelled-place pairs. `interpretSign` compares a read sign to the believed position: consistent / relocate (re-plan from the sign's node) / ambiguous / unknown.
+Commands run: `make test` -> 95 tests, 0 failures (85 old + 10 new); `make typecheck` -> OK; `make test-hooks` -> 15 passed; `python3 tools/validate_map.py Samples/rice-hall-sample.json` PASS; tools unit tests 9 OK; on Sachin's iPhone 16 Pro Max: `DEVICE=... make selftest-sim` -> SELFTEST PASS (simulated walk, arrived at Room 204); `make selftest-e2e` -> 20 passed, 0 failed, 1 skipped (cloud: Supabase not configured).
+Verified: all of the above.
+NOT verified: RoutePlanner is NOT wired into NavigationController/SignReader/ObstacleDetector yet, so the app does not use it; no real blockage/sign detection on a device (UNVERIFIED ON DEVICE); `make uitest`, `make selftest-scan`, `make check`, SQL/Supabase tests and live cloud were not run; real LiDAR scanning and relocalization (Gate G2) still need a human walk.
+Open problems / handoff: TODO(B) wire planner into NavigationController (replace direct `Router.route`, call `detour` when ObstacleClassifier reports a persistent block, call `interpretSign` on SignReader confirmations); persist `RouteMemory` next to the map in MapStore; decide TTL and `signAgreementRadius` (5 m) from field data.
+
 ## 2026-10-17 16:20 — Claude (agent, for Sachin) — Docs-on-every-commit hook for agents and humans (AGENTS.md rule 12)   [tags: BUILD, DOCS]
 Area: D (build system/docs), shared; also touches `.github/` (U3's lane per ROADMAP, did not exist yet) at U1's request that every dev follows this.
 Files created: `scripts/docs-sync.sh` (check | stub | install | status | session), `scripts/githooks/pre-commit`, `scripts/test-docs-sync.sh`, `.claude/settings.json` (SessionStart auto-installs the hook for Claude Code users), `.gitattributes` (LF for scripts so Git Bash on Windows works), `.github/workflows/docs-check.yml` (PR + push-to-main backstop).
