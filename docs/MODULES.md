@@ -6,7 +6,8 @@ sketched; needs real work/device testing) · **TODO** (not started).
 been run on a device yet: **all device-facing code is UNVERIFIED ON DEVICE** as of the first scaffold.
 **Update 2026-10-17 (build block 1):** still true — the live scan view, simulate mode, cloud UI and everything else under `Waypoint/` have only been type-checked. The new pure-logic parts (box math, simulator, Supabase client against a mock) are covered by 45 tests.
 
-Team (fill in real names): **A** = ______ · **B** = ______ · **C** = ______ · **D** = ______
+~~Team (fill in real names): **A** = ______ · **B** = ______ · **C** = ______ · **D** = ______~~
+**Update 2026-10-17:** **U1** = Mac Pro + iPhone 16 Pro Max · **U2** = Mac Air + iPhone Pro · **U3** = Windows + iPhone Pro · **U4** = Windows + regular iPhone (no LiDAR). Letters map to people: **A = U1** · **B = U2** · **C = U2 + U3** · **D = U2 + U3 + U4** (details in docs/ROADMAP.md, Revision 3). The "Owner" column below still uses the letters.
 
 ## Layout
 

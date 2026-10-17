@@ -19,6 +19,19 @@ Open problems / handoff: <what the next person must know>
 
 ---
 
+## 2026-10-17 15:10 — Claude (agent, for Sachin) — Detailed per-person roadmap (Revision 3)   [tags: DOCS]
+Area: shared (docs only, no code, tests not re-run)
+Request: "make a roadmap with explicit granular details from start to finish, what we have so far, and what is attributed to each user" with the real team: U1 Mac Pro + iPhone 16 Pro Max, U2 Mac Air + iPhone Pro, U3 Windows + iPhone Pro, U4 Windows + regular iPhone.
+Files edited (strike-through + Update rule respected, nothing deleted):
+- `docs/ROADMAP.md` — old per-letter "Recommended assignment" struck through with a pointer; appended **Revision 3**: device capability matrix, state-of-the-project table, phases P0-P6 with gates G1-G5 and the critical path,
+  full task tables for U1-U4 (ID, estimate, blocked-by, done-when), dependency sketch, branch/merge rules, check-in rhythm, cut order with owners, open questions.
+- `AGENTS.md` (Human team) and `docs/MODULES.md` (team line): struck the "fill in names" placeholders, added the U1-U4 mapping (A=U1, B=U2, C=U2+U3, D=U2+U3+U4).
+Assumptions to confirm: about 24 h remain; U3/U4 cannot build iOS so they get backend/web/tooling and field/QA/demo lanes (Swift changes via Live Share on a Mac host); the regular iPhone has no LiDAR, so no scanning or obstacle detection there.
+New task IDs introduced: INF-1 (`make ipa` + sideload path), INF-2 (CI workflow); both unbuilt.
+Verified: nothing to run (docs). Open: see "Open questions" at the end of Revision 3.
+
+---
+
 ## 2026-10-17 14:40 — Claude (agent, for Sachin) — Security fixes: unsafe segment ids (path traversal) + Keychain session   [tags: BUG, CONTRACT CHANGE]
 Area: D (cloud/sync) + shared Model
 Trigger: automated commit-time security review, 2 findings (both MEDIUM, both judged valid):

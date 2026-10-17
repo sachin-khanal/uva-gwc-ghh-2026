@@ -96,4 +96,5 @@ someone else may have changed it a minute ago.
 ## 7. Human team
 
 Roles (A AR/Maps, B Navigation/Feedback, C Vision, D App/Sync/Integration) are defined in
-`docs/MODULES.md`. Fill in the real names there.
+`docs/MODULES.md`. ~~Fill in the real names there.~~
+**Update 2026-10-17:** the team is U1 (MacBook Pro + iPhone 16 Pro Max), U2 (MacBook Air + iPhone Pro), U3 (Windows + iPhone Pro), U4 (Windows + regular iPhone). Letter roles map to people as: A = U1; B = U2; C = U2 (calibration, OCR wiring) + U3 (mesh export, paired); D = U2 (app UI, Multipeer) + U3 (backend, web, cloud) + U4 (field, demo, QA). Per-task assignments: `docs/ROADMAP.md`, Revision 3.
