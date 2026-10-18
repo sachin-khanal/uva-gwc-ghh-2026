@@ -108,6 +108,8 @@ public struct FeedbackPlanner {
     private var turnInProgress: GuidanceInstruction.Kind?
     /// The "you will need to open it" line has been said for the door we are standing at.
     private var announcedWayThrough = false
+    /// The way round the current obstacle has been suggested. Re-armed when the way is clear.
+    private var announcedAvoidance = false
 
     public init() {}
 
@@ -126,6 +128,7 @@ public struct FeedbackPlanner {
         announcedCorners = []
         turnInProgress = nil
         announcedWayThrough = false
+        announcedAvoidance = false
     }
 
     public mutating func plan(
@@ -135,7 +138,8 @@ public struct FeedbackPlanner {
         posture: PostureUpdate? = nil,
         report: ObstacleReport? = nil,
         time: TimeInterval? = nil,
-        isMoving: Bool? = nil
+        isMoving: Bool? = nil,
+        avoidTowards: Side? = nil
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
 
@@ -199,6 +203,15 @@ public struct FeedbackPlanner {
                     actions.append(.haptic(.obstacleCaution))
                 }
             } else {
+                // A way round, with the reason - "Slightly left, there is a wall ahead." Said once per
+                // obstacle, right after the warning, and only when the sides were actually measured.
+                // It SUGGESTS: the depth sensor cannot promise the floor that way is safe, so the
+                // stop warning below is never replaced by it (see AvoidanceAdvisor).
+                if let avoidTowards, !announcedAvoidance,
+                   let text = TurnSpeech.avoidance(side: avoidTowards, obstacle: report?.kind) {
+                    announcedAvoidance = true
+                    actions.append(.speak(text, priority: .high))
+                }
                 switch obstacle {
                 case .stop:
                     actions.append(.speak(ObstacleSpeech.stop(report), priority: .critical))
@@ -213,7 +226,10 @@ public struct FeedbackPlanner {
             lastObstacleSpeech = time ?? lastObstacleSpeech
         }
         lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
-        if obstacle == .clear { announcedWayThrough = false } // through it (or it moved): arm for the next one
+        if obstacle == .clear {
+            announcedWayThrough = false // through it (or it moved): arm for the next one
+            announcedAvoidance = false
+        }
         lastObstacle = obstacle
         // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
         // the beacon and stops everything else.

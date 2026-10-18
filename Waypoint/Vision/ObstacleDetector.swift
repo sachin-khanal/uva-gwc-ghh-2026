@@ -24,6 +24,10 @@ struct DepthHit {
     var depth: Float            // meters along the camera's viewing axis
     var worldPoint: SIMD3<Float>
     var side: Side              // v1: always `.ahead` (only the straight-ahead corridor is scanned)
+    /// Nearest thing to each side as well, so guidance can suggest a way round and say why
+    /// ("Slightly left, there is a wall ahead"). nil to a side means nothing was seen there, which
+    /// for depth means open space. See `AvoidanceAdvisor` for how it is used, and its safety note.
+    var clearance: AvoidanceAdvisor.Clearance = .init()
 }
 
 enum ObstacleDetector {
@@ -33,6 +37,9 @@ enum ObstacleDetector {
     static let corridorRowFractions: ClosedRange<Float> = 0.36...0.64
     /// Look at every n-th pixel: 256x192 -> a few thousand samples is plenty and keeps this cheap at 10 Hz.
     static let sampleStride = 2
+    /// A sample further than this from the centre line counts as "to the side" rather than ahead.
+    /// Roughly half a body width, so the ahead corridor stays the thing you would walk into.
+    static let sideOffsetMetres: Float = 0.35
 
     static func centerHit(in frame: ARFrame) -> DepthHit? {
         guard let depthData = frame.sceneDepth else { return nil }
@@ -68,6 +75,8 @@ enum ObstacleDetector {
         let row0 = Int(Float(height) * corridorRowFractions.lowerBound), row1 = Int(Float(height) * corridorRowFractions.upperBound)
 
         var best: DepthHit?
+        var nearestLeft: Float?
+        var nearestRight: Float?
         var row = row0
         while row < row1 {
             let depthRow = depthBase.advanced(by: row * depthStride).assumingMemoryBound(to: Float32.self)
@@ -78,17 +87,34 @@ enum ObstacleDetector {
                 if let confRow, confRow[col] < confidenceFloor { continue }
                 let d = depthRow[col]
                 guard d.isFinite, d > 0.1 else { continue }
-                if let b = best, d >= b.depth { continue } // only the nearest matters; skip the unprojection for farther pixels
-
                 // Unproject to camera space (x right in the image, y UP in the image, camera looks along -z) and then to world space.
                 let u = Float(col) + 0.5, v = Float(row) + 0.5
-                let local = SIMD4<Float>((u - cx) * d / fx, -(v - cy) * d / fy, -d, 1)
-                let world = transform * local
+                let cameraLocal = SIMD3<Float>((u - cx) * d / fx, -(v - cy) * d / fy, -d)
+                let world = transform * SIMD4<Float>(cameraLocal, 1)
                 guard ObstacleBand.contains(pointY: world.y, cameraY: cameraY) else { continue }
+
+                // Which side is this, from the USER's point of view? In portrait the camera's own x
+                // axis points toward the bottom of the phone, so image-x is NOT the user's right;
+                // `cameraLocalToUser` is the same conversion the audio beacon uses.
+                let lateral = Geometry.cameraLocalToUser(cameraLocal).x
+                if lateral < -Self.sideOffsetMetres {
+                    if d < (nearestLeft ?? .greatestFiniteMagnitude) { nearestLeft = d }
+                    continue
+                }
+                if lateral > Self.sideOffsetMetres {
+                    if d < (nearestRight ?? .greatestFiniteMagnitude) { nearestRight = d }
+                    continue
+                }
+                if let b = best, d >= b.depth { continue } // only the nearest straight-ahead one matters
                 best = DepthHit(depth: d, worldPoint: SIMD3<Float>(world.x, world.y, world.z), side: .ahead)
             }
             row += sampleStride
         }
-        return best
+        guard var hit = best else {
+            // Nothing ahead, but the sides may still be worth reporting to anything that asks.
+            return nil
+        }
+        hit.clearance = AvoidanceAdvisor.Clearance(ahead: hit.depth, left: nearestLeft, right: nearestRight)
+        return hit
     }
 }

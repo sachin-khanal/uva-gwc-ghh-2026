@@ -304,3 +304,141 @@ final class SpeechPacingTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Suggesting a way round, with the reason (team request, 2026-10-17)
+
+final class AvoidanceAdvisorTests: XCTestCase {
+
+    private typealias Clearance = AvoidanceAdvisor.Clearance
+
+    func testSaysNothingWhileTheWayAheadIsOpen() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertNil(advisor.advise(Clearance(ahead: 5, left: 0.3, right: 4)),
+                     "a wall beside you is not a reason to turn")
+        XCTAssertNil(advisor.advise(Clearance(ahead: nil, left: 0.3, right: 4)))
+    }
+
+    func testSuggestsTheClearlyBetterSideWhenBlocked() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.8, left: 3, right: 0.9)), .left)
+    }
+
+    /// A coin flip between two bad options helps nobody.
+    func testSaysNothingWhenNeitherSideIsClearlyBetter() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertNil(advisor.advise(Clearance(ahead: 0.8, left: 2.0, right: 1.9)))
+    }
+
+    /// Never send someone toward a second wall.
+    func testSaysNothingWhenTheBetterSideIsStillTooTight() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertNil(advisor.advise(Clearance(ahead: 0.8, left: 1.0, right: 0.2)),
+                     "1 m of room is not a way through")
+    }
+
+    /// Nothing detected to one side means open space, not an error.
+    func testNothingDetectedToOneSideCountsAsOpen() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.8, left: nil, right: 0.5)), .left)
+    }
+
+    /// The cue must not flutter left/right while the user is walking toward the obstacle.
+    func testTheSuggestionIsHeldWhileStillBlocked() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.9, left: 3, right: 0.8)), .left)
+        // Readings wobble and now favour the right; the advice must not swap under the user.
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.9, left: 0.8, right: 3)), .left)
+    }
+
+    func testClearingTheWayForgetsTheSuggestion() {
+        var advisor = AvoidanceAdvisor()
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.9, left: 3, right: 0.8)), .left)
+        XCTAssertNil(advisor.advise(Clearance(ahead: 6, left: 3, right: 0.8)), "way is open")
+        XCTAssertEqual(advisor.advise(Clearance(ahead: 0.9, left: 0.8, right: 3)), .right,
+                       "a fresh obstacle gets a fresh answer")
+    }
+
+    // MARK: Wording
+
+    func testTheCueSaysWhichWayAndWhy() {
+        XCTAssertEqual(TurnSpeech.avoidance(side: .left, obstacle: .wall),
+                       "Slightly left, there is a wall ahead.")
+        XCTAssertEqual(TurnSpeech.avoidance(side: .right, obstacle: .chair),
+                       "Slightly right, there is a chair ahead.")
+        XCTAssertEqual(TurnSpeech.avoidance(side: .left, obstacle: nil), "Slightly left.")
+        XCTAssertNil(TurnSpeech.avoidance(side: .ahead, obstacle: .wall), "ahead is not a side")
+    }
+}
+
+// MARK: - The planner speaks the way round (2026-10-17)
+
+final class AvoidanceCueTests: XCTestCase {
+
+    private func spoken(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    private func walking(targetKind: NodeKind = .corridor, label: String? = nil) -> GuidanceInstruction {
+        GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 6,
+                            targetNodeId: UUID(), targetLabel: label, targetPosition: SIMD3(0, 0, -6),
+                            hazard: nil, targetKind: targetKind, destinationLabel: label)
+    }
+
+    private let wall = ObstacleReport(kind: .wall, side: .ahead, distanceMeters: 0.8, confidence: 0.9)
+
+    func testItSaysWhichWayAndWhy() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
+                                       report: wall, time: 1, isMoving: true, avoidTowards: .left))
+        XCTAssertTrue(said.contains("Slightly left, there is a wall ahead."), "\(said)")
+    }
+
+    /// The suggestion never replaces the warning: a blocked path is still a stop.
+    func testTheStopWarningIsStillGiven() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                       report: wall, time: 1, isMoving: true, avoidTowards: .right))
+        XCTAssertTrue(said.contains { $0.hasPrefix("Stop.") }, "\(said)")
+        XCTAssertTrue(said.contains { $0.hasPrefix("Slightly right") }, "\(said)")
+    }
+
+    func testTheWayRoundIsSaidOncePerObstacle() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true, report: wall,
+                         time: 1, isMoving: true, avoidTowards: .left)
+        let again = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                        report: wall, time: 4, isMoving: true, avoidTowards: .left))
+        XCTAssertFalse(again.contains { $0.hasPrefix("Slightly left") }, "said once, not nagged: \(again)")
+    }
+
+    /// Past it and on to the next thing: the suggestion is armed again.
+    func testTheNextObstacleIsExplainedAgain() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true, report: wall,
+                         time: 1, isMoving: true, avoidTowards: .left)
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true, time: 5, isMoving: true)
+        let next = spoken(planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
+                                       report: wall, time: 9, isMoving: true, avoidTowards: .right))
+        XCTAssertTrue(next.contains { $0.hasPrefix("Slightly right") }, "\(next)")
+    }
+
+    /// A door we were routed through is the way IN, not something to sidestep.
+    func testNoWayRoundIsOfferedForADoorOnTheRoute() {
+        var planner = FeedbackPlanner()
+        let door = ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+        let said = spoken(planner.plan(instruction: walking(targetKind: .room, label: "Room 402"),
+                                       obstacle: .stop, trackingOK: true, report: door,
+                                       time: 1, isMoving: true, avoidTowards: .left))
+        XCTAssertFalse(said.contains { $0.hasPrefix("Slightly") }, "open the door, do not walk round it: \(said)")
+        XCTAssertTrue(said.contains { $0.contains("open it") }, "\(said)")
+    }
+
+    /// With no side measured, behaviour is exactly as before.
+    func testNoSuggestionWhenNoSideWasMeasured() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
+                                       report: wall, time: 1, isMoving: true))
+        XCTAssertFalse(said.contains { $0.hasPrefix("Slightly") })
+        XCTAssertTrue(said.contains { $0.hasPrefix("Careful.") }, "\(said)")
+    }
+}

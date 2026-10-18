@@ -80,6 +80,8 @@ final class NavigationController: ObservableObject {
     private var planner = FeedbackPlanner()
     private var obstacles = ObstacleClassifier()
     private var postureMonitor = PostureMonitor()
+    /// Suggests a way round a blocked path, so a cue can say why it is asking for a turn.
+    private var avoidance = AvoidanceAdvisor()
     private let identifier = ObstacleIdentifier()
     private var simulatedTime: TimeInterval = 0
     private var postureLogCounter = 0
@@ -214,6 +216,7 @@ final class NavigationController: ObservableObject {
         planner.reset()
         obstacles.reset()
         postureMonitor.reset()
+        avoidance.reset()
         identifier.reset()
         simulatedTime = 0
         lastSpoken = ""
@@ -249,8 +252,10 @@ final class NavigationController: ObservableObject {
                 report = ObstacleReport(kind: known.report.kind, side: hit.side, distanceMeters: hit.depth, confidence: known.report.confidence)
             }
         }
+        // Is there a clearly better way round? Suggestion only - see AvoidanceAdvisor's safety note.
+        let avoidTowards = avoidance.advise(hit?.clearance ?? .init())
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
-             nearestDepth: hit?.depth, report: report, time: frame.timestamp)
+             nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards)
     }
 
     /// Simulated driver: one timer tick.
@@ -279,7 +284,7 @@ final class NavigationController: ObservableObject {
     // MARK: The shared loop
 
     private func tick(camera: simd_float4x4, mapToWorld: simd_float4x4, trackingOK: Bool, nearestDepth: Float?,
-                      report: ObstacleReport?, time: TimeInterval) {
+                      report: ObstacleReport?, time: TimeInterval, avoidTowards: Side? = nil) {
         let level = obstacles.update(nearest: nearestDepth)
         if level != obstacleLevel { obstacleLevel = level }
 
@@ -369,7 +374,8 @@ final class NavigationController: ObservableObject {
         }
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
-                                   posture: posture, report: report, time: time, isMoving: isMoving)
+                                   posture: posture, report: report, time: time, isMoving: isMoving,
+                                   avoidTowards: avoidTowards)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 

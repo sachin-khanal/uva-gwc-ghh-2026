@@ -1,5 +1,30 @@
 # Work log
 
+## 2026-10-17 — Claude (agent, for Anmol) — Suggest a way round a blockage, with the reason   [tags: BUILD]
+Area: C (Vision) + B (Guidance). Branch `avoidance-reasoning` off `navigation-overhaul`. See D-045.
+
+Request: "there should also be reasonings like 'Turn slightly left, there is a wall ahead'". `TurnReason` existed and
+was tested but had no caller, because nothing produced an avoidance turn in the first place.
+Files created (WaypointCore): `Vision/AvoidanceAdvisor.swift` - ahead/left/right clearances in, a suggested side out;
+conservative by design (see D-045), sticky while blocked so the cue cannot flutter.
+Files edited (WaypointCore): `Guidance/SpokenPhrases.swift` (+`TurnSpeech.avoidance(side:obstacle:)`),
+`Guidance/FeedbackPlanner.swift` (+`avoidTowards:`; says the way round once per obstacle, re-armed when clear; never
+for a door we were routed through).
+Files edited (app): `Waypoint/Vision/ObstacleDetector.swift` (`DepthHit.clearance` - nearest thing per side, split by
+`Geometry.cameraLocalToUser` so the axis is the USER's left/right, not the image's),
+`Waypoint/Navigation/NavigationController.swift` (holds the advisor, feeds it the clearance, passes the suggestion).
+Tests added: `AvoidanceAdvisorTests` (8) - silent while the way is open, picks the clearly better side, silent when
+neither is clearly better or the better one is still too tight, nothing-detected counts as open, the suggestion is
+held while blocked and forgotten when clear, and the wording. `AvoidanceCueTests` (6) - the cue is spoken, the STOP
+warning is still given alongside it, said once per obstacle, re-armed for the next, NOT offered for a door on the
+route, and absent entirely when no side was measured.
+Verified: `make test` -> **253 tests, 0 failures** (was 247); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** No schema change; recordings unaffected. Thresholds (blocked under 1.5 m,
+decisive margin 0.6 m, usable 1.2 m, 0.35 m ahead/side split) are guesses.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Resume cue was silently dropped; turns name their destination   [tags: BUILD, BUG]
 Area: B (Guidance). Branch `turn-context-and-resume` off `navigation-overhaul`. See D-044.
 

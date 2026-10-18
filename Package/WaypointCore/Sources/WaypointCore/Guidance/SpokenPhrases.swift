@@ -157,6 +157,19 @@ public enum TurnSpeech {
         }
     }
 
+    /// A suggestion to step aside, with the reason: "Slightly left, there is a wall ahead."
+    /// A suggestion, never a command - see the safety note on `AvoidanceAdvisor`.
+    public static func avoidance(side: Side, obstacle: ObstacleKind?) -> String? {
+        let direction: String
+        switch side {
+        case .left: direction = "left"
+        case .right: direction = "right"
+        case .ahead: return nil
+        }
+        guard let obstacle else { return "Slightly \(direction)." }
+        return "Slightly \(direction), there is \(ObstacleSpeech.noun(obstacle)) ahead."
+    }
+
     /// A real turn, named for what it is FOR: "Right, toward Room 402."
     ///
     /// Only genuine turns get the destination. A small correction ("Slightly right 20 degrees") is

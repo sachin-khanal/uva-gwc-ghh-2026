@@ -571,3 +571,19 @@ destination every few seconds would bury the cues that matter. "Continue straigh
 The one-move-at-a-time rule from D-037 is intact - these are still single instructions, just ones that say what they
 are for.
 **Status:** accepted; 239 tests pass. UNVERIFIED ON DEVICE.
+
+## D-045 — Suggest a way round a blockage, and say why (2026-10-17)
+Team request: cues like "Turn slightly left, there is a wall ahead" - the reasoning case from the original turn spec,
+which `TurnReason` was built for but which had no caller because nothing GENERATED an avoidance turn.
+`ObstacleDetector` already unprojected every depth sample; it now also records the nearest thing to each SIDE, using
+`Geometry.cameraLocalToUser` (the same conversion the audio beacon uses, because in portrait the camera's own x axis
+points at the bottom of the phone, not the user's right). `AvoidanceAdvisor` (WaypointCore, pure, tested) turns
+ahead/left/right clearances into a suggestion, and `FeedbackPlanner` speaks it once per obstacle.
+**It suggests; it never commands.** A clearer depth reading is not a promise that the floor is safe - descending
+stairs, a drop-off and a down ramp all read as "far away". So the advisor is deliberately conservative: it speaks only
+when the way ahead is actually blocked; the chosen side must be clearly better than the other (0.6 m), not marginally;
+it must itself have real room (1.2 m), so nobody is sent toward a second wall; and once chosen it is held until the
+way clears, so the cue cannot flutter side to side while the user walks. The STOP warning is never replaced by it.
+A door we were routed through is excluded - that is the way IN and the "you will need to open it" line still wins.
+**Status:** accepted; 253 tests pass. UNVERIFIED ON DEVICE. The three thresholds and the 0.35 m ahead/side split are
+guesses that want a real corridor.
