@@ -1,5 +1,42 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — ARKit first, and the two extension paths stop racing each other   [tags: BUG]
+Area: A (capture). Branch `stairs-multifloor`. Closes the risk flagged when manual alignment first landed.
+
+THE HAZARD: both ways of locating yourself in a saved map were live at the same time. The world map stayed
+loaded while the volunteer confirmed places by hand, so ARKit could relocalize A MOMENT LATER - at which point
+the camera transform silently moves into the saved map's frame while `worldToMap` still describes the
+provisional one, and every node recorded after that lands somewhere else in the building. A jump BETWEEN the two
+taps is usually caught by the length check; a jump AFTER the second tap was undetectable.
+
+Fixed, and the ordering is now explicit:
+* ARKit stays the DEFAULT and the preferred answer. It is strictly better when it lands: exact pose rather than
+  a two-point estimate, session frame == map frame so nothing is converted, the new area keeps a usable scan
+  file, and the 3D model export works. The manual path gives up the last two.
+* Confirming the FIRST place commits to aligning by hand, and now calls `stopRelocalizing()`: the saved world
+  map is removed from the running configuration and the session re-run with NO options. No `.resetTracking` -
+  that would throw away the very frame the first confirmed place was measured in.
+* `beginExtension` refuses while a hand alignment is half-finished. Once the world map is dropped, a `.mapped`
+  status describes the NEW session, not the saved area, so attaching on it would use an identity transform
+  against map-frame nodes - the same frame mistake in a different place.
+* "Start over" RESTORES the world map (kept in `droppedWorldMap`) and re-runs with `.resetTracking`, so ARKit
+  gets its chance again. Without this, one tap would have silently disabled the better path for the rest of the
+  session.
+* The on-screen hint now says to give ARKit a few seconds first, because finding the area itself is more
+  accurate.
+
+Verified: `make test` -> **402 tests, 0 failures**. `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone has been unavailable for five fixes now.
+Specifically unverified: whether re-running the configuration mid-session disturbs tracking at all (it should
+not; no `.resetTracking`), and whether dropping `initialWorldMap` really does stop ARKit relocalizing rather
+than merely stopping it starting.
+Open: `restartPlaceConfirmation` holds the decoded `ARWorldMap` for the rest of the session so it can be put
+back. That is tens of megabytes kept alive; acceptable, but it is the reason to prefer leaving the extension
+screen over tapping Start over repeatedly.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Three faults from the first real Rice Hall walk, all from ONE frame mistake   [tags: BUG, DEVICE]
 Area: A (capture/maps) + B (guidance). Branch `stairs-multifloor`. First time any of this ran in the demo
 building. Anmol reported: (1) an extension does not appear in the 3D viewer, (2) pathfinding is shifted off the

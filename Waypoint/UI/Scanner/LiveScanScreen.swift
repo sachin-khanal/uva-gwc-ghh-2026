@@ -170,7 +170,7 @@ struct LiveScanScreen: View {
             if !s.placesToStandAt.isEmpty, !s.canRecord {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text(s.confirmedPlaceCount == 0
-                         ? "Standing somewhere you already labelled? Tap it and skip the search."
+                         ? "Give it a few seconds first - finding the area itself is more accurate. Not working? Stand at a labelled place and tap it."
                          : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
                         .font(.subheadline.weight(.medium))
                         .accessibilityIdentifier("scan.extension.manualHint")

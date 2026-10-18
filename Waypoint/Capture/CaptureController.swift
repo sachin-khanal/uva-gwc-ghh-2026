@@ -101,6 +101,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var alignedByHand = false
     /// Id of the place already confirmed, so the screen can tick it and refuse a second tap on it.
     @Published private(set) var confirmedPlaceId: UUID?
+    /// The configuration the session is running, kept so it can be re-run without the saved world map
+    /// once the volunteer commits to aligning by hand (see `confirmPlace`).
+    private var activeConfig: ARWorldTrackingConfiguration?
+    /// The world map taken out of the configuration by `stopRelocalizing`, so starting over restores it.
+    private var droppedWorldMap: ARWorldMap?
     /// A save is in flight. Published and readable so `LiveScanService` can tell "still working" from
     /// "stalled" instead of failing the save on a fixed timer.
     @Published private(set) var isSaving = false
@@ -227,6 +232,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         confirmedPlaceCount = 0
         confirmedPlaceId = nil
         alignedByHand = false
+        droppedWorldMap = nil
+        activeConfig = nil
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
         nodeCount = map?.nodes.count ?? 0
@@ -256,6 +263,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         config.planeDetection = []
         config.environmentTexturing = .none // saves memory/power; we never render reflections
+        activeConfig = config
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
         Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
@@ -414,6 +422,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             confirmedPlaces = [(map: node.position, world: world)]
             confirmedPlaceCount = 1
             confirmedPlaceId = node.id
+            stopRelocalizing()
             extensionStatus = "Got it. Now walk to another labelled place at least \(Int(ManualAlignment.minSeparationMeters)) meters away and confirm that one."
             Log.capture.info("alignment: first place \(node.label ?? "-")")
             return
@@ -442,6 +451,25 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
     }
 
+    /// Give up on ARKit recognising the space, because the volunteer has started locating themselves by
+    /// hand instead. The saved world map is dropped from the running configuration.
+    ///
+    /// This is not tidying up - it removes a real hazard. Both paths were live at once: having confirmed
+    /// a place by hand, ARKit could still relocalize A MOMENT LATER, at which point the camera transform
+    /// silently moves into the saved map's frame while `worldToMap` still describes the provisional one,
+    /// and every node recorded after that lands somewhere else in the building. A jump BETWEEN the two
+    /// taps is usually caught by the length check; a jump AFTER the second tap was undetectable.
+    ///
+    /// Re-run with NO options: `.resetTracking` would throw away the frame the first confirmed place was
+    /// measured in, which is the one thing that must survive.
+    private func stopRelocalizing() {
+        guard let config = activeConfig, let saved = config.initialWorldMap else { return }
+        droppedWorldMap = saved // so "Start over" can put ARKit back in play
+        config.initialWorldMap = nil
+        session.run(config)
+        Log.capture.info("aligning by hand: dropped the saved world map so ARKit cannot move the frame")
+    }
+
     /// Forget the places confirmed so far. There must always be a way out of a refused alignment: with
     /// only two labelled places in the map, a volunteer who has used both and been refused would
     /// otherwise be stuck with no tap that does anything (device report 2026-10-18).
@@ -449,12 +477,27 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         confirmedPlaces = []
         confirmedPlaceCount = 0
         confirmedPlaceId = nil
+        // Put the saved world map back: starting over means ARKit gets its chance again, and its answer
+        // is the better one whenever it arrives (exact pose, and the new area keeps a usable scan file).
+        if let saved = droppedWorldMap, let config = activeConfig {
+            config.initialWorldMap = saved
+            droppedWorldMap = nil
+            session.run(config, options: [.resetTracking, .removeExistingAnchors])
+            Log.capture.info("start over: saved world map restored, ARKit may relocalize again")
+        }
         extensionStatus = "Starting over. Stand at a labelled place and tap it."
     }
 
     /// Volunteer confirms they are in the mapped corridor after ARKit has relocalized.
     /// Starting a new segment never changes the world origin or any existing node.
     func beginExtension() {
+        // Once a place has been confirmed by hand, the saved world map has been dropped, so a `.mapped`
+        // status describes the NEW session - not the saved area. Attaching on it would use an identity
+        // transform against map-frame nodes, which is the frame mistake all over again.
+        guard !(confirmedPlaceCount > 0 && !alignedByHand) else {
+            extensionStatus = "Finish locating yourself: confirm a second labelled place, or tap Start over."
+            return
+        }
         guard isExtension, !extensionAttached, isRunning, !isSaving,
               let frame = session.currentFrame, case .normal = frame.camera.trackingState,
               // A hand alignment IS the fix, so ARKit's own opinion of the saved map is irrelevant;
