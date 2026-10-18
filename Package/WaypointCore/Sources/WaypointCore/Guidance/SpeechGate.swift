@@ -34,8 +34,12 @@ public struct SpeechGate {
     /// Identical text inside this window is dropped.
     public var repeatWindow: TimeInterval
 
-    private var lastText: String?
-    private var lastTime: TimeInterval = -.greatestFiniteMagnitude
+    /// When each recent line was last spoken. A SINGLE `lastText` only caught duplicates that were
+    /// immediately consecutive: any other line in between reset it, so "In 3 meters, turn right" could
+    /// be said, interrupted by an obstacle warning, and said again moments later - which is exactly
+    /// what the Rice Hall transcript shows at 1:11 (2026-10-18). Pruned to `repeatWindow`, so it stays
+    /// small however long the walk.
+    private var spokenAt: [String: TimeInterval] = [:]
 
     public init(repeatWindow: TimeInterval = 3) {
         self.repeatWindow = repeatWindow
@@ -44,33 +48,37 @@ public struct SpeechGate {
     /// - Parameters:
     ///   - isSpeaking: is the speaker mid-utterance right now?
     ///   - now: monotonic seconds; the caller supplies it so tests are deterministic.
+    /// - Parameter speakingPriority: the priority of the line currently being spoken, if any. Lets a
+    ///   safety cue avoid cutting off ANOTHER safety cue (see `.critical` below).
     public mutating func decide(text: String, priority: SpeechPriority,
-                                isSpeaking: Bool, now: TimeInterval) -> Decision {
+                                isSpeaking: Bool, now: TimeInterval,
+                                speakingPriority: SpeechPriority? = nil) -> Decision {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .drop }
-        if text == lastText, now - lastTime < repeatWindow { return .drop }
+        spokenAt = spokenAt.filter { now - $0.value < repeatWindow }
+        if let last = spokenAt[text], now - last < repeatWindow { return .drop }
 
         switch priority {
         case .critical:
-            lastText = text
-            lastTime = now
-            return isSpeaking ? .interrupt : .speak
+            spokenAt[text] = now
+            guard isSpeaking else { return .speak }
+            // Safety interrupts GUIDANCE, never another safety line. Two warnings about the same
+            // hazard arriving a moment apart used to cut each other off, so the user heard "Stop.
+            // Stop. Stop. Stop." and only the last one ever reached the part that says what the
+            // hazard is (device report 2026-10-18). A half-spoken warning helps nobody; the one in
+            // progress finishes and this one follows.
+            return speakingPriority == .critical ? .enqueue : .interrupt
         case .high:
             // Queue rather than interrupt: a walking user generates several of these in a row and
             // cutting each off with the next produced half sentences.
-            lastText = text
-            lastTime = now
+            spokenAt[text] = now
             return isSpeaking ? .enqueue : .speak
         case .normal:
             if isSpeaking { return .drop }
-            lastText = text
-            lastTime = now
+            spokenAt[text] = now
             return .speak
         }
     }
 
     /// Forget what was last said (new navigation, or the user stopped guidance).
-    public mutating func reset() {
-        lastText = nil
-        lastTime = -.greatestFiniteMagnitude
-    }
+    public mutating func reset() { spokenAt.removeAll() }
 }

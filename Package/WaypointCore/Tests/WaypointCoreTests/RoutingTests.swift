@@ -771,4 +771,139 @@ final class LoopRoutingTests: XCTestCase {
         let map = BuildingMap(name: "straight", nodes: nodes, edges: edges)
         XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
     }
+
+    // MARK: Staircases must survive simplification (2026-10-18, Rice Hall rear stairs)
+
+    /// A switchback staircase rises while returning to almost the same x,z. Both simplifier passes
+    /// measure horizontally, so the whole flight used to collapse into one segment and the route jumped
+    /// from the bottom step to the top in a straight line - "straight up" through the floor.
+    func testASwitchbackStaircaseKeepsItsShape() {
+        var nodes: [MapNode] = [MapNode(kind: .corridor, position: [0, 0, 0])]
+        // Up the first flight: +y, small +x.
+        for i in 1...8 { nodes.append(MapNode(kind: .corridor, position: [Float(i) * 0.3, Float(i) * 0.17, 0])) }
+        // Landing, turn back on itself: same x,z region, still climbing.
+        for i in 1...8 { nodes.append(MapNode(kind: .corridor, position: [2.4 - Float(i) * 0.3, 1.36 + Float(i) * 0.17, 0.8])) }
+        nodes.append(MapNode(kind: .room, label: "Floor 2", position: [0, 2.9, 1.6]))
+
+        let simplified = RouteSimplifier.simplify(nodes)
+        let climbed = simplified.filter { $0.position.y > 0.05 && $0.position.y < 2.8 }
+        XCTAssertGreaterThan(climbed.count, 8, "the flight must keep its steps, not become one jump: \(simplified.count) of \(nodes.count)")
+        // ...and the route still ends where it should.
+        XCTAssertEqual(simplified.last?.label, "Floor 2")
+    }
+
+    /// A flat corridor is simplified exactly as before: the height rule must not stop ordinary thinning.
+    func testAFlatCorridorIsStillThinned() {
+        let nodes = (0...20).map { MapNode(kind: .corridor, position: [Float($0) * 0.5, 0, 0]) }
+        let simplified = RouteSimplifier.simplify(nodes)
+        XCTAssertLessThan(simplified.count, nodes.count / 2, "a straight corridor should collapse: \(simplified.count)")
+    }
+
+    /// Carrying the phone a little higher or lower along a flat corridor is not a climb.
+    func testPhoneHeightWobbleIsNotTreatedAsAClimb() {
+        let nodes = (0...20).map { i in
+            MapNode(kind: .corridor, position: [Float(i) * 0.5, (i % 2 == 0) ? 0.03 : -0.03, 0])
+        }
+        let simplified = RouteSimplifier.simplify(nodes)
+        XCTAssertLessThan(simplified.count, nodes.count / 2, "wobble must not protect every node: \(simplified.count)")
+    }
+
+    // MARK: Walking toward stairs (2026-10-18, Rice Hall)
+
+    private func stairsGraph() -> (WaypointGraph, [MapNode]) {
+        // A corridor running along -z with a staircase as a LEAF off one breadcrumb, which is how
+        // `addPOI` records it - the route never traverses its edge.
+        var nodes = (0...6).map { MapNode(kind: .corridor, position: [0, 0, -Float($0) * 2]) }
+        let stairs = MapNode(kind: .stairs, label: "Rear Stairs 4", position: [0, 0, -9])
+        nodes.append(stairs)
+        var edges = (0..<6).map { MapEdge(from: nodes[$0].id, to: nodes[$0 + 1].id, distance: 2) }
+        edges.append(MapEdge(from: nodes[4].id, to: stairs.id, distance: 1, hazard: .stairs))
+        return (WaypointGraph(map: BuildingMap(name: "Rice", nodes: nodes, edges: edges)), nodes)
+    }
+
+    /// Walking straight at a staircase is a warning, even though the route never steps onto it.
+    func testWalkingTowardStairsIsAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        // Standing 3 m short of the stairs, facing down the corridor toward them.
+        XCTAssertEqual(follower.stairsAhead(from: [0, 0, -6], forward: [0, 0, -1]), .stairs)
+    }
+
+    /// Stairs behind you are not a hazard.
+    func testStairsBehindYouAreNotAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, -6], forward: [0, 0, 1]))
+    }
+
+    /// Stairs far down the corridor are not yet news.
+    func testDistantStairsAreNotYetAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, 0], forward: [0, 0, -1]))
+    }
+
+    /// Stairs off to one side as you pass are left to the landmark announcement.
+    func testStairsToTheSideAreNotAFrontalHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        // 3 m short of the stairs but facing across the corridor: they are 90 degrees away, well outside
+        // the frontal band. (Standing ON the node is not a meaningful test - the bearing is undefined.)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, -6], forward: [1, 0, 0]))
+    }
+
+    // MARK: Floors - you cannot reach a room by standing under it (2026-10-18)
+
+    private func twoFloorMap() -> BuildingMap {
+        // Same x,z footprint, one storey apart. Node heights are camera heights.
+        let down = (0...3).map { MapNode(kind: .corridor, position: [Float($0) * 2, 1.4, 0]) }
+        let up = (0...3).map { MapNode(kind: .corridor, position: [Float($0) * 2, 5.0, 0]) }
+        let room = MapNode(kind: .room, label: "Room 542", position: [6, 5.0, 0],
+                           extent: RoomExtent(center: [6, 5.0, 0], halfExtents: [3, 3], yaw: 0, areaSquareMeters: 36))
+        var edges = (0..<3).map { MapEdge(from: down[$0].id, to: down[$0 + 1].id, distance: 2) }
+        edges += (0..<3).map { MapEdge(from: up[$0].id, to: up[$0 + 1].id, distance: 2) }
+        edges.append(MapEdge(from: up[3].id, to: room.id, distance: 1))
+        return BuildingMap(name: "Rice", nodes: down + up + [room], edges: edges)
+    }
+
+    /// Standing directly BELOW the destination is not arriving at it - in plan view it is zero metres
+    /// away, and the room's extent covers your x,z exactly.
+    func testStandingUnderARoomIsNotArriving() {
+        let map = twoFloorMap()
+        let graph = WaypointGraph(map: map)
+        let room = map.nodes.first { $0.label == "Room 542" }!
+        let upstairs = map.nodes.filter { $0.position.y > 4 && $0.kind == .corridor }
+        var follower = RouteFollower(route: upstairs + [room], graph: graph)
+        // Underneath the room, on the floor below.
+        let below = SIMD3<Float>(6, 1.4, 0)
+        XCTAssertNotEqual(follower.update(position: below, forward: [1, 0, 0]).kind, .arrived)
+    }
+
+    /// ...and standing IN it is.
+    func testStandingInTheRoomIsArriving() {
+        let map = twoFloorMap()
+        let graph = WaypointGraph(map: map)
+        let room = map.nodes.first { $0.label == "Room 542" }!
+        let upstairs = map.nodes.filter { $0.position.y > 4 && $0.kind == .corridor }
+        var follower = RouteFollower(route: upstairs + [room], graph: graph)
+        XCTAssertEqual(follower.update(position: [6, 5.0, 0], forward: [1, 0, 0]).kind, .arrived)
+    }
+
+    /// The router must not decide you are standing upstairs because a node above is nearer in a
+    /// straight line than one along your own corridor.
+    func testNearestNodesStaysOnYourFloor() {
+        let graph = WaypointGraph(map: twoFloorMap())
+        // Standing at the start of the lower corridor. The node directly above is 3.6 m away; the next
+        // one along this corridor is 4 m. Straight-line sorting alone would pick the one upstairs.
+        let nearest = graph.nearestNodes(to: [4, 1.4, 0], limit: 4)
+        XCTAssertFalse(nearest.isEmpty)
+        XCTAssertTrue(nearest.allSatisfy { $0.position.y < 4 }, "picked a node on another floor: \(nearest.map(\.position))")
+    }
+
+    /// A floor the map does not cover must still route rather than returning nothing.
+    func testAnUnknownFloorFallsBackInsteadOfFailing() {
+        let graph = WaypointGraph(map: twoFloorMap())
+        let nearest = graph.nearestNodes(to: [4, 40, 0], limit: 3)
+        XCTAssertEqual(nearest.count, 3, "no candidates at all would mean no route")
+    }
 }

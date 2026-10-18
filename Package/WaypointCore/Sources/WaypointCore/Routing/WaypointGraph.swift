@@ -52,11 +52,21 @@ public struct WaypointGraph {
     /// Routing uses this rather than the single nearest node: on a loop corridor the closest node can
     /// sit on the wrong branch, and starting there sends the user the long way round (device report
     /// 2026-10-17).
+    /// Nearest nodes ON THE SAME LEVEL, nearest first.
+    ///
+    /// The level filter matters as soon as a building has two floors: this sorts by STRAIGHT-LINE
+    /// distance, and a node directly above you is about 3 m away - nearer than a corridor node 5 m
+    /// down your own hallway. The router starts from these candidates, so without the filter it could
+    /// decide you are standing upstairs (Anmol, 2026-10-18).
+    ///
+    /// Falls back to ignoring the level when nothing on it is known, rather than returning nothing:
+    /// that only happens on a floor the map does not cover, where every answer is wrong anyway, and
+    /// refusing to route at all would be the worse one.
     public func nearestNodes(to position: SIMD3<Float>, limit: Int) -> [MapNode] {
-        map.nodes
+        let byDistance = map.nodes
             .sorted { simd_distance($0.position, position) < simd_distance($1.position, position) }
-            .prefix(max(1, limit))
-            .map { $0 }
+        let sameLevel = byDistance.filter { Geometry.isSameLevel(position, $0.position) }
+        return Array((sameLevel.isEmpty ? byDistance : sameLevel).prefix(max(1, limit)))
     }
 
     /// Case/space/punctuation-insensitive substring search over node labels.

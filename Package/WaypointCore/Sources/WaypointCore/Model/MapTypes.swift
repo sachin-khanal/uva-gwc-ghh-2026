@@ -77,6 +77,18 @@ public struct RoomExtent: Codable, Hashable, Sendable {
     /// Ceiling height, metres, when it was measured (format 3, optional; written by the web viewer's pipeline, ignored by guidance).
     public var heightMeters: Float?
 
+    /// The same rectangle expressed in another frame. `m` must be a yaw-only rigid motion (no scale),
+    /// which is what `ManualAlignment` produces, so the half extents and the area are unchanged and
+    /// only the centre and the rotation move. Used when a room is measured in a live ARKit session
+    /// that has been aligned onto a saved map by hand.
+    public func transformed(by m: simd_float4x4) -> RoomExtent {
+        RoomExtent(center: Geometry.transformPoint(m, center),
+                   halfExtents: halfExtents,
+                   yaw: yaw + Geometry.yawAboutY(of: m),
+                   areaSquareMeters: areaSquareMeters,
+                   heightMeters: heightMeters)
+    }
+
     public init(center: SIMD3<Float>, halfExtents: SIMD2<Float>, yaw: Float, areaSquareMeters: Float, heightMeters: Float? = nil) {
         self.center = center
         self.halfExtents = halfExtents
@@ -100,6 +112,69 @@ public struct RoomExtent: Codable, Hashable, Sendable {
 }
 
 /// One point of interest or breadcrumb on the map.
+/// Which way a staircase or lift goes FROM this end of it. The same stairwell appears in both floors'
+/// maps - floor 1's end goes `.up`, floor 2's goes `.down` - and that is how the two ends are told
+/// apart when they are matched by name. A mid-flight landing is `.both`.
+public enum StairsDirection: String, Codable, CaseIterable, Sendable {
+    case up, down, both
+
+    public var spoken: String {
+        switch self {
+        case .up: return "going up"
+        case .down: return "going down"
+        case .both: return "going up and down"
+        }
+    }
+
+    /// The direction the OTHER end of the same stairwell must have, for the consistency check in
+    /// `MapHealth`. `.both` pairs with anything.
+    public func pairs(with other: StairsDirection) -> Bool {
+        switch (self, other) {
+        case (.both, _), (_, .both): return true
+        case (.up, .down), (.down, .up): return true
+        default: return false
+        }
+    }
+}
+
+/// Which side the handrail is on, FACING THE WAY THE STAIRS GO. A blind user reaching for a rail that
+/// is not there is the reason this is recorded at all, and ARKit's mesh classification has no railing
+/// class (wall, floor, ceiling, table, seat, window, door, none), so the volunteer is the only source.
+/// `neither`, not `none`: a case called `none` collides with `Optional.none`, so `railings: .none` on
+/// an optional parameter silently means "NOT RECORDED" rather than "no handrail" - the opposite of what
+/// the writer intended, with no warning. Caught by a unit test; worth keeping in mind for any other
+/// optional enum here.
+public enum RailingSide: String, Codable, CaseIterable, Sendable {
+    case left, right, both, neither
+
+    public var spoken: String? {
+        switch self {
+        case .left: return "Handrail on your left."
+        case .right: return "Handrail on your right."
+        case .both: return "Handrails on both sides."
+        case .neither: return "No handrail."
+        }
+    }
+}
+
+/// What the volunteer recorded about a staircase or lift. All optional: a stairs node tagged before
+/// format 4, or tagged in a hurry, simply has none and behaves as it always did.
+public struct StairsInfo: Codable, Hashable, Sendable {
+    public var direction: StairsDirection?
+    public var railings: RailingSide?
+    /// Roughly how many steps, when it is known. Spoken as "about N steps".
+    public var stepCount: Int?
+
+    public init(direction: StairsDirection? = nil, railings: RailingSide? = nil, stepCount: Int? = nil) {
+        self.direction = direction
+        self.railings = railings
+        self.stepCount = stepCount
+    }
+
+    /// Nothing was recorded, so there is no point storing it.
+    public var isEmpty: Bool { direction == nil && railings == nil && stepCount == nil }
+}
+
 public struct MapNode: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     public var kind: NodeKind
@@ -114,6 +189,9 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
     /// For a `.room`, the floor area it occupies, when the scan could work it out. See `RoomExtent`.
     /// Optional and defaulted, so maps written before schema 2 decode unchanged.
     public var extent: RoomExtent?
+    /// For `.stairs` and `.elevator`: which way it goes, where the handrail is, how many steps.
+    /// Format 4, optional, so every older map decodes unchanged with none.
+    public var stairs: StairsInfo?
 
     public init(
         id: UUID = UUID(),
@@ -122,7 +200,8 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
         position: SIMD3<Float>,
         segmentId: String = "seg1",
         createdBy: String = "unknown",
-        extent: RoomExtent? = nil
+        extent: RoomExtent? = nil,
+        stairs: StairsInfo? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -131,6 +210,7 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
         self.segmentId = segmentId
         self.createdBy = createdBy
         self.extent = extent
+        self.stairs = stairs
     }
 }
 

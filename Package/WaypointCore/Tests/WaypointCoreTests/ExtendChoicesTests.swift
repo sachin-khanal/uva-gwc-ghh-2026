@@ -40,4 +40,37 @@ final class ExtendChoicesTests: XCTestCase {
         XCTAssertTrue(FinishGate.evaluate(quality: .mapped, labelledTagCount: 3, extensionPending: false).isReady)
         XCTAssertFalse(FinishGate.evaluate(quality: .mapped, labelledTagCount: 0, extensionPending: false).isReady)
     }
+
+    /// An area must say WHERE it is. "Scan area 2 of 2" gave the volunteer nothing to choose on, and
+    /// picking an area they were not standing in asked ARKit to recognise a different part of the
+    /// building - which never succeeds (device report 2026-10-18).
+    func testAnAreaNamesThePlacesInsideIt() {
+        let seg1 = "seg_" + String(repeating: "a", count: 32)
+        let seg2 = "seg_" + String(repeating: "b", count: 32)
+        let map = BuildingMap(name: "Rice", nodes: [
+            MapNode(kind: .corridor, position: [0, 0, 0], segmentId: seg1),
+            MapNode(kind: .room, label: "Start", position: [1, 0, 0], segmentId: seg1),
+            MapNode(kind: .stairs, label: "Rear Stairwell", position: [2, 0, 0], segmentId: seg1),
+            MapNode(kind: .corridor, position: [9, 0, 0], segmentId: seg2),
+            MapNode(kind: .room, label: "Men's Bathroom", position: [9, 0, 1], segmentId: seg2),
+        ])
+        let options = ExtendChoices.options(maps: [map]) { _, _ in true }
+        XCTAssertEqual(options.count, 2)
+        XCTAssertTrue(options[0].isOriginal)
+        XCTAssertEqual(options[0].placeNames, ["Rear Stairwell", "Start"])
+        XCTAssertEqual(options[0].pointCount, 3)
+        XCTAssertFalse(options[1].isOriginal)
+        XCTAssertEqual(options[1].placeNames, ["Men's Bathroom"])
+    }
+
+    /// An area with nothing labelled still says something useful about itself.
+    func testAnUnlabelledAreaFallsBackToItsSize() {
+        let seg = "seg_" + String(repeating: "c", count: 32)
+        let map = BuildingMap(name: "Rice", nodes: [
+            MapNode(kind: .corridor, position: [0, 0, 0], segmentId: seg),
+            MapNode(kind: .corridor, position: [1, 0, 0], segmentId: seg),
+        ])
+        let options = ExtendChoices.options(maps: [map]) { _, _ in true }
+        XCTAssertEqual(options.first?.whereItIs, "2 points, nothing labelled")
+    }
 }

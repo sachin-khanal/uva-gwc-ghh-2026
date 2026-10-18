@@ -8,9 +8,10 @@
 //           Output: a list of `FeedbackAction`s for the app target to perform (speak / vibrate / move the spatial beacon).
 // Priority: lost tracking > obstacle stop > obstacle caution > phone posture > route advance warnings / turns > landmarks > ambient beacon.
 //           (Posture ranks below obstacles on purpose: a wall in front of the user matters more than how the phone is held.)
-// Speech:   `.high` interrupts and is used for anything the user must not miss (arrival, turns, hazards, obstacles, phone posture, lost position, warnings
-//           within 5 m); `.normal` is SKIPPED while the voice is busy and is used only for chatter ("Continue straight", route briefing, landmarks,
-//           far warnings, "Position found").
+// Speech:   `.critical` CUTS OFF whatever is being said and is reserved for a STOP obstacle or a lost position - nothing else, because an interrupt
+//           also discards the route instruction the user was about to hear. `.high` QUEUES and is used for anything the user must not miss (arrival,
+//           turns, hazards, cautions, phone posture, first position fix, warnings within 5 m); `.normal` is SKIPPED while the voice is busy and is
+//           used only for chatter (route briefing, landmarks, far warnings, "Position found").
 // Spoken guidance (accessibility requirement, 2026-10-17):
 //           * route BRIEFING once at the start: "Walk straight about 12 meters, then turn right."
 //           * ADVANCE WARNINGS counting down to the next turn/stairs/arrival: "In 10 meters, turn right." ... "In 5 meters ..." ... "In 2 meters ..."
@@ -106,6 +107,9 @@ public struct FeedbackPlanner {
     private var lastObstacleSpeech: TimeInterval?
     private var lastDirectionSpeech: TimeInterval?
     private var lastTrackingOK = true
+    /// Have we EVER had a position this session? Distinguishes "still finding you" from "lost you";
+    /// see step 1. Starts false and is set the first tick tracking is healthy.
+    private var hasBeenTracking = false
     private var briefed = false
     private var announcedWarnings: Set<String> = []
     private var announcedLandmarks: Set<UUID> = []
@@ -118,6 +122,9 @@ public struct FeedbackPlanner {
     private var announcedWayThrough = false
     /// The way round the current obstacle has been suggested. Re-armed when the way is clear.
     private var announcedAvoidance = false
+    /// A drop in the floor ahead has been announced. Re-armed once the floor is good again, so a
+    /// staircase is not re-announced at every tick while the user stands at the top of it.
+    private var announcedDrop = false
 
     public init() {}
 
@@ -134,6 +141,7 @@ public struct FeedbackPlanner {
         lastObstacleSpeech = nil
         lastDirectionSpeech = nil
         lastTrackingOK = true
+        hasBeenTracking = false
         briefed = false
         announcedWarnings = []
         announcedLandmarks = []
@@ -141,6 +149,7 @@ public struct FeedbackPlanner {
         turnInProgress = nil
         announcedWayThrough = false
         announcedAvoidance = false
+        announcedDrop = false
     }
 
     /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
@@ -156,7 +165,9 @@ public struct FeedbackPlanner {
         time: TimeInterval? = nil,
         context: SceneContext? = nil,
         isMoving: Bool? = nil,
-        avoidTowards: Side? = nil
+        avoidTowards: Side? = nil,
+        backUp: Bool = false,
+        floorAhead: FloorAhead.Verdict = .continuous
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
 
@@ -165,15 +176,25 @@ public struct FeedbackPlanner {
             return [.beacon(nil)]
         }
 
-        // 1. Lost tracking: say it once, silence the beacon, issue nothing else.
+        // 1. No position: say it once, silence the beacon, issue nothing else.
+        // LOSING a position and never having had one are different events and must not share a
+        // sentence. `lastTrackingOK` starts true, so the first untracked tick of a walk announced
+        // "Lost my position" before there was anything to lose - alarming, and flatly untrue (heard at
+        // 0:06 of the recorded walk, 2026-10-18, while the screen correctly read "Finding your
+        // position"). Only a real loss is `.critical`; first acquisition is routine and queues.
         guard trackingOK else {
             if lastTrackingOK {
-                actions.append(.speak("Lost my position. Hold still.", priority: .critical))
+                if hasBeenTracking {
+                    actions.append(.speak("Lost my position. Hold still.", priority: .critical))
+                } else {
+                    actions.append(.speak("Finding your position. Stand still, then turn slowly.", priority: .high))
+                }
             }
             lastTrackingOK = false
             actions.append(.beacon(nil))
             return actions
         }
+        hasBeenTracking = true
         if !lastTrackingOK {
             actions.append(.speak("Position found.", priority: .normal))
             lastTrackingOK = true
@@ -201,12 +222,55 @@ public struct FeedbackPlanner {
             return actions
         }
 
+        // 1c. THE FLOOR FALLING AWAY. This sits above the obstacle branch deliberately: that branch can
+        // `return`, and a staircase going down is the one hazard nothing else in the app can see. A
+        // descending flight puts NOTHING in the obstacle band - the floor simply stops - so without this
+        // the most dangerous thing in a building reads as clear corridor.
+        // Said once per edge and re-armed when the floor is good again. `unsure` is deliberately silent
+        // but also does NOT re-arm: from the top of a staircase the treads are edge-on and return almost
+        // nothing, so `unsure` is frequently the same physical situation as `drop`.
+        switch floorAhead {
+        case .continuous:
+            announcedDrop = false
+        case .unsure:
+            break
+        case .drop(let atMeters, let byMeters):
+            // Stairs we were ROUTED to are the way onward, not an ambush: the user still needs telling,
+            // but the beacon keeps guiding and we do not stop them.
+            let routedToStairs = instruction?.targetKind == .stairs
+            if !announcedDrop, let text = FloorAhead.speech(for: .drop(atMeters: atMeters, byMeters: byMeters)) {
+                announcedDrop = true
+                actions.append(.speak(text, priority: .critical))
+                actions.append(.haptic(.obstacleStop))
+            }
+            if byMeters >= FloorAhead.stairsDropMeters, !routedToStairs {
+                // A flight of stairs we are not meant to be taking: stop guiding the user into it.
+                actions.append(.beacon(nil))
+                return actions
+            }
+        }
+
         // 2. Obstacles: say WHAT and WHERE when the level or the kind of thing changes, and keep reminding while STOP persists.
         // Is the thing ahead the way IN rather than something to avoid? (door of the target room,
         // the stairs we routed to). If so it gets instructions, not an alarm, and guidance continues.
-        let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
+        // No manoeuvre left and a few metres to go: whatever is in front is the destination, not an ambush.
+        let onFinalApproach = instruction.map {
+            $0.upcoming == nil && $0.distanceMeters <= RouteFeature.finalApproachMeters
+        } ?? false
+        let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind,
+                                                   onFinalApproach: onFinalApproach)
         let levelChanged = obstacle != lastObstacle
+        // A CHANGE OF KIND only counts as news while the user is actually moving. Standing in front of
+        // one wall, the classifier flickers between what it thinks it is seeing - wall, then unknown,
+        // then table - and each flip looked like a brand new obstacle, so the warning was re-issued
+        // every tick. Each re-issue is `.critical`, so it cut off the one before it: "Stop. Stop. Stop.
+        // Stop." and only the last one finished its sentence (device report 2026-10-18). If the user has
+        // neither walked nor turned, the scene in front of them cannot have changed, so a different
+        // answer from the classifier is noise, not news. `isMoving` covers turning on the spot too.
+        // A change of LEVEL is deliberately NOT gated this way: an escalation to STOP must always be
+        // heard, including when somebody walks into a stationary user's path.
         let kindChanged = obstacle != .clear && report != nil && report?.kind != lastObstacleKind
+            && (isMoving ?? true)
         // Repeating a STOP only helps while the user is still moving toward the thing. Standing in
         // front of a closed door being told "stop, a door ahead" every three seconds is noise, and it
         // drowns out the one line that matters - that the door has to be opened (device report
@@ -234,6 +298,13 @@ public struct FeedbackPlanner {
                    let text = TurnSpeech.avoidance(side: avoidTowards, obstacle: report?.kind) {
                     announcedAvoidance = true
                     actions.append(.speak(text, priority: .high))
+                } else if backUp, !announcedAvoidance {
+                    // Blocked ahead with no usable side (`AvoidanceAdvisor.isBoxedIn`). Saying only
+                    // "Stop." leaves the user standing in front of a wall with nothing to do, which is
+                    // exactly what was reported on the phone (F-5, 2026-10-18). Same latch as the way
+                    // round above, so it is offered once per obstacle rather than nagged.
+                    announcedAvoidance = true
+                    actions.append(.speak(TurnSpeech.backUp, priority: .high))
                 }
                 // ONE way round, not two: when `AvoidanceAdvisor` (U2) has a suggestion ("Slightly left, there is a wall ahead.") the plain
                 // surroundings hint ("Open space on your left.") stays quiet; it only speaks when the advisor has no clear side to suggest.
@@ -243,7 +314,14 @@ public struct FeedbackPlanner {
                     actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, hintContext), priority: .critical))
                     if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
                 case .caution:
-                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, hintContext), priority: .critical))
+                    // `.high`, NOT `.critical`. A caution is "there is a table two steps ahead", not
+                    // "stop walking" - and `.critical` means cut off whatever is being said, which is
+                    // reserved for a STOP obstacle or a lost position (see `SpeechPriority.critical`).
+                    // Marking cautions critical broke that contract twice over in a cluttered room: each
+                    // one chopped the previous sentence into fragments ("Careful. An obstacle. Careful.
+                    // Careful. An obstacle ahead. Careful." - recorded walk 2026-10-18) and each one
+                    // wiped the queued route instruction, so no turn was ever spoken (F-1, F-7).
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, hintContext), priority: .high))
                     if levelChanged { actions.append(.haptic(.obstacleCaution)) }
                 case .clear:
                     break

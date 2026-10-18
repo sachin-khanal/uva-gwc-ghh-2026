@@ -63,7 +63,36 @@ public struct AvoidanceAdvisor {
         }
         // Hold the existing suggestion while still blocked, so it cannot flutter side to side.
         if let current { return current }
+        current = Self.bestSide(clearance, blockedAheadMetres: blockedAheadMetres,
+                                decisiveMargin: decisiveMargin, minimumUsable: minimumUsable)
+        return current
+    }
 
+    /// The way ahead is blocked and NEITHER side is a usable way round. Nothing we can see is safe to
+    /// walk toward, so the only honest advice is to stop going forward and back off a little.
+    ///
+    /// Without this the user heard "Stop." and nothing else, with no way out of the situation at all
+    /// (device report 2026-10-18, finding F-5). Call it AFTER `advise`, which is the thing that knows
+    /// whether a side was found: while a suggestion stands, the user is not boxed in.
+    ///
+    /// The same safety note applies as to the rest of this type - backing up is suggested because it
+    /// retraces ground the user has just walked, which is the only direction we have any evidence
+    /// about. It is still a suggestion, not a command.
+    public func isBoxedIn(_ clearance: Clearance) -> Bool {
+        guard let ahead = clearance.ahead, ahead < blockedAheadMetres else { return false }
+        if current != nil { return false } // a way round already stands
+        return Self.bestSide(clearance, blockedAheadMetres: blockedAheadMetres,
+                             decisiveMargin: decisiveMargin, minimumUsable: minimumUsable) == nil
+    }
+
+    public mutating func reset() { current = nil }
+
+    // MARK: Private
+
+    /// The side worth suggesting, or nil when neither is decisively better AND roomy enough. Pure, so
+    /// `advise` and `isBoxedIn` can never disagree about what counts as a way round.
+    private static func bestSide(_ clearance: Clearance, blockedAheadMetres: Float,
+                                 decisiveMargin: Float, minimumUsable: Float) -> Side? {
         // nil = nothing detected that way = open. Treat as comfortably far.
         let openEnough = max(blockedAheadMetres, minimumUsable) * 4
         let left = clearance.left ?? openEnough
@@ -74,9 +103,6 @@ public struct AvoidanceAdvisor {
 
         guard betterDistance >= minimumUsable,
               betterDistance - otherDistance >= decisiveMargin else { return nil }
-        current = better
         return better
     }
-
-    public mutating func reset() { current = nil }
 }

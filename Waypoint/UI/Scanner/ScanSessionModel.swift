@@ -55,6 +55,47 @@ final class ScanSessionModel: ObservableObject {
         Announcer.voiceOverOnly(isPaused ? "Scan paused" : "Scan resumed")
     }
 
+    /// "I am standing at this labelled place" while extending a saved map. Deliberately NOT gated on
+    /// `canRecord`: the whole point is that recording is still blocked because the scanner has not
+    /// found its place, and this is how the volunteer gives it one.
+    func confirmPlace(_ id: UUID) {
+        service.confirmPlace(id: id)
+        snapshot = service.snapshot
+        if let status = snapshot.extensionStatus { Announcer.voiceOverOnly(status) }
+    }
+
+    /// A stairs or lift tag that is waiting for the volunteer to fill in the sheet, nil otherwise.
+    @Published var taggingStairs: NodeKind?
+
+    /// Stairs and lifts carry metadata nothing can measure (which way they go, where the handrail is),
+    /// so tapping them opens a sheet rather than dropping a bare node. Everything else tags directly.
+    func beginTag(_ kind: NodeKind) {
+        guard !isPaused, snapshot.canRecord else { return }
+        if kind == .stairs || kind == .elevator {
+            taggingStairs = kind
+        } else {
+            tag(kind)
+        }
+    }
+
+    func finishStairsTag(kind: NodeKind, name: String, info: StairsInfo) {
+        taggingStairs = nil
+        guard !isPaused, snapshot.canRecord else { return }
+        let before = snapshot.tags.count
+        service.tagStairs(kind: kind, label: name, info: info)
+        snapshot = service.snapshot
+        guard snapshot.tags.count > before else { return }
+        labelDraft = ""
+        tagEvents += 1
+        showToast("\(kind.displayName) \u{201C}\(name)\u{201D} tagged")
+    }
+
+    func restartPlaceConfirmation() {
+        service.restartPlaceConfirmation()
+        snapshot = service.snapshot
+        if let status = snapshot.extensionStatus { Announcer.voiceOverOnly(status) }
+    }
+
     func tag(_ kind: NodeKind) {
         guard !isPaused, snapshot.canRecord else { return }
         let label = labelDraft.trimmingCharacters(in: .whitespacesAndNewlines)

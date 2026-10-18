@@ -20,11 +20,18 @@ extension MapStore {
     /// Saves a scan recorded on this phone: validates and merges the map JSON exactly like an import, then writes the scan file with
     /// no 50 MB sharing limit. Returns the stored (possibly merged) map.
     @discardableResult
-    public func saveLocalScan(map: BuildingMap, worldMap: Data, segmentId: String) throws -> BuildingMap {
+    /// - Parameter worldMap: nil saves the map JSON only, with NO scan file for this segment. Used when
+    ///   the segment was recorded in a frame that is not the map's - a hand-aligned extension - because
+    ///   an `ARWorldMap` cannot be transformed, and `Relocalizer` takes the FIRST segment that has one
+    ///   and localizes in ITS frame. Saving a session-frame scan file next to map-frame nodes therefore
+    ///   offsets everything the moment that segment is the one picked (device report 2026-10-18).
+    public func saveLocalScan(map: BuildingMap, worldMap: Data?, segmentId: String) throws -> BuildingMap {
         guard SegmentID.isValid(segmentId) else { throw MapStoreError.rejected("Unsafe segment id.") }
-        guard worldMap.count <= Self.maxLocalWorldMapBytes else { throw MapStoreError.rejected("This scan is too large to store on the phone.") }
+        if let worldMap {
+            guard worldMap.count <= Self.maxLocalWorldMapBytes else { throw MapStoreError.rejected("This scan is too large to store on the phone.") }
+        }
         let stored = try importBundle(MapBundle(map: map, worldMaps: [:])) // map JSON: same validation and merge rules as any import
-        try saveWorldMap(worldMap, mapId: stored.id, segmentId: segmentId)
+        if let worldMap { try saveWorldMap(worldMap, mapId: stored.id, segmentId: segmentId) }
         return stored
     }
 

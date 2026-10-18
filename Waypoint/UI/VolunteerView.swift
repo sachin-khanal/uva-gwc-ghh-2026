@@ -106,7 +106,7 @@ private struct ScanningView: View {
             .background(.regularMaterial)
         }
         .fullScreenCover(item: $viewingModel) { map in
-            ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { viewingModel = nil })
+            ModelViewerView(map: map, urls: app.store.modelURLs(mapId: map.id, segmentIds: map.segmentIds), onClose: { viewingModel = nil })
         }
     }
 
@@ -157,6 +157,25 @@ private struct ScanningView: View {
                 Button("I'm in the saved corridor — begin extension") { controller.beginExtension() }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("scan.extension.begin")
+                // Locating yourself BY HAND, for when ARKit will not recognise the space. Two places
+                // are needed: the first says where you are, the second which way you are turned.
+                if !controller.placesToStandAt.isEmpty {
+                    Text(controller.confirmedPlaceCount == 0
+                         ? "Or: stand at a place you already labelled and tap it."
+                         : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("scan.extension.manualHint")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(controller.placesToStandAt, id: \.id) { node in
+                                Button(node.label ?? "-") { controller.confirmPlace(node) }
+                                    .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("scan.extension.places")
+                }
             }
             TextField("Label for next tag (e.g. Room 204)", text: $poiLabel)
                 .textFieldStyle(.roundedBorder)
@@ -203,7 +222,7 @@ private struct ScanningView: View {
                         if let status = controller.modelStatus {
                             Text(status).font(.footnote).accessibilityIdentifier("scan.modelStatus")
                         }
-                        if app.store.hasModel(mapId: saved.id) {
+                        if app.store.hasModel(mapId: saved.id, segmentIds: saved.segmentIds) {
                             Button("View 3D model") { viewingModel = saved }.font(.footnote).accessibilityIdentifier("scan.viewModel")
                         }
                     }

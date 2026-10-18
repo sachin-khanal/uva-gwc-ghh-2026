@@ -352,3 +352,38 @@ Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next 
 | U1.15 freeze | later |
 | NEW: size policy | scans over the 50 MB cloud limit are saved on the phone only (`SharePolicy`, `MapStore.saveLocalScan`); see WORKLOG 2026-10-18 |
 | NEW: finish gating | Finish/Save still requires ARKit `mapped` plus one labelled place; no change yet (decision pending) |
+
+## NEW 2026-10-18 — Anmol's field test of `navigation-overhaul` @ `fecc146`: next session's queue
+
+Full detail (with the knobs and the leads) is the WORKLOG entry
+"Field test of the merged branch: overall good, 8 findings for tomorrow" at the top of `docs/WORKLOG.md`.
+Overall verdict was positive; this is the fix list, not a revert list.
+
+Do first — these decide whether a blind user can finish a route:
+
+| # | Finding | Owner | Note |
+|---|---|---|---|
+| ~~F-1~~ | ~~CRITICAL: contradicting directions (speech says left, arrow says right; cues out of order)~~ **Update 2026-10-18 (Claude):** MOSTLY FIXED in code, UNVERIFIED ON DEVICE. The recorded walk showed the real problem was bigger: NO turn was spoken at all, because a caution was `.critical` (interrupts) and an interrupt discarded the queued turn. STILL OPEN: when an avoidance ("Slightly left") disagrees with the route ("Turn right"), nothing relates the two. See WORKLOG. | B | re-walk the same route |
+| ~~F-5~~ | ~~MAJOR regression: obstacle says only "Stop", no way through~~ **Update 2026-10-18 (Claude):** FIXED in code, UNVERIFIED ON DEVICE. Not the suppression I guessed at: the advice was queued behind the stop line and dropped by `Speaker.maxQueuedAge = 2.0`. Also added "Back up slowly." for when no side is usable. See WORKLOG. | B | needs a walk to confirm |
+| ~~F-7~~ | ~~BIG: the direction is sometimes never spoken at all, usually under higher-priority traffic~~ **Update 2026-10-18 (Claude):** SAME ROOT CAUSE as F-5; fixed by raising `maxQueuedAge` to 4.5 s. UNVERIFIED ON DEVICE. The planner still marks a line "announced" when it generates it rather than when it is spoken - the remaining structural weakness if this recurs. | B | needs a walk to confirm |
+
+Then:
+
+| # | Finding | Owner | Note |
+|---|---|---|---|
+| F-6 | repetition without spamming; priority vs. freshness fight while moving | B | test more before changing `Speaker`/`SpeechGate` |
+| F-3 | active-path / arrival radius too tight (a door point sat inside the shut door) | B | `ArrivalRadius` door = 1.2 m is the tightest |
+| F-4 | relocalization wants specific viewpoints and never says "pan slowly, walk around" | A | the coaching TODO already in `Relocalizer.swift` |
+| F-8 | QoL: starting instructions for the blind user at the top of a walk | B | |
+| F-2 | preference: routes follow the volunteer's breadcrumbs, not the shorter mapped way | A | the real fix is floor-grid routing over the mesh (designed, not started) |
+
+Also still open from the same session, already diagnosed with file:line in the WORKLOG: the 15 s save timeout
+reported as a failure, the 60 s "no 3D model" stopwatch, the slow USDZ export, the export reading paused-session
+Metal buffers, `CoverageTracker`'s absolute 2 m grid, and the loop-closure threshold mismatch (builder joins at
+1.0 m in 3D, the health check flags at 1.5 m in 2D, so the "check before sharing" warning cannot be cleared).
+
+Idea parked (Anmol): make the mesh triangles much coarser — nothing downstream needs 3.5 M of them. Note that
+decimating harder alone will NOT speed up the export, because the cost is paid in `MeshExporter.extract` before any
+decimation; the fix is snapping vertices to a grid while reading. Also worth revisiting that mesh detail is currently
+set by `ExportBudget.defaultBudgetBytes = 40_000_000`, which is the Supabase free-tier file limit — a hosting
+constraint standing in for a quality decision.
