@@ -77,6 +77,18 @@ public struct RoomExtent: Codable, Hashable, Sendable {
     /// Ceiling height, metres, when it was measured (format 3, optional; written by the web viewer's pipeline, ignored by guidance).
     public var heightMeters: Float?
 
+    /// The same rectangle expressed in another frame. `m` must be a yaw-only rigid motion (no scale),
+    /// which is what `ManualAlignment` produces, so the half extents and the area are unchanged and
+    /// only the centre and the rotation move. Used when a room is measured in a live ARKit session
+    /// that has been aligned onto a saved map by hand.
+    public func transformed(by m: simd_float4x4) -> RoomExtent {
+        RoomExtent(center: Geometry.transformPoint(m, center),
+                   halfExtents: halfExtents,
+                   yaw: yaw + Geometry.yawAboutY(of: m),
+                   areaSquareMeters: areaSquareMeters,
+                   heightMeters: heightMeters)
+    }
+
     public init(center: SIMD3<Float>, halfExtents: SIMD2<Float>, yaw: Float, areaSquareMeters: Float, heightMeters: Float? = nil) {
         self.center = center
         self.halfExtents = halfExtents

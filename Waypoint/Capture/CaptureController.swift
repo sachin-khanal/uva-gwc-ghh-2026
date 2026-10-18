@@ -86,6 +86,19 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var segmentId = "seg1"
     private var isExtension = false
     private var extensionAttached = false
+    /// Session (ARKit world) -> MAP. IDENTITY when ARKit relocalized into the saved world map, because
+    /// then the session's world frame IS the map frame. When the volunteer locates themselves by hand
+    /// instead (`confirmPlace`), this carries their alignment, and EVERY position that becomes a map
+    /// node must go through `mapPoint` / `mapDirection` - a node written in session coordinates would
+    /// land in the wrong part of the building.
+    private var worldToMap = matrix_identity_float4x4
+    /// Places the volunteer has confirmed standing at. Two are needed: one fixes position only, and
+    /// without ARKit's relocalization the session's yaw bears no relation to the map's.
+    private var confirmedPlaces: [(map: SIMD3<Float>, world: SIMD3<Float>)] = []
+    /// How many places have been confirmed so far (0, 1), for the UI.
+    @Published private(set) var confirmedPlaceCount = 0
+    /// The volunteer located themselves by hand, so ARKit does not have to recognise the space.
+    private var alignedByHand = false
     private var isSaving = false
     private var exportProbeDone = false
     private var latestCameraTransform: simd_float4x4?
@@ -195,6 +208,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         lastCoverageSample = -.greatestFiniteMagnitude
         isSaving = false
         extensionAttached = false
+        // A new capture starts unaligned: the session frame is the map frame only once ARKit has
+        // relocalized, or once the volunteer has confirmed two places.
+        worldToMap = matrix_identity_float4x4
+        confirmedPlaces = []
+        confirmedPlaceCount = 0
+        alignedByHand = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
         nodeCount = map?.nodes.count ?? 0
@@ -323,17 +342,74 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         latestCameraTransform = nil
     }
 
+    /// A point from the live session, in MAP coordinates.
+    private func mapPoint(_ world: SIMD3<Float>) -> SIMD3<Float> { Geometry.transformPoint(worldToMap, world) }
+    /// A direction from the live session, in MAP coordinates (rotation only, no translation).
+    private func mapDirection(_ world: SIMD3<Float>) -> SIMD3<Float> { Geometry.transformDirection(worldToMap, world) }
+
+    /// The labelled places in the map being extended, for the volunteer to pick from. Empty when this
+    /// is not an extension.
+    var placesToStandAt: [MapNode] {
+        guard isExtension, let builder else { return [] }
+        return builder.map.nodes
+            .filter { ($0.label?.trimmingCharacters(in: .whitespaces).isEmpty == false) }
+            .sorted { ($0.label ?? "") < ($1.label ?? "") }
+    }
+
+    /// "I am standing at this place." Needs TWO, a few metres apart: the first fixes where the session
+    /// sits in the map, the second fixes which way it is turned. When the second arrives the alignment
+    /// is solved and the extension attaches straight away, so ARKit never has to recognise the space.
+    ///
+    /// Refuses rather than guesses: see `ManualAlignment`. A wrong alignment writes every new node into
+    /// the wrong part of the building, which is much worse than asking the volunteer to try again.
+    func confirmPlace(_ node: MapNode) {
+        guard isExtension, !extensionAttached, isRunning, !isSaving,
+              let frame = session.currentFrame, case .normal = frame.camera.trackingState else {
+            extensionStatus = "Hold the phone up and wait for tracking, then confirm the place again."
+            return
+        }
+        let world = Geometry.translation(of: frame.camera.transform)
+        guard let first = confirmedPlaces.first else {
+            confirmedPlaces = [(map: node.position, world: world)]
+            confirmedPlaceCount = 1
+            extensionStatus = "Got it. Now walk to another labelled place at least \(Int(ManualAlignment.minSeparationMeters)) meters away and confirm that one."
+            Log.capture.info("alignment: first place \(node.label ?? "-")")
+            return
+        }
+        switch ManualAlignment.worldToMap(mapA: first.map, worldA: first.world,
+                                          mapB: node.position, worldB: world) {
+        case .failure(.tooClose):
+            extensionStatus = "Those two places are too close together to tell which way you are facing. Pick one further away."
+        case .failure(.lengthMismatch(let mapMeters, let walked)):
+            extensionStatus = String(format: "That does not add up: the map puts those places %.0f m apart but you walked %.0f m. Start again from the first place.", mapMeters, walked)
+            confirmedPlaces = []
+            confirmedPlaceCount = 0
+        case .failure(.notFinite):
+            extensionStatus = "Lost track of where you walked. Start again from the first place."
+            confirmedPlaces = []
+            confirmedPlaceCount = 0
+        case .success(let transform):
+            worldToMap = transform
+            alignedByHand = true
+            confirmedPlaceCount = 2
+            Log.capture.info("alignment: solved from two places, yaw \(Geometry.yawAboutY(of: transform) * 180 / .pi) deg")
+            beginExtension()
+        }
+    }
+
     /// Volunteer confirms they are in the mapped corridor after ARKit has relocalized.
     /// Starting a new segment never changes the world origin or any existing node.
     func beginExtension() {
         guard isExtension, !extensionAttached, isRunning, !isSaving,
               let frame = session.currentFrame, case .normal = frame.camera.trackingState,
-              frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending,
+              // A hand alignment IS the fix, so ARKit's own opinion of the saved map is irrelevant;
+              // without one we still wait for it to have matched the space.
+              alignedByHand || frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending,
               let builder else {
-            extensionStatus = "Still finding the saved area. Look around slowly; recording is paused."
+            extensionStatus = "Still finding the saved area. Look around slowly, or confirm a labelled place you are standing at."
             return
         }
-        guard builder.attachExtension(at: Geometry.translation(of: frame.camera.transform)) else {
+        guard builder.attachExtension(at: mapPoint(Geometry.translation(of: frame.camera.transform))) else {
             extensionStatus = "Move within 2 meters of a previously scanned corridor point on the same floor, then try again."
             return
         }
@@ -351,8 +427,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         var fwd = Geometry.cameraForward(of: t)
         fwd.y = 0
         let ahead = simd_length(fwd) > 1e-3 ? simd_normalize(fwd) : SIMD3<Float>(0, 0, -1)
-        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead,
-                                  extent: kind == .room ? roomExtent(standingAt: pos) : nil)
+        // `roomExtent` samples the LIVE mesh, so it must be seeded with the session position and its
+        // result carried into the map frame afterwards; everything stored on the node is map frame.
+        let extent = kind == .room ? roomExtent(standingAt: pos)?.transformed(by: worldToMap) : nil
+        let node = builder.addPOI(kind: kind, label: label, position: mapPoint(pos + ahead),
+                                  extent: extent)
         nodeCount = builder.map.nodes.count
         let area = node.extent.map { String(format: " (%.0f m2)", $0.areaSquareMeters) } ?? ""
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")\(area)")
@@ -510,7 +589,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let ready = !isExtension || extensionAttached
         if canRecord != ready { canRecord = ready }
         guard canRecord, let builder else { return }
-        if builder.observe(position: Geometry.translation(of: frame.camera.transform)) != nil {
+        if builder.observe(position: mapPoint(Geometry.translation(of: frame.camera.transform))) != nil {
             nodeCount = builder.map.nodes.count
         }
     }

@@ -1,5 +1,66 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Extend a map by standing at a place you already labelled   [tags: FEATURE]
+Area: A (AR/Maps) + U3 (scanner UI). NEW branch `map-extension` off `navigation-overhaul` d8afcf1.
+
+Context: extending a saved map was ALREADY built end to end (ExtendChoices -> ScanLibraryView ->
+`CaptureController.prepareExtension` loads the saved ARWorldMap as `initialWorldMap` -> ARKit relocalizes ->
+`beginExtension` -> `MapBuilder.attachExtension`), and it was blocked on the one thing we know is unreliable:
+ARKit recognising the space. Anmol's idea was to use geometry instead of images; the cheap version of that idea,
+and the one built here, is to let the SIGHTED volunteer do the recognising - they can see a door they labelled.
+
+WHY TWO PLACES, not one: a single confirmed place fixes TRANSLATION only. Without relocalization the session's
+yaw bears no relation to the map's, so one point would record the new corridor at an arbitrary angle - a map
+that looks plausible and is wrong. Two places a few metres apart fix position and heading together, and the
+distance between them is a free sanity check.
+
+New (pure, unit-tested):
+* `Package/.../Model/ManualAlignment.swift` - `worldToMap(mapA:worldA:mapB:worldB:)` returning
+  `Result<simd_float4x4, Failure>`. Yaw-only (ARKit has +y along gravity in both sessions, so solving for roll
+  and pitch would only fit noise). REFUSES rather than guesses: `tooClose` under 2 m apart (a short baseline
+  turns a small standing error into a large angular one), and `lengthMismatch` over 1.0 m (the map and the walk
+  describe the same physical distance; if they disagree the volunteer tapped the wrong place).
+* `Geometry.yawAboutY(of:)` and `RoomExtent.transformed(by:)` - a room measured in the live session has to be
+  carried into the map frame; with no scale only the centre and the rotation move.
+
+Wiring (`Waypoint/Capture/CaptureController.swift`):
+* `worldToMap` (identity when ARKit relocalized, since then the session frame IS the map frame) plus
+  `mapPoint` / `mapDirection`, applied at EVERY place a camera position becomes a map node: the breadcrumb
+  (`observe`), `tagPOI` (position AND the room extent), and `attachExtension`. Missing any one of these would
+  write nodes into the wrong part of the building.
+* `confirmPlace(_:)` collects the two places, solves, and attaches immediately; each refusal has a sentence a
+  person can act on. `placesToStandAt` lists the map's labelled nodes.
+* `beginExtension` no longer requires `worldMappingStatus == .mapped/.extending` when the volunteer has aligned
+  by hand - that check is about ARKit's own opinion of the saved map, which is exactly what we are bypassing.
+* `start(...)` resets the alignment, so one capture cannot inherit another's.
+UI (`Waypoint/UI/VolunteerView.swift`): under the existing "I'm in the saved corridor" button, a row of the
+map's labelled places with a hint line that changes after the first tap.
+
+Verified: `make test` -> **363 tests, 0 failures** (354 before; 9 new for `ManualAlignment`: identity, pure
+translation, a quarter turn, height carried through, an arbitrary rotated+translated pose round-tripped through
+a third point the solver never saw, realistic standing slop accepted, and the three refusals).
+`make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: EVERYTHING about this on a phone. UNVERIFIED ON DEVICE - not built onto the device in this block,
+and no extension has ever been recorded and saved by anyone.
+Open problems (all real, none fixed here):
+1. `attachExtension` still requires standing within 2 m of a CORRIDOR or JUNCTION node (rooms and doors are not
+   eligible anchors) and within 0.75 m in height. After a hand alignment the volunteer is standing at a labelled
+   POI, whose nearest corridor breadcrumb is roughly 1 m away (`tagPOI` drops the POI ~1 m ahead of where the
+   volunteer stood), so it should pass - but it is the most likely thing to fail first on device.
+2. MESH EXPORT IS WRONG FOR A HAND-ALIGNED EXTENSION. `MeshExporter` writes vertices in the SESSION frame and
+   `MeshAsset.coordinateFrame` claims "map"; `worldToMap` is not applied. Pre-existing for extensions in another
+   way too: `save()` writes `store.modelURL(mapId:)`, which OVERWRITES the whole map's model with only the new
+   segment's mesh. Navigation does not read either, so this is a 3D-viewer problem, not a guidance one.
+3. The scan box, `CoverageTracker` and `CoverageGrid` all still work in session coordinates. Harmless for the
+   saved graph (they are about the live scan) but worth knowing before anyone reads those numbers as map-frame.
+4. Nothing stops the volunteer confirming the SAME place twice; `tooClose` catches it, but the message then
+   blames the distance rather than saying "that is the one you already picked".
+Handoff: install and try it. Pick the scan from tonight, stand at one labelled place, tap it, walk to another at
+least 2 m away, tap that. Expect either "Extending this building..." (works) or the 2 m corridor-anchor message
+(open problem 1).
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — The way-round advisor was reading a sensor window too narrow to see sideways   [tags: BUG]
 Area: B (navigation/feedback) / C (vision wiring). Branch `navigation-overhaul`.
 Anmol, after the F-5 fix shipped: "when facing a wall / very close to a chair, it just says stop rather than how

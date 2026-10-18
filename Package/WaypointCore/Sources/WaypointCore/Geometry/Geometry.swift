@@ -87,6 +87,13 @@ public enum Geometry {
     }
 
     /// Rotation about the +y (up) axis as a 4x4 matrix.
+    /// The rotation about the vertical axis baked into `m`, radians. Only meaningful for a transform
+    /// that IS a yaw-only rigid motion (`rotationY` composed with a translation) - which is what the
+    /// map frame and an ARKit session frame differ by, since both have +y along gravity.
+    public static func yawAboutY(of m: simd_float4x4) -> Float {
+        atan2(m.columns.2.x, m.columns.0.x)
+    }
+
     public static func rotationY(_ radians: Float) -> simd_float4x4 {
         simd_float4x4(simd_quatf(angle: radians, axis: SIMD3<Float>(0, 1, 0)))
     }
