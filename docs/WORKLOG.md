@@ -22,6 +22,9 @@ New (pure, unit-tested):
   describe the same physical distance; if they disagree the volunteer tapped the wrong place).
 * `Geometry.yawAboutY(of:)` and `RoomExtent.transformed(by:)` - a room measured in the live session has to be
   carried into the map frame; with no scale only the centre and the rotation move.
+  (The pre-commit hook warned that `Model/*` changed. It is NOT a contract change: `RoomExtent.transformed(by:)`
+  is a new method, no stored field was added, renamed or removed, the JSON shape is identical and
+  `MapSchema.current` is untouched. No fixture or migration needed.)
 
 Wiring (`Waypoint/Capture/CaptureController.swift`):
 * `worldToMap` (identity when ARKit relocalized, since then the session frame IS the map frame) plus

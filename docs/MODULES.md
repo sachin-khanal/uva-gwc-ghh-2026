@@ -49,6 +49,9 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Data model & storage** | D (shared contract) | `Model/MapTypes.swift`, `BuildingMap.swift`, `MapStore.swift` | DONE | `ModelTests` |
 | **Graph building from scan** | A | `Model/MapBuilder.swift` | DONE (logic) | `RoutingTests.testMapBuilder…` |
 | **Geometry / frames** | A (shared with B) | `Geometry/Geometry.swift` | DONE | `RoutingTests.testSignedBearing…`, `testMarkerAlignment…` |
+| **Manual alignment (extend a map)** | A | `Model/ManualAlignment.swift` | DONE (logic); capture wiring UNVERIFIED ON DEVICE | `ManualAlignmentTests` (9) |
+
+**Update 2026-10-18 (Claude):** `ManualAlignment` locates the phone inside a SAVED map from two places the volunteer confirms standing at, so extending a map no longer waits on ARKit relocalization. Added on branch `map-extension`; see the WORKLOG entry of the same date.
 | **AR capture (volunteer)** | A | `Waypoint/Capture/CaptureController.swift` | SCAFFOLD | – (device) |
 | **Live LiDAR scan view + bounding box** | A | `Waypoint/Scan/LiveScanView.swift`, `MeshSampler.swift`, `Capture/CaptureController.swift` (stats, box) · core `Scan/OrientedBox.swift` | box math DONE · view SCAFFOLD | `ScanAndSimulationTests` (box) |
 | **Obstacle avoidance suggestion** (added 2026-10-17) | C + B | core `Vision/AvoidanceAdvisor.swift` · `Waypoint/Vision/ObstacleDetector.swift` (per-side clearance) · `Guidance/FeedbackPlanner.swift` (says the way round) | logic DONE · UNVERIFIED ON DEVICE | `AvoidanceAdvisorTests` (8), `AvoidanceCueTests` (6) |
