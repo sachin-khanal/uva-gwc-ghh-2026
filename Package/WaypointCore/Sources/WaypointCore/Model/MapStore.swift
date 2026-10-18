@@ -9,6 +9,7 @@
 // Pure Foundation: no ARKit. The ARWorldMap is treated as opaque `Data` here; archiving it
 //           with NSKeyedArchiver happens in the app target (Waypoint/Capture).
 //
+// Status: Schema 3 implementation; native tests pending Mac; UNVERIFIED ON DEVICE.
 import Foundation
 import simd
 
@@ -17,10 +18,13 @@ public struct MapBundle: Codable, Sendable {
     public var map: BuildingMap
     /// segmentId -> archived ARWorldMap bytes. May be empty (e.g. a hand-written sample map).
     public var worldMaps: [String: Data]
+    /// Schema 3 optional OBJ payloads, keyed by asset UUID string. Absent in legacy bundles.
+    public var meshFiles: [String: Data]?
 
-    public init(map: BuildingMap, worldMaps: [String: Data] = [:]) {
+    public init(map: BuildingMap, worldMaps: [String: Data] = [:], meshFiles: [String: Data]? = nil) {
         self.map = map
         self.worldMaps = worldMaps
+        self.meshFiles = meshFiles
     }
 }
 
@@ -50,6 +54,42 @@ extension MapBundle {
     ///  * edge distance is within max(0.5 m, 25%) of the straight-line distance between its nodes
     ///    (a "shortcut" edge claiming 1 m between rooms 40 m apart is rejected).
     public func validate() throws {
+        guard (1...MapSchema.current).contains(map.schemaVersion), (map.meshAssets ?? []).count <= 100 else {
+            throw MapStoreError.rejected("Unsupported map schema or too many mesh assets.")
+        }
+        var assetIDs = Set<UUID>()
+        var declaredMeshBytes = 0
+        for asset in (map.meshAssets ?? []) {
+            try asset.validate()
+            declaredMeshBytes += asset.byteCount
+            guard declaredMeshBytes <= 80_000_000 else { throw MapStoreError.rejected("Mesh assets exceed 80 MB.") }
+            guard assetIDs.insert(asset.id).inserted, map.segmentIds.contains(asset.segmentId) else {
+                throw MapStoreError.rejected("Duplicate mesh asset or unknown segment.")
+            }
+        }
+        var meshBytes = 0
+        for (key, bytes) in meshFiles ?? [:] {
+            guard let id = UUID(uuidString: key), let asset = (map.meshAssets ?? []).first(where: { $0.id == id }) else {
+                throw MapStoreError.rejected("Mesh file has no manifest entry.")
+            }
+            meshBytes += bytes.count
+            guard meshBytes <= 80_000_000 else { throw MapStoreError.rejected("Mesh bundle exceeds 80 MB.") }
+            try asset.validate(data: bytes)
+        }
+        for node in map.nodes {
+            if let e = node.extent {
+                let area = 4 * Double(e.halfExtents.x) * Double(e.halfExtents.y)
+                guard node.kind == .room,
+                      e.center.x.isFinite, e.center.y.isFinite, e.center.z.isFinite,
+                      e.halfExtents.x.isFinite, e.halfExtents.y.isFinite,
+                      e.halfExtents.x > 0, e.halfExtents.y > 0, e.yaw.isFinite,
+                      e.areaSquareMeters.isFinite, e.areaSquareMeters > 0,
+                      Double(e.areaSquareMeters) <= area + 0.01,
+                      e.heightMeters.map({ $0.isFinite && $0 > 0 }) ?? true else {
+                    throw MapStoreError.rejected("Invalid room extent.")
+                }
+            }
+        }
         guard map.nodes.count <= Self.maxNodes, map.edges.count <= Self.maxEdges else {
             throw MapStoreError.rejected("Map is too large (\(map.nodes.count) nodes, \(map.edges.count) edges).")
         }
@@ -214,7 +254,19 @@ public final class MapStore {
         for seg in map.segmentIds {
             if let d = try loadWorldMap(mapId: id, segmentId: seg) { worldMaps[seg] = d }
         }
-        return MapBundle(map: map, worldMaps: worldMaps)
+        var meshes: [String: Data] = [:]
+        for asset in (map.meshAssets ?? []) {
+            if let bytes = try loadMesh(mapId: id, asset: asset) { meshes[asset.id.uuidString] = bytes }
+        }
+        return MapBundle(map: map, worldMaps: worldMaps, meshFiles: meshes.isEmpty ? nil : meshes)
+    }
+
+    public func loadMesh(mapId: UUID, asset: MeshAsset) throws -> Data? {
+        let url = directory(for: mapId).appendingPathComponent("mesh-\(asset.id.uuidString).obj")
+        guard fm.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        try asset.validate(data: data)
+        return data
     }
 
     /// Writes a bundle file into the temp directory and returns its URL, for ShareLink / AirDrop
@@ -237,7 +289,18 @@ public final class MapStore {
     public func importBundle(_ bundle: MapBundle) throws -> BuildingMap {
         try bundle.validate()
         var result = bundle.map
-        if let existing = try? load(id: bundle.map.id) {
+        if fm.fileExists(atPath: mapJSONURL(bundle.map.id).path) {
+            // An unreadable/future stored map is not a missing map: never overwrite it.
+            let existing = try load(id: bundle.map.id)
+            for asset in (bundle.map.meshAssets ?? []) {
+                if let old = (existing.meshAssets ?? []).first(where: { $0.id == asset.id }) {
+                    var a = old, b = asset
+                    a.storageOwner = nil; b.storageOwner = nil
+                    guard a == b, old.storageOwner == nil || asset.storageOwner == nil || old.storageOwner == asset.storageOwner else {
+                        throw MapStoreError.rejected("Existing mesh metadata cannot be replaced.")
+                    }
+                }
+            }
             let known = Set(existing.nodes.map(\.id))
             for e in bundle.map.edges
             where known.contains(e.from) && known.contains(e.to)
@@ -250,13 +313,22 @@ public final class MapStore {
             // before anything is saved (security review 2026-10-18).
             try MapBundle(map: result).validate()
         }
-        try save(result)
+        // Write payloads first. A failed write may leave an orphan file, never a new
+        // map manifest claiming that its mesh bytes were saved when they were not.
+        try fm.createDirectory(at: directory(for: result.id), withIntermediateDirectories: true)
         for (seg, data) in bundle.worldMaps {
             // Only fill world maps we do not have; never silently replace a good local scan.
             if try loadWorldMap(mapId: result.id, segmentId: seg) == nil {
                 try saveWorldMap(data, mapId: result.id, segmentId: seg)
             }
         }
+        for (key, bytes) in bundle.meshFiles ?? [:] {
+            guard let id = UUID(uuidString: key), let asset = (result.meshAssets ?? []).first(where: { $0.id == id }) else { continue }
+            try asset.validate(data: bytes)
+            let url = directory(for: result.id).appendingPathComponent("mesh-\(id.uuidString).obj")
+            if !fm.fileExists(atPath: url.path) { try bytes.write(to: url, options: .atomic) }
+        }
+        try save(result)
         return result
     }
 

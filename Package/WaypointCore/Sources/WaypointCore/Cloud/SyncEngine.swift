@@ -47,8 +47,22 @@ public final class SyncEngine {
             let path = try Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
             try await client.upload(bucket: Self.worldMapBucket, path: path, data: data)
         }
-        let row = BuildingRow(mapId: mapId, name: bundle.map.name, version: bundle.map.version,
-                              map: bundle.map, isShared: share)
+        var published = bundle.map
+        var assets = published.meshAssets ?? []
+        for i in assets.indices {
+            let asset = assets[i]
+            if asset.storageOwner != nil { continue } // another contributor's immutable asset
+            guard let data = bundle.meshFiles?[asset.id.uuidString] else {
+                throw CloudError.rejected("Local mesh file is missing; refusing to publish a broken reference.")
+            }
+            try asset.validate(data: data)
+            let path = "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(asset.id.uuidString.lowercased()).obj"
+            try await client.upload(bucket: "meshes", path: path, data: data, contentType: "text/plain")
+            assets[i].storageOwner = UUID(uuidString: owner)
+        }
+        if !assets.isEmpty { published.meshAssets = assets }
+        let row = BuildingRow(mapId: mapId, name: published.name, version: published.version,
+                              map: published, isShared: share)
         try await client.upsertBuilding(row)
     }
 
@@ -93,7 +107,20 @@ public final class SyncEngine {
                 continue
             }
         }
-        let bundle = MapBundle(map: remote.row.map, worldMaps: worldMaps)
+        var meshes: [String: Data] = [:]
+        var meshBytes = 0
+        for asset in (remote.row.map.meshAssets ?? []) {
+            guard let contributor = asset.storageOwner else {
+                throw CloudError.rejected("Shared mesh has no contributor.")
+            }
+            guard meshBytes + asset.byteCount <= 80_000_000 else { throw CloudError.rejected("Mesh download exceeds 80 MB.") }
+            let path = "\(contributor.uuidString.lowercased())/\(remote.row.mapId.uuidString.lowercased())/\(asset.id.uuidString.lowercased()).obj"
+            let bytes = try await client.download(bucket: "meshes", path: path)
+            try asset.validate(data: bytes)
+            meshBytes += bytes.count
+            meshes[asset.id.uuidString] = bytes
+        }
+        let bundle = MapBundle(map: remote.row.map, worldMaps: worldMaps, meshFiles: meshes.isEmpty ? nil : meshes)
         do { try bundle.validate() } catch MapStoreError.rejected(let reason) { throw CloudError.rejected(reason) }
         return FetchedBundle(bundle: bundle, missingSegments: missing)
     }

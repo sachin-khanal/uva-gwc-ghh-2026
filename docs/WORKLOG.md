@@ -1,5 +1,101 @@
 # Work log
 
+
+## 2026-10-18 - Codex for U3 - Remove unrequested viewer slogans
+Files edited: web/index.html and docs/WORKLOG.md in open workspace and personal U3 checkout, keeping preview/source aligned. Removed 'Small steps. More independence.' footer span and 'A LITTLE PLANNING GOES A LONG WAY' eyebrow. Plan your route heading retained. No other behavior changed; no commit/push.
+Verified: targeted source check confirms both exact slogans absent and route heading retained; git diff --check PASS. Commands: rg, targeted Python text edits, diff check. No runtime/native checks needed for static copy removal; no native code touched.
+
+
+
+## 2026-10-18 - Codex for U3 - Publish all personal changes to origin/U3
+User explicitly requested pushing all their changes to personal U3. Fetched origin; U3 worktree clean before operation. Fast-forwarded U3 from 99f617b to resolved integration 4600cba, copied all 11 modified tracked docs/web files and new web/{building-model,walkthrough}.js from open workspace. Restored floor1-demo/ from its earlier U3 commit for personal preservation; it remains separate/unlinked and no main push occurs. No credentials or TEMP Floor 4 snapshot added; .codex worktrees excluded. .gitignore was open but had no changes.
+Verified: every copied web source byte-matches the previously tested workspace; latest browser suites 57 logic/GPU/mock + 22 UI PASS and actual Floor 4 fixed-tour validation documented above. Whitespace/docs-hook checks run before commit. Native make test/typecheck unavailable on Windows, as previously attempted; native capture integration remains UNVERIFIED ON DEVICE. No new live DB changes. Commands: git fetch/status/branch/worktree/merge --ff-only/restore, explicit file copies, SHA-256 copy comparison, git diff/check/add/commit/push to U3 only. No force push; GitHub main unchanged. Separate test demo restored only to personal branch.
+
+
+
+## 2026-10-18 - Codex for U3 - Fixed stairs/401 tour with elevator and bathroom stops
+User reported walkthrough glitching and specified stairs near Room 401, around corridor, detour/stop around elevator/bathroom, finish Room 420-428. Edited web/{walkthrough.js,building-model.js,app.js,geometry-tests.js,README.md}, docs/WORKLOG.md. No cloud/map/native edits or commit/push.
+Floor 4 now uses fixed named waypoints in corridor order instead of nearest-destination touring: stairs closest to Room 401, Rooms 401 through 412, return corridor (414/442/434/432/440/430/429), elevator, bathroom, 427, 425, 420-428. Each leg routes along stored connections; repeated room names choose the closest graph-connected occurrence. Pauses 3 seconds by elevator and bathroom, then resumes; tour finishes at 420-428 instead of looping back to 412. Existing generic tour remains fallback for other maps. Inferred hallway geometry includes the fixed tour's loop connectors as well as root-to-room paths, avoiding unnecessary central backtracking. Initial heading uses first actual segment, camera height fixed relative to inferred floor, turn heading uses lookahead and bounded angular speed.
+Verified: actual Floor 4 browser check starts 'stairs near Room 401', ends 'Room 420-428', 82 connected path steps, no skipped requested anchors, elevator then bathroom pauses, no forced return. Elevator/bathroom route distance separation ~1.51 m after restoring modeled loop connector (previous reduced graph forced ~21.6 m detour). Hidden Edge 57 logic/GPU/mock + 22 UI checks PASS, including pause/resume without position skipping and prior complete arrival checks. git diff --check PASS. Temporary actual-map test HTML removed. Commands: read local TEMP snapshot metadata, Get-Content, Python edits, hidden Edge suites/actual snapshot validation. Native unchanged/make unavailable; physical fidelity and manual long-run experience UNVERIFIED ON DEVICE. Preview retained http://127.0.0.1:8023/web/?floor4=1. Supersedes older Room-412-start closed-loop behavior.
+
+
+
+## 2026-10-18 - Codex for U3 - Smaller attached door frames
+User requested smaller doors joined to rooms instead of floating pieces. Edited web/{building-model.js,geometry-tests.js,README.md}, docs/WORKLOG.md. Estimated entrances now snap to actual rendered room/corridor ownership boundaries rather than original scan tag locations. Frames are 0.82 m wide x 2.05 m tall (previous 1.10 x 2.25), with thinner subdued jambs, compact thresholds and lintel wall panels connecting to full-height room walls. Door gap matched to new frame width; non-room/corridor partitions no longer lose arbitrary large circular gaps. If overlapping room cells have no corridor interface, no detached frame is generated. Feature names/positions and underlying graph preserved; no cloud writes/commit/push.
+Verified: headless Edge 56 logic/GPU/mock + 22 UI checks PASS, including compact attached entrance metadata, room preservation, tour/route arrival and selection. git diff --check PASS. Commands: Get-Content, targeted Python edits and hidden Edge on retained preview port 8023. Native unchanged; make unavailable on Windows; room dimensions/door placement remain inferred and physical fidelity UNVERIFIED ON DEVICE.
+
+
+
+## 2026-10-18 - Codex for U3 - Restore corridor shapes; filter route choices only
+User clarified corridors should remain in the model and only be excluded from starting/ending lists. Edited web/app.js to restore full corridor geometry while retaining Floor 4 named-place selectors and duplicate 412 suppression (Room 412 retained). Underlying map unchanged. Also updated this log and web/README.md. No commit/push.
+Verified: hidden Edge 55/55 logic/GPU/mock and 22/22 UI checks PASS; git diff --check PASS. Commands: targeted Python edit, headless Edge against retained 8023 preview. Native checks not run (no native changes, Windows make unavailable); physical geometry remains estimated/UNVERIFIED ON DEVICE. This supersedes preceding entry's corridor-geometry hiding behavior; only named route-choice filtering remains active.
+
+
+
+## 2026-10-18 - Codex for U3 - Named-place-only Floor 4 preview
+User requested keeping named places, deleting corridors, and removing duplicate '412' while retaining Room 412. Edited web/{walkthrough.js,building-model.js,app.js,geometry-tests.js,README.md}, docs/WORKLOG.md. Implemented reversible viewer-only filtering: Floor 4 architectural model omits corridor strips, raw corridor markers cannot be toggled on there, selectors/list show named non-corridor places, exact '412' suppressed when 'Room 412' exists. Room 412 retained; other repeated names retained as distinct saved locations. Underlying graph/Supabase untouched to preserve routing. Current-position/tour anchors use human-readable temporary options rather than corridor names. No commit/push.
+Verified: headless Edge 55 logic/GPU/mock + 22 UI checks PASS; actual Floor 4 snapshot shows 34 named entries, start selector begins Room 412 and no raw Corridor entries. Source immutability and duplicate filtering covered. git diff --check PASS. Commands: Get-Content/rg, Python targeted edits and hidden Edge tests/actual snapshot DOM check. No native changes; make unavailable on Windows. With corridor geometry hidden, routes still cross the retained mapped connections in empty visual space; this is a named-rooms display experiment, not a physical geometry change. Physical fidelity UNVERIFIED ON DEVICE. Preview retained on 8023.
+
+
+
+## 2026-10-18 - Codex for U3 - Walk through starts near Room 412 and tours Floor 4
+User reported Walk through stuck outside; requested starting near Room 412 and going around the floor. Edited web/{walkthrough.js,building-model.js,app.js,geometry-tests.js,ui-tests.js,README.md}, docs/WORKLOG.md. No map/cloud/native changes or commit/push.
+Walk through now builds/plays a connected hallway tour rather than only setting a static camera at the first scan node. Prefers Room 412, anchors to its adjoining corridor, visits reachable corridor anchors beside named places by graph distance and returns to the starting corridor. Respects stairs preference and does not shortcut across unconnected graph edges. Restricts tour planning to corridor edges actually represented in the estimated 3D building, preventing paths through unmodeled space. User can Exit walk, drag to look, or select a room to interrupt/retarget. Original route start restored when exiting tour/Fit, and Fit recomputes the normal route.
+Verified: actual 171-point Floor 4 snapshot tour starts by Room 412 on kind=corridor, 229 path steps, zero skipped anchors, returnsToStart=true; every tour segment is an edge drawn in the building. Temporary browser test HTML removed after execution. Headless Edge suites 54 logic/GPU/mock + 22 UI checks PASS, including tour start/closed connected path, prior route arrival and original selection restoration. git diff --check PASS. Commands: Get-Content, targeted Python edits, hidden Edge suites and temporary actual-snapshot check on retained 8023 preview. Native unchanged; make unavailable on Windows. Physical floor fidelity remains estimated/UNVERIFIED ON DEVICE. Preview retained http://127.0.0.1:8023/web/?floor4=1.
+
+
+
+## 2026-10-18 - Codex for U3 - Apply clarified indoor view and gentler close-up behavior
+User chose realistic full-height enclosed rooms, allowed estimated cleanup, and clarified that the layout itself is correct: zoom and stray lines are the problem. Edited web/{building-model.js,walkthrough.js,app.js,surfaces.js,geometry-tests.js,README.md}, docs/{WORKLOG,TESTING}. Underlying positions, room names, connectivity and room layout unchanged. No cloud edits/commit/push.
+Walking uses wider perspective (focal 0.6 rather than 0.85 times viewport minimum); zoom buttons use bounded 12% steps and walk maximum 1.5. Trips stop 0.55 m inside the inferred doorway rather than center of a small room. Inferred walls now 2.8 m and ceiling mesh is shown only in walking mode; overview retains low cutaway (45%). Walk mode always shows full inferred walls/ceilings regardless of overview cutaway. User data has no surveyed heights; 2.8 m remains an explicit display assumption.
+Selected route rendered on floor rather than floating at scan camera height. Unrelated background edge lines hidden unless raw points are explicitly shown, and label leader lines removed. First-person label occlusion uses inferred wall segments to avoid through-wall name clutter; names remain in the complete place list/overview. No rooms or labels deleted. Door gaps remain open.
+Verified: headless Edge 53/53 logic/GPU/mock and 22/22 UI checks PASS, including wider perspective, wall occlusion, full-height/ceiling metadata, source preservation and full route arrival; git diff --check PASS. Commands: Get-Content/rg, Python targeted edits, hidden Edge tests against retained 8023 preview. No native changes; make unavailable on Windows. Real building geometry and physical touch/visual experience UNVERIFIED ON DEVICE. Preview retained http://127.0.0.1:8023/web/?floor4=1. Supersedes older room-center arrival and low-wall indoor behavior descriptions above.
+
+
+
+## 2026-10-18 - Codex for U3 - Clean Floor 4 geometry and labels without removing rooms
+User requested cosmetic cleanup at close zoom while keeping all labels/rooms. Files edited: web/{building-model.js,app.js,README.md}, docs/WORKLOG.md. No cloud/map edits, no commit/push. Reduced estimated floor raster from 0.35 to 0.18 m, simplified internal partitions as well as exterior contours, gave walls consistent thickness/caps and a floor-foot strip to hide raster/contour cracks. Door gaps remain split before simplification. Standardized gentle floor colors; smaller neutral markers; labels search left/right/staggered slots with lighter leader lines, keeping every name rather than culling. Full text labels retained. Default Floor 4 snapshot zoom reduced to fit enlarged canvas without cropping.
+Verified: hidden Edge 51 logic/GPU/mock checks + 22 UI checks PASS after smoothing/label changes, including source immutability and feature preservation, route arrival, selection and mobile checks. Actual Floor 4 screenshot inspected in TEMP. Final default-framing/floor-foot edits are display-only; full source preservation unchanged. git diff --check PASS. Commands: Get-Content, Python targeted edits, hidden Edge tests/screenshot. No native changes; native checks unavailable on Windows. Real-world geometry remains estimated, physical walkthrough UNVERIFIED ON DEVICE. Preview retained at http://127.0.0.1:8023/web/?floor4=1.
+
+
+
+## 2026-10-18 - Codex for U3 - Larger Floor 4 map and working route selection
+User requested more space/less congestion and fixing room clicks not following the selected route. Files edited: web/{app.js,index.html,styles.css,ui-tests.js,README.md}, docs/{WORKLOG,TESTING}. No map/cloud/native data changes or commit/push.
+Found route overlay was hidden by estimated building initialization, while room selection did not restore it. Choosing a room now makes the route visible; in walking mode it immediately follows the newly selected destination. Added prominent Start route button alongside route summary; disabled for empty/unreachable paths. Travel synchronizes source/destination selectors and route summary, uses closest actual trip anchor after interruption, and updates current node during motion rather than pre-setting destination. Start/step-free changes recompute the trip. Smooth time-based trip updates at ~30 fps, cancelable on Fit/map/drag.
+Widened canvas layout with narrower sidebars, larger height and Expand map/Restore layout control retaining route planning. Intermediate responsive expansion uses full-width map to avoid shrinking at tablet widths; 390px remains usable.
+Verified: 51 logic/GPU/mock checks PASS; UI suite 22/22 PASS including route visibility on room click, Start route/retargeting selectors, complete short trip reaching 'Arrived at Arrival test.', expanded/restored canvas size and mobile overflow. git diff --check PASS. Initial UI expansion check caught a 10px tablet shrink and was fixed; full-arrival check caught the virtual-time RAF scheduling gap, replaced by bounded 32ms monotonic trip timer. Commands: rg/Get-Content, targeted Python edits, hidden Edge against retained 8023 preview, diff check. Native checks not run (no native changes; Windows make unavailable). Real Floor 4 route physical fidelity, rooms/walls still inferred and UNVERIFIED ON DEVICE. Preview http://127.0.0.1:8023/web/?floor4=1 retained.
+
+
+
+## 2026-10-18 - Codex for U3 - Architectural Floor 4 reconstruction from complete saved map
+User corrected scope: wanted a solid 3D building from their full Floor 4 mapping, rather than a route-only view. Read the 171-node/203-edge Floor 4 document (35 explicit named markers including repeated labels) through read-only Supabase. No cloud writes/deletes. Full snapshot is in OS TEMP, not tracked source. Opt-in loopback server --preview-map serves it at /preview-map.json; ?floor4=1 loads real Floor 4 directly without credentials. No first-floor plan used.
+Files created: web/building-model.js. Files edited: web/{app.js,surfaces.js,index.html,serve.py,geometry-tests.js,ui-tests.js,README.md}, docs/{WORKLOG,MODULES,TESTING}. Estimated model rasterizes connected mapped paths into corridors and named markers into room volumes; measured extents take precedence. Union of shortest paths to labeled destinations excludes dangling unlabeled detours from architectural preview. Preserves every named marker, coordinates, IDs and underlying routing graph. Generates floor tiles, low partitions/outer walls with simplified contours, teal thresholds/frames, colored room floors, and offset readable labels. First-person renderer and graph travel retained; walks enter estimated room centers, and hidden mapped points can be double-clicked/tapped for travel. Actual verified OBJ takes priority over estimated geometry.
+Geometry is explicitly labeled Estimated 3D building: corridor width 1.8 m, default rooms 3 x 3.6 m, floor offset 1.5 m, walls 1.05 m are DISPLAY ASSUMPTIONS, not measurements; no real scan exists in these Floor 4 rows. Bounded node/label/grid limits prevent excessive geometry. Added optional color attributes to WebGL while retaining existing real-mesh rendering tests.
+Verified: hidden Edge 51/51 logic/GPU/mock checks and 19/19 UI checks PASS; Python 22 PASS; git diff --check PASS. Opened actual Floor 4 snapshot in headless browser: title correct, 171 places/203 connections, 35 modeled named places, no load error. Screenshot inspected in TEMP. Native code unchanged; make unavailable on Windows; actual physical building fidelity/phone use UNVERIFIED ON DEVICE. Commands: read-only Supabase query, Python targeted edits, apply_patch, loopback preview with explicit TEMP file, hidden Edge tests/screenshots, Python unittest. No commit/push. Retained preview at http://127.0.0.1:8023/web/?floor4=1.
+
+
+
+## 2026-10-18 - Codex for U3 - First-person Floor 4 viewer and hidden unlabeled points
+User requested Google Maps style walking in Floor 4 and removal of unlabeled triangle/points. Files created: web/walkthrough.js. Files edited: web/{app.js,index.html,styles.css,surfaces.js,geometry-tests.js,ui-tests.js,README.md}, docs/WORKLOG.md, docs/MODULES.md, docs/TESTING.md. No floor1 demo, native or cloud data changes, no commit/push.
+Read-only Supabase metadata inspection: Floor 4 maps have no meshAssets (largest 171 nodes/35 labeled points). Added eye-level perspective for canvas and actual mesh shader, graph-constrained smooth travel by double click/touch double tap on labeled destinations, Walk through/Exit and Walk to destination buttons. Fit/map changes cancel trips. Unlabeled markers and background edges touching unlabeled nodes hidden by default; Show unlabeled points restores them. Routing retains all nodes, selected route still drawn. No fake walls generated. Visible status explicitly says route-only walkthrough when no real 3D scan exists.
+Verified: headless Edge 49/49 logic/GPU/mock checks + 19/19 UI checks PASS (including projected mesh pixels, behind-camera clipping, bent graph interpolation, hidden point restoration, unchanged routing choices, desktop/touch entry and Fit reset). Python 22/22 PASS; git diff --check PASS. Native not changed; make checks unavailable on Windows. No real Floor 4 scan/walls to verify. Physical touch and real uploaded mesh performance remain UNVERIFIED ON DEVICE. Commands: Get-Content/rg, read-only Supabase query, apply_patch/Python edits, Python loopback server + hidden Edge, Python unittest. Root updated viewer retained on port 8000; temporary QA server stopped.
+
+
+## 2026-10-18 - Codex for U3 - Apply requested live migrations 0004/0005/0007
+User explicitly requested running these three migrations on connected Supabase. Inspected public tables, migration history and rich geometry prerequisite first. Applied local files 0004_storage_read_policy.sql, 0005_map_extras_constraint.sql and 0007_mesh_read_policy.sql in that order through Supabase apply_migration; all returned success. No other migrations run. No source files edited; this WORKLOG entry is the only local edit; no commit/push.
+Verified: both storage policies use objects.name and no c.name; worldmaps uses exact full-path matching. canonical_map_extras_valid CHECK exists and convalidated=true. All 4 canonical buildings satisfy map_extras_valid. Read-only smoke queries accept an empty extras document and reject extent on a non-room. Existing function waypoint_validate_geometry was present before application.
+NOT verified: real cross-user downloads/device behavior, full disposable-database SQL regression scripts (contain psql/table setup; deliberately not run on live data). No native changes/tests; make/Swift unavailable on Windows. UNVERIFIED ON DEVICE. Commands/tools: Get-Content, Supabase list_tables/list_migrations/execute_sql/apply_migration.
+
+
+## 2026-10-18 - Codex for U3 - Resolve U3/main integration [CONTRACT CHANGE compatibility]
+Area: shared Model/Capture/Sync and backend tooling; user explicitly authorized resolving cross-owner conflicts. Integration branch integrate-u3 starts at main 6269746 and merges U3 99f617b. Main and original U3 checkouts preserved. First-floor demo excluded from merge tree; original committed files remain on U3.
+Files: shared BuildingMap/MapStore, MeshAsset extension, OBJEncoder, RoomExtractor input guards, SyncEngine; CaptureController and MeshExporter; RichMapSchemaTests/CloudTests/RouteVectorTests; sample; Python validator/tests; additive docs and rich-map SQL/tests. Retained main web source/fixtures and native MapTypes/MapBuilder/MeshSampler/RoomExtractor algorithm, keyframes, USDZ APIs, local scan save policy and stricter validation. Removed auto-merged duplicate wallPoints method. Optional meshAssets stays nil on legacy maps, no JSON/schema bump; mesh integrity methods extend existing shared type. OBJ capture snapshots before pause, encodes off-main and attaches on main independently of USDZ/local-save success. Existing keyframes retained/unioned; new regression covers OBJ attachment retaining fingerprint + worldmap. Extents enrich only missing geometry; immutable mesh owner metadata may fill absent owner.
+Incoming SQL numbered 0006 rich-map / 0007 mesh-policy / 0008 validator-alias to avoid main's 0004/0005 collisions. New rich-map function includes corrected object path and validator alias plus keyframe union; preserves main's 0005 constraint and 0003 wrapper. Already deployed migrations were not rerun or renamed on the live database. Historical U3 docs retained additively; old deployment filenames/status are historical and superseded here.
+Commands: git fetch/merge-tree/worktree/merge, source comparisons, Python unittest discovery, temporary loopback server 8021 + hidden Edge, rg conflict/duplicate scans, git diff --check, required docs hook installation/check, git add/commit.
+Verified: Python 22/22 PASS; integrated browser logic/GPU/mock checks 46/46 PASS and UI 16/16 PASS. No conflict markers remain. First-floor files absent. Whitespace check PASS after formatting-only trailing-space cleanup.
+NOT verified: make test and make typecheck both attempted and FAILED TO START (make/Swift/Xcode unavailable on Windows). New Swift integration tests and updated iOS capture have NOT compiled/run here. New SQL keyframe-union integration not executed; no live DB changes. All physical AR/OBJ/USDZ/mesh roundtrip behavior UNVERIFIED ON DEVICE. Main push withheld pending required Mac checks. Integration is a conflict-resolution candidate, not a release verification claim.
+
+
 ## 2026-10-18 06:20 — Claude (agent, for Sachin) — Integrated U2's navigation-overhaul (12 commits) with main; conflicts resolved; two fixes   [tags: CONTRACT CHANGE, BUILD]
 Area: shared integration (U1 merge captain). Branch `integrate/navigation-overhaul` = main f912ef5 + origin/navigation-overhaul a107f85 (Anmol, 12 commits: keyframe relocalization with visual fingerprints OFF by default, "one move at a time" speech, sooner re-routing, route continuously, scan both directions (`CoverageTracker`), suggest a way round a blockage (`AvoidanceAdvisor`)). Cross-referenced first: main = origin/main; U3 and app-ui-workflows unchanged; Anmol pushed 3 more commits while this was being prepared (latest a107f85, minutes old).
 Conflicts (4 files, 8 blocks) and how they were resolved, keeping BOTH sides: `FeedbackPlanner.swift` (params `context:` + `isMoving:` + U2's `avoidTowards:`); `BuildingMap.swift` (kept my instance `schemaVersion` + `meshAssets` + U2's `keyframes`; U2's own hand-written decoder was a DUPLICATE of mine and was removed, `keyframes` is now decoded by the single decoder with `decodeIfPresent ?? []`; format 3 now also means `keyframes`, MAP_FORMAT.md updated); `NavigationController.swift` (my sensor context + opening briefing + sign speech + U2's pose-jump guard + avoidance advice); WORKLOG (both entries).
@@ -1425,3 +1521,567 @@ wanted a CLI-first build and docs readable by humans and agents.
 5. Known logic gaps are listed per owner at the bottom of `docs/MODULES.md`.
 
 **Update 2026-10-17 (Codex):** isolated main integration re-run: 46/46 browser logic/GPU/mock checks and 16/16 UI checks PASS; git diff --check PASS. Temporary preview server stopped.
+
+
+## Update 2026-10-18 (Codex) ? preserved U3 integration notes
+
+The following U3 notes are retained for history. Current integration details are in the newest WORKLOG entry; earlier status claims describe their original checkout.
+
+# Work log
+
+## 2026-10-18 - Codex for U3 - Preserve local work before main update
+User requested committing local work to U3 before updating main. Original work was safely stashed before a local-only fast-forward of main to 6269746; no remote push occurred. Restored stash on original U3 base e22e5cb in isolated .codex-u3-preserve worktree, with no conflicts; stash retained as backup. This commit preserves all original tracked/untracked changes, including native rich-map work, SQL follow-ups, web viewer and standalone floor1 demo. No merge into main or remote push in this operation.
+Commands: git fetch/status/stash/switch/merge/worktree, Python unittest discovery, git diff --check, git add/commit. Verification: Python validator suite 15 PASS; diff whitespace check PASS. Prior separate demo checks 29 PASS, web checks 62 PASS and SQL regressions documented above; not rerun for preservation. Native make test/typecheck unavailable on Windows; native/device work UNVERIFIED ON DEVICE. Existing duplicate migration numbering and native integration still need review before merging U3 changes to main. Main checkout stays at fetched upstream main; preservation is not a claim that all native work is release-ready.
+
+## 2026-10-17 - Codex for U3 - Lower walls, plain names and bounded zoom
+User requested removing question-mark/DOOR label suffixes, lower walls for visibility, and zoom buttons. Edited separate floor1-demo/{floor1-model.js,floor1.js,floor1.html,floor1.css,checks.html} plus this log. Labels now use room names unchanged. Walls default to 0.85 m in both overview/walking; Low walls toggle restores full height when off. Door frames and signage remain visible. Added +, minus and Fit building controls; proportional 10% overview steps bounded to 18-100 distance, walking FOV bounded to 0.35-0.7 half-angle. Wheel uses bounded proportional steps instead of unbounded per-event delta. Geometry/rooms/open areas and shared website preserved.
+Verified: hidden headless Edge checks 19/19 PASS and movement checks 10/10 PASS, including zoom step/limits/Fit and low-wall persistence walking. Commands: rg, targeted Python edits, hidden Edge against retained demo server on 8020. No dependencies, native changes, commit/push. Physical device/touch visualization UNVERIFIED ON DEVICE; model remains estimated from plan. No make tests (Windows unavailable, no native changes).
+
+## 2026-10-17 - Codex for U3 - Open lobby/cafe and visible room entrances
+User clarified Einstein's and entry lobby are open areas and requested labeled office/meeting doors. Edited only separate floor1-demo/{floor1-model.js,floor1.js,checks.html,movement-checks.html} plus this log. Lobby/cafe retain floor markings without enclosing walls or ceilings. Enclosed spaces now have contrasting door jambs/header, open door leaf/handle, sign backing and larger eye-level labels anchored over entrances (DOOR); open area labels say OPEN. Door gaps remain passable. Main/shared website untouched; no commit/push.
+Verified: hidden headless Edge smoke/geometry/UI checks 14/14 PASS; double click/touch movement checks 10/10 PASS. Updated wall test to aim outside the lab doorway: removing the lobby enclosure correctly allows travel through that doorway. Commands: Get-Content/rg, targeted Python edits, hidden Edge on existing separate preview port 8020. No native changes; make checks not run (unavailable on Windows). Actual touch/device visual fidelity remains UNVERIFIED ON DEVICE. Plan scale, door placement and furniture remain estimates. Preview retained for user.
+
+## 2026-10-17 - Codex for U3 - Double-tap movement in separate floor demo
+Files edited: floor1-demo/floor1.js, floor1-demo/floor1.html; created floor1-demo/movement-checks.html; this log updated. Floor geometry, colors, markings and shared website preserved. Perspective floor picking handles desktop double click and touch double tap, smoothly moves camera from overview to eye level or toward a walking target, stops direct movement at walls, highlights target, and retains keyboard/room controls. Drag gestures do not trigger touch travel; movement/drag cancels transitions. No dependency/cloud/commit/push.
+Verified: headless Edge existing smoke checks 10/10 PASS and new movement checks 10/10 PASS (desktop/touch entry, target, transition timing, further movement, wall blocking, outside rejection, renderer errors). Commands: Get-Content, apply_patch, targeted Python edits, hidden headless Edge using existing separate loopback preview port 8020. Physical touch/visual animation timing not manually tested; virtual-time checks include tolerance for integer MouseEvent coordinates. Native tests not run (no Swift changes; Windows make unavailable). Floor-plan approximation limits remain unchanged; UNVERIFIED ON DEVICE. Preview remains at http://127.0.0.1:8020/floor1.html.
+
+## 2026-10-17 - Codex for U3 - Separate first-floor concept demo
+User requested a 3D reconstruction from the supplied floor-plan image, then explicitly required a separate website. Created floor1-demo/{floor1.html,floor1.css,floor1-model.js,floor1.js,serve.py,checks.html,preview.png}. Removed only the three temporary untracked floor1 prototype files created in the publish worktree; shared viewer source and main unchanged. No commit/push/cloud writes/deployment.
+Demo includes 23 marked spaces, colored floor polygons, 3D walls/ceilings, illustrative auditorium seating and furniture, orbit/zoom, first-person movement, wall collision checks, room teleport selectors, cutaway, labels and mobile controls. Source image visually interpreted, not a calibrated trace: scale 0.1 m/image pixel, height 3.2 m, door positions/furniture and unreadable room names estimated; some plan regions simplified. Explicit concept-only status shown.
+Verified: isolated Edge smoke checks 10/10 PASS (WebGL init, spaces, triangles, modes, movement, room selection, bounds, ceilings, 390px overflow); screenshot inspected. Commands: targeted Copy-Item/Remove-Item, apply_patch, Python isolated loopback server on port 8020, hidden headless Edge checks/screenshot. No dependencies or native changes; make test/typecheck unavailable on Windows. Device/physical accuracy UNVERIFIED ON DEVICE. Preview server retained for user to try at http://127.0.0.1:8020/floor1.html; only demo directory served.
+
+## 2026-10-17 - Codex for U3 - Web viewer commit readiness review
+Read-only code/status review; only docs/WORKLOG.md edited to record results. No staging/commit/push. Commands: git status --short, git diff --stat/check, Get-Content, rg, Python unittest discovery, temporary loopback web/serve.py on 8017, hidden headless Edge DOM checks. Verified now: browser logic/geometry/cloud mocks 46/46 PASS; UI 16/16 PASS; Python 15 PASS; git diff --check PASS. Preview server stopped.
+Web-focused commit must include web/, Samples/route-vectors.json, the updated Samples/rice-hall-sample.json and applicable docs; broader native schema/capture changes are mixed in the working tree and remain unverified on Mac/device. README has stale cloud deployment claims (0004 not applied) superseded by live SQL entries above, and binary-file wording predating OBJ support. Existing duplicate 0004 migration numbering needs reconciliation before CLI migration deployment, not a browser-only commit blocker. Live cloud downloads and real LiDAR fidelity/performance remain unverified; make/native checks unavailable on Windows. No secrets observed in the reviewed web source; no exhaustive security audit claimed.
+
+## 2026-10-17 - Codex for U3 - Delete connection-test canonical buildings
+User explicitly requested DELETE FROM public.canonical_buildings WHERE name LIKE 'ZZ CONNECTION TEST%'. Executed through Supabase execute_sql with RETURNING map_id,name: 2 rows deleted (0dd6bb28-dbc1-49cd-ab07-625043c2ebbb and 1fc97ab0-ec18-4d50-8719-0075d928a03c). No storage cleanup requested or performed. Only local file edited: docs/WORKLOG.md; no files created/deleted. Verification: DELETE returned both affected rows successfully. No source/native changes; native checks not run for this data-only operation. No commit/push.
+
+## 2026-10-17 - Codex for U3 - Apply corrected worldmap read policy
+User explicitly requested live policy replacement and confirmation. Applied supplied SQL through Supabase apply_migration as worldmaps_read_policy; success. SQL matches existing supabase/migrations/0004_storage_read_policy.sql, so no migration source edits. Only local file edited: docs/WORKLOG.md (new entry). No files created/deleted.
+Verified via pg_policies: canonical_worldmaps_read contains objects.name and does not contain c.name (both boolean assertions true). This resolves the worldmap policy issue recorded in the preceding entry. Actual cross-user HTTP download not exercised; device behavior UNVERIFIED ON DEVICE. Commands/tools: Get-Content, Supabase execute_sql (before/after), apply_migration, git diff --check. No native code changed; make test/typecheck unavailable in this Windows environment as established earlier. No commit/push.
+
+## 2026-10-17 - Codex for U3 - Live rich-map SQL verification and fixes
+Files created: supabase/migrations/0005_mesh_read_policy.sql and 0006_geometry_validator_alias.sql. Files edited: docs/WORKLOG.md, docs/MODULES.md, docs/TESTING.md (additive updates). No files deleted; existing work preserved.
+Connected Supabase inspection confirmed the pasted 0004 functions and 0003 checked wrapper were already deployed despite empty migration history. Did not replay older migrations. Applied follow-up migrations mesh_read_policy and geometry_validator_alias successfully through Supabase MCP. First qualifies objects.name in canonical_mesh_read (bare name resolved to c.name); second fixes PL/pgSQL variable n colliding with the node query alias, discovered by the live rich-map regression. Existing migrations left intact.
+Verified: supabase/tests/rich_map_schema.sql, canonical_maps.sql and extension_connections.sql each executed successfully against the connected database after fixes, with transactional fixture rollback. Inspected deployed mesh policy: references objects.name. Canonical building count remained 1 after initial regression runs. Commands: Get-Content, git status, make help/test/typecheck, git diff --check; Supabase list_tables/list_migrations/execute_sql/apply_migration.
+make test and make typecheck: FAILED TO START (make unavailable on Windows); no native changes. Cross-user mesh HTTP download and phone behavior remain UNVERIFIED ON DEVICE. Open problems: existing canonical_worldmaps_read also resolves bare name to c.name; imported 0004_storage_read_policy.sql fixes it but was not applied in this rich-map task. Two existing local 0004 filenames still require ordering/version reconciliation before CLI deployment; preexisting dashboard migrations are not recorded in Supabase history. No commit/push.
+
+
+## 2026-10-17 - Codex for U3 - Import guidance voice storage migration
+User requested importing and applying guidance voice SQL migrations. Fetched origin; imported `supabase/migrations/0004_storage_read_policy.sql` and `supabase/tests/storage_read_policy.sql` byte-for-byte from origin/fix/guidance-voice (2218557). Migrations 0001-0003 already identical. No branch merge, commit or push. Existing untracked 0004_rich_map_schema.sql untouched; its duplicate 0004 number and unqualified storage name still need resolution before migration deployment.
+Verified: imported bytes match git show; codex mcp list reports project-scoped supabase enabled with OAuth; prior login process completed Successfully logged in. Live application NOT performed: this active chat has no callable Supabase tools; newly configured MCP requires reloading/restarting the Codex session. Do not infer database changes from local import. Storage regression is a disposable-database psql script, not for the live SQL editor. No native source changes; native checks/device behavior not exercised.
+
+
+## 2026-10-17 ? Codex for U3 ? Render actual LiDAR interior surfaces
+Files created: `web/surfaces.js`. Files edited: `web/{app.js,index.html,styles.css,geometry-tests.js,README.md}`, `docs/WORKLOG.md`. No files deleted. Personal U3 work remains local; main unchanged.
+Replaced sparse transparent triangle sampling with full, opaque, flat-lit WebGL triangles and a depth buffer. Uses captured map-frame OBJ vertices without inferring walls from route lines. Two-sided surfaces preserve scan visibility; GPU buffers released on map switches. Height cutaway reveals interiors without modifying scan data. Scan visibility and route overlay are independent; verified mesh arrival defaults to surfaces only unless the user selected an overlay preference. Room boxes are suppressed when real scan geometry is loaded. Missing scans retain explicit graph-only status; renderer initialization failures report a readable error.
+Verification: hidden headless Edge (software WebGL) 46/46 logic/geometry/mock-cloud checks + 16/16 UI checks PASS. New checks verify all 12,001 triangles are retained, face normals, GPU opaque pixel output, height clipping and buffer cleanup. Python unittest discovery 15 PASS; git diff --check PASS. Temporary loopback preview stopped after QA. make test and make typecheck attempted: unavailable on Windows (make not installed).
+Limitations: no real building mesh supplied; triangle fixtures are synthetic. Device capture, physical wall fidelity, real scan performance and iOS build remain UNVERIFIED ON DEVICE. OBJ carries shape, not photographic textures or true interior colors. SQL 0004/native checks from prior entry still pending. No new schema change required for surface rendering.
+
+
+## 2026-10-17 — Codex for U3 — Schema 3 rich geometry [tags: CONTRACT CHANGE]
+Area: shared Model, A/C capture, D storage/cloud, U3 web/tooling. User explicitly authorized richer data/schema 3 on personal U3, including these cross-owner changes. Existing uncommitted viewer work preserved; main untouched.
+Sources: version framework from origin/main (34e9a73; fetched head dd38866); RoomExtent/RoomExtractor and wall sampler from navigation-overhaul (6c892a1 lineage). Retains serialized version framework; does NOT reuse that branch's static schema-2 meaning. Schema 3 reads 1/2/3, rejects future files, and leaves missing old geometry nil/empty.
+Files created: core `Model/MeshAsset.swift`, `Scan/{OBJEncoder,RoomExtractor}.swift`, tests `RichMapSchemaTests.swift`; app `Waypoint/Scan/MeshExporter.swift`; `supabase/migrations/0004_rich_map_schema.sql`, `supabase/tests/rich_map_schema.sql`; `tools/test_rich_maps.py`; `docs/MAP_FORMAT.md`, `docs/map-format/{map-v1.json,map-v2.json,map-v3.json,mesh-v3.obj}`; web `geometry3d.js`, `geometry-tests.js` (earlier uncommitted viewer retained).
+Files edited: core `Model/{BuildingMap,MapTypes,MapBuilder,MapStore}.swift`, `Cloud/SyncEngine.swift`, `CloudTests.swift`; app `Capture/CaptureController.swift`, `Scan/MeshSampler.swift`; `Samples/rice-hall-sample.json` (schema 3, SYNTHETIC footprints, no real mesh); `tools/validate_map.py`; web `app.js`, `cloud.js`, `cloud-tests.js`, `index.html`, `styles.css`, `tests.html`, `ui-tests.js`, `test-web.mjs`, README; docs MODULES/ROADMAP/DECISIONS/TESTING/WORKLOG and tools README (additive/strike-update). Files deleted: none.
+**Update 2026-10-17 (Codex):** also added the schema-3 compatibility/pipeline note to `Architecture.md` before final handoff.
+Contract: optional room footprint (floor center, half extents, yaw, area, optional measured height); OBJ asset manifest (UUID, segment, map frame, bytes, SHA-256, bounds, cloud owner); optional meshFiles bundle payloads. Actual anchor transforms bake into MAP-frame vertices. No textures/face labels, inferred walls/heights or fabricated geometry on migration. Limits: 40 MB/asset, 80 MB total/map, 100 assets, 500k exported vertices/1m triangles. Local payloads write before manifest; conflicting assets reject, missing extents fill, stale copies preserve rich fields; unreadable future on-disk maps cannot be overwritten.
+Pipeline: classified floor/wall samples drive room extraction; absent enclosure stays nil. AR buffers snapshot on session queue, OBJ/archive encoding off-main; save/bundle/cloud carry integrity-checked meshes. Mesh uploads precede canonical manifest; contributor UUIDs locate files. SQL 0004 retains the 0003 shortcut wrapper, validates rich fields, upgrades writes to schema 3, allows absent extent enrichment, rejects conflicting replacements and preserves omitted geometry. 0001-0003 unchanged; no live SQL run. Web supports XYZ orbit/keyboard camera/zoom/reset, room footprints, verified OBJ loading from bundles/cloud and explicit missing-file status. Rendering sampling never changes stored files.
+Commands: git fetch/show/diff for source review; Python validator on fixtures 1/2/3 -> 3 PASS; `python -B -m unittest discover -s tools -p "test_*.py" -q` -> 15 PASS; temporary `python -B web/serve.py --port 8000`; hidden headless Edge -> 44/44 logic/geometry/API-mock and 16/16 UI PASS (60 browser checks); desktop screenshot inspected in TEMP; git diff --check PASS. make test/typecheck attempted -> cannot launch (make/Swift/Xcode unavailable on Windows).
+NOT verified: 7 new native schema/geometry/store tests + 2 cloud regressions, iOS typecheck/build, SQL 0004/test execution, LiDAR extraction/export performance, live mesh cloud roundtrip/cross-phone alignment. UNVERIFIED ON DEVICE. Browser cloud tests mocked; optional Node runner not executed (Node absent).
+Handoff: apply 0004 after 0003, run rich_map_schema.sql and both old SQL tests; Mac owner runs make test/typecheck/check and device scan-save-publish-web/second-phone roundtrip. U3 base predates newer main: preserve main route-memory APIs/new navigation/UI on integration, never copy files wholesale. QA server stopped after checks. No dependencies, hosted deployment, commit or push.
+
+
+## 2026-10-17 — Codex for U3 — Restore web building explorer (U3.7)
+Area: D / U3 (web/tooling); user requested redo after undoing the local viewer work.
+Files created: `web/{index.html,styles.css,app.js,router.js,cloud.js,serve.py,README.md,package.json,test-web.mjs,route-tests.js,cloud-tests.js,tests.html,ui-tests.js,ui-tests.html}`, `Samples/route-vectors.json`, `Package/WaypointCore/Tests/WaypointCoreTests/RouteVectorTests.swift`.
+Files edited: `tools/validate_map.py` (default discovery excludes route vectors), `tools/test_validate_map.py` (default CLI check), `tools/README.md` (strike/update note), docs WORKLOG/MODULES/ROADMAP/TESTING (additive status). Native shared-vector test is part of the roadmap's U3.7 assignment; no B-owned router code, map schema or original sample changed.
+Behavior: sample and local-file plan viewer; memory-only anonymous Supabase connection and canonical-building list; graph validation; start/destination selection and canvas clicks; A* with the native stairs penalty; route length/hazard warnings; zoom/fit; responsive/keyboard controls. Supabase is read-only. Restored desktop layout and sample labels with separate starting-point label. Local repo workflow; no Site hosting, registration or dependencies.
+Commands run: temporary `python -B web/serve.py --port 8000`; hidden headless Edge runs of `/web/tests.html` and `/web/ui-tests.html`, captures in TEMP; `python -B tools/validate_map.py`; `python -B -m unittest discover -s tools -p "test_*.py" -q`; `git diff --check`; `make test`; `make typecheck`.
+Verified on restored files: 33/33 browser routing/validation/cloud MOCK tests PASS; 13/13 actual DOM interaction tests PASS (sample route, marker clicks, stairs, selectors, search, local import/plain-text labels, invalid import, disconnected/empty maps, mock canonical connect/refresh, 390px no horizontal overflow). Sample validator PASS; 9 Python tests PASS; whitespace check PASS.
+NOT verified: live Supabase (anon key not supplied), optional Node runner (Node unavailable), new native RouteVectorTests (Mac needed). make test/typecheck both fail to launch because make is not installed on Windows. Prior Mac checks predate the new shared-vector test. Browser and Swift use the same expectations, but native parity is not yet proven. AR behavior remains UNVERIFIED ON DEVICE.
+Handoff: `python -B web/serve.py`, open http://127.0.0.1:8000/web/, Connect library with anon public key. Preview is read-only and projects floors together, not live positioning. QA server stopped after checks. No commit or push.
+
+
+## 2026-10-17 — Codex for U3 — Main integration authorized after reported checks
+Area: shared integration; user explicitly authorized merging U3 into main.
+Files edited: `docs/WORKLOG.md` (this verification/handoff entry only).
+User-reported verification: make test, make typecheck, and make check all passed on the Mac; migration 0003 and both SQL test scripts also reported success in Supabase. These update earlier pending-check notes; agent did not directly run the Mac or dashboard checks.
+Commands: git fetch origin; ancestry and diff whitespace checks; git switch main; git merge --ff-only U3 (0fc02d5, no conflicts); documentation commit and push to origin/main.
+NOT verified: real-device scan extension and cross-phone alignment remain UNVERIFIED ON DEVICE. No claim that compile/SQL checks prove AR behavior.
+Handoff: teammates pull main; perform the extension checklist in docs/TESTING.md on LiDAR phones before relying on it for navigation.
+
+
+## 2026-10-17 — Codex for U3 — Align extension rules and add existing-building scan flow
+Area: D (SQL/UI), A (capture and MapBuilder); U3 explicitly requested BOTH integration fixes, authorizing these A-owned edits.
+Files created: `supabase/migrations/0003_extension_connections.sql`, `supabase/tests/extension_connections.sql`, `Package/WaypointCore/Tests/WaypointCoreTests/MapExtensionTests.swift`.
+Files edited: `Model/MapBuilder.swift` (bounded first-breadcrumb attachment), `Waypoint/Capture/CaptureController.swift` (load selected ARWorldMap before recording, preserve building ID, unique segment ID, gate tagging/saving, merge saved snapshot), `Waypoint/UI/VolunteerView.swift` (existing building and scan segment pickers, explicit attachment, cancel/done), `supabase/CANONICAL_MAPS.md`, docs WORKLOG/MODULES/ROADMAP/TESTING.
+Behavior: new SQL wrapper rejects previously absent edges joining two pre-existing canonical nodes, preserving the local import protection; internal merge RPC loses API execution grants. Original already-applied 0002 remains unchanged. New segments attach only to corridor/junction nodes within 2 m and 0.75 m vertical offset; missing saved world maps cannot start an extension. No marker-only or new-origin fallback. New scans also get unique segment IDs. Save merges with the current local map and retains existing scan files; acquisition freezes during save and stops on success.
+Commands run: `git diff --check`; `python -B tools/validate_map.py` (sample PASS); `python -B -m unittest discover -s tools -p "test_*.py" -q` (9 PASS); `make test` and `make typecheck` (both fail to launch: make not installed on Windows).
+Verified: Python regression suite and whitespace check only. Added 3 Swift tests for attachment/identity/route reachability/local import, bounded failure/no mutation, and one-time attachment; SQL test checks shortcut rejection, legitimate new-node path, and repeat/reversed existing edges. New Swift/SQL tests NOT executed here; no Swift/Xcode/PostgreSQL available.
+NOT verified: iOS compilation, new Swift tests, new migration/tests, world-map relocalization and cross-phone scan alignment; UNVERIFIED ON DEVICE. Earlier user-reported 0002 test success does not cover 0003.
+Handoff: apply 0003 then run both SQL test files; Mac teammate runs make test/typecheck and the new extension device checklist in docs/TESTING.md. No JSON contract changes, dependencies, commit, push, or remote database writes by the agent.
+
+
+## 2026-10-17 — Codex for U3 — Shared-map verification and branch handoff
+Area: D (cloud/backend).
+Files edited: `docs/WORKLOG.md` (this entry); committing the canonical-map files listed in the entry below at U3's request.
+User-reported verification: U3 ran the full migration `0002_canonical_maps.sql` and the full `supabase/tests/canonical_maps.sql` in the Supabase SQL Editor; both returned success. This updates the earlier unverified SQL status below; the agent did not directly observe the dashboard.
+Commands run: `git status --short --branch`, `git diff --check`; commit and push to `origin/U3` requested. No main merge.
+Verified: whitespace check passed. Earlier Python regression suite: 9 PASS.
+NOT verified: Swift tests/typecheck still require a Mac (prior attempts failed because make is unavailable); live concurrent requests and app integration remain unverified; UNVERIFIED ON DEVICE.
+Handoff: Mac teammate should run make test and make typecheck, then device cloud checks. Full extend-existing-map capture flow remains separate.
+
+
+## 2026-10-17 — Codex for U3 — Canonical shared building map [tags: CONTRACT CHANGE]
+Area: D cloud/backend; user explicitly requested one main map per building that other users can extend and see.
+Files created: `supabase/migrations/0002_canonical_maps.sql`, `supabase/tests/canonical_maps.sql`, `supabase/CANONICAL_MAPS.md`.
+Files edited: core `Cloud/{SupabaseClient,CloudModels,SyncEngine}.swift`, `CloudTests.swift`, app `CloudController.swift`, `SyncView.swift`; docs WORKLOG/MODULES/DECISIONS (additive notes). App UI edits are necessary for the requested cloud behavior (remove private publish option, review every shared download).
+CONTRACT CHANGE: cloud endpoint now uses canonical_buildings and rpc/extend_building; optional segment_owners column tracks contributor scan paths. BuildingMap JSON unchanged, so no schemaVersion bump or sample change. Apply migration 0002 before using this client. Original 0001 data remains; existing maps must be republished.
+Behavior: one unique map UUID per building; all authenticated users can read; atomic additive merges preserve concurrent/stale contributions; existing-node/edge edits rejected. Different names are not a building identity mechanism. Scan alignment and unique segment IDs remain the capture owner's responsibility.
+Commands: `git diff --check`; Python validator tests (9 PASS); `make test` and `make typecheck` attempted, both unavailable because make is not installed on Windows.
+Verified: existing Python suite passes, diff whitespace checks pass. Updated Swift request assertions and added contributor-file-path regression; added transactional SQL functional test.
+NOT verified: SQL migration/test execution (no PostgreSQL here), Swift tests/typecheck (Mac required), concurrency on live server; UNVERIFIED ON DEVICE. No remote database changed, no dependencies added, no commit/push.
+Handoff: apply 0002 and run supabase/tests/canonical_maps.sql in dashboard; Mac owner runs required make checks. Full extend-existing-map capture UI is still a separate roadmap task. Prior D-015 contributor-row behavior is superseded for updated clients, retained for old-client data.
+
+
+## 2026-10-17 — Codex for U3 — Windows map validator (U3.4)
+Area: D (U3 tooling)
+Files created: `tools/validate_map.py`, `tools/test_validate_map.py`, `tools/README.md`.
+Files edited: `docs/WORKLOG.md` (this entry), `docs/MODULES.md` and `docs/ROADMAP.md` (additive status notes).
+Files deleted: none. No Swift, schema, sample, dependencies, or CI workflow changed.
+Commands run: `py --version` (launcher reports no installed Python); `python --version` (3.14.0); `make help`, `make test`, `make typecheck` (all unavailable: make not installed on Windows); `python -B tools/validate_map.py`; `python -B -m unittest discover -s tools -p "test_*.py" -v`; `git diff --check`.
+Verified: sample PASS; 9 Python tests PASS, including hostile segment ids, nonfinite/overflow coordinates, duplicate UUIDs with different case, bad references, self-loops, distance tolerance, size limits, malformed bundles, required fields, and CLI failure exit codes. Whitespace check passed.
+NOT verified: Swift unit tests and iOS typecheck require a Mac; UNVERIFIED ON DEVICE. Python float math approximates SIMD and may differ at rounding boundaries; marker finite-number checking is intentionally stricter. Real-world map truth and existing-map merge checks are outside this tool's scope.
+Open problems / handoff: INF-2 CI wiring is still separate, as requested by U3. Mac teammate should run required make checks before merging. No commit or push performed.
+
+
+**Newest entry at the TOP.** Every human and agent adds an entry when they finish a block of work.
+This is how four people plus LLM agents stay in sync, so be explicit and complete.
+
+## Entry template (copy this)
+
+```
+## YYYY-MM-DD HH:MM — <name or agent> — <one-line summary>   [tags: CONTRACT CHANGE | BUILD | DOCS | BUG]
+Area: A | B | C | D | shared
+Files created:  <paths>
+Files edited:   <paths + what changed>
+Files deleted:  <paths>
+Commands run:   <notable commands>
+Verified:       <what you ran and the result, e.g. `make test` -> 25 passed>
+NOT verified:   <anything involving a phone/AR/audio/haptics/Multipeer: "UNVERIFIED ON DEVICE">
+Open problems / handoff: <what the next person must know>
+```
+
+---
+
+## 2026-10-17 22:45 — Claude (agent, for Sachin) — Branch review before commit: app-ui-workflows is merge-safe with one fix   [tags: BUILD]
+Area: shared (integration check requested by U1 before committing)
+Branches: `origin/U3` = no own commits (old pointer, 3 behind main). `origin/app-ui-workflows` (neehamikki, ca2ece5) = 1 commit, 49 files / ~5,100 lines: new Scanner + Navigator interface behind a default-OFF "Interface" setting,
+  WaypointCore `Flows/*` + 21 `FlowTests`, `Waypoint/Services/*` (mock + live adapters around CaptureController/NavigationController), design system. Based on 27365ec (older than main), written on Windows, never compiled before this check.
+Method: throwaway git worktree outside the repo = main + ALL of Sachin's uncommitted work, then `git merge origin/app-ui-workflows`; nothing in the real working tree was touched except the fix below; worktree and its build folders deleted afterwards.
+Findings: (1) no duplicate type names in WaypointCore or the app; (2) their logging, CaptureController and NavigationController calls are all still valid (APIs only gained defaulted params);
+  (3) ONE compile break: their `LiveScanScreen.swift:68` calls `LiveScanView(session:box:)`, but today's lossless pass added a required `showMesh:` -> fixed on OUR side with a default (`var showMesh: Bool = true`), applied to the working tree;
+  (4) ONE textual conflict, `Waypoint/UI/RootView.swift` (both edited the toolbar + modifier chain): resolution = keep both (our `toolbar.home` id + `-autoE2E` task, their gear/Settings sheet/auto-open; gear gets id `toolbar.settings`); docs auto-merged cleanly.
+Verified on the MERGED code: unit tests 102/102 (81 ours + 21 theirs); type-check 58 app files, 0 errors, 0 warnings; signed `build-for-testing` for the iPhone 16 Pro Max succeeded; ON DEVICE `make uitest`-equivalent 7/7 and the in-app E2E 20/0/1 (Classic interface unchanged). Sachin's own build was reinstalled afterwards.
+NOT verified: their NEW interface (Interface = New) at runtime - no UI tests cover it yet; their Live adapters with a real scan/route.
+Note: the commit labels its work "U3 (UI flows)"; per ROADMAP Revision 3 the author's lane (Windows + non-Pro iPhone 17) is U4. Worth agreeing who owns `Waypoint/UI/{Scanner,Navigator}` + `Waypoint/Services` going forward.
+
+---
+
+## 2026-10-17 22:15 — Claude (agent, for Sachin) — Accessibility features verified on the phone; UI churn fixed; config-tracking question answered   [tags: BUILD, BUG]
+Area: B/D; U1 said the phone's VPN profile prevents auto-lock, so tests were run directly.
+Verified ON DEVICE (iPhone 16 Pro Max): `make uitest` 7/7 (was 5; +`testObstacleIsNamedByTypeInTheSpokenSentence`, +`testPhonePostureCoachSpeaksAndRecovers`); `make selftest-e2e` 20 passed / 0 failed / 1 skipped (cloud); unit tests 81/81; `make typecheck` OK.
+Phone's REAL Vision vocabulary (1,303 labels) for tuning `ObstacleLabelMapper`: trash -> `trash_can` (only one); people -> adult, baby, child, crowd, people (no plain "person"); seating -> armchair, bench, chair, chair_other, folding_chair, high_chair, seat, sofa, stool, swivel_chair, wheelchair (+car_seat, toilet_seat);
+  furniture -> bed, cabinet, cart, desk, refrigerator, shopping_cart, table; structure -> door, elevator, escalator, stairs, window (+glass types); objects -> backpack, bicycle, cardboard_box, decorative_plant, extinguisher, flower, luggage, machine, plant, pole, sign, stroller, suitcase. No "wall" label: walls rely on the ARKit mesh class.
+Bugs found by the on-device UI tests and fixed:
+ 1. The navigation screen was re-rendered 10x per second even when nothing changed (assigning equal values to @Published properties). It kept the app from ever going idle, so UI tests waited minutes (145 s -> 26 s for the same test after the fix). Now `setIfChanged` (also saves battery on a real walk). Same class of bug as the scan HUD fix.
+ 2. Posture recovery said "Phone position is good." and, in the same tick, "Continue straight.", so the confirmation was instantly replaced. The planner now says only the confirmation on that tick and resumes guidance on the next (unit test updated).
+ 3. UI tests raced the 15-second simulated walk; added a "Pause walker" control (`nav.pauseWalk`, useful for a sighted helper too) and a short speech history on screen (`nav.recentSpeech`).
+Files edited: `Waypoint/Navigation/NavigationController.swift` (setIfChanged, `simulationPaused`, `recentSpeech`), `Waypoint/UI/NavigatorView.swift`, `Waypoint/Guidance/FeedbackPlanner.swift`... (path: Package/.../Guidance/FeedbackPlanner.swift), `Tests/.../AccessibilityGuidanceTests.swift`, `WaypointUITests/WaypointUITests.swift`, `Package/.../Vision/ObstacleKind.swift` (+`.furniture`; chair += wheelchair), `Waypoint/Capture/CaptureController.swift` (posture in the scan line).
+STILL NOT verified (needs a person holding the phone): the real-phone posture axes/signs (TESTING.md A1-A3), the beacon being in the correct ear (A5), real depth hits and naming of real objects (A6), hallway countdown timing (A7), haptic feel, calibration, and blind-user review of the wording.
+Config question answered: tracked = `Config/Base.xcconfig` (shared defaults, bundle prefix, empty Supabase placeholders) and `Config/Local.xcconfig.example` (template), `project.yml`; NOT tracked = `Config/Local.xcconfig` (your team id, dev suffix, and later the Supabase URL + anon key) - git-ignored and never committed (checked all history).
+
+---
+
+## 2026-10-17 21:30 — Claude (agent, for Sachin) — Accessibility: phone-posture coach, named obstacles, distance-aware instructions   [tags: BUILD, BUG, CONTRACT CHANGE]
+Area: B (guidance), C (vision), shared geometry; requested by U1 ("remember this is for visually impaired": posture stabilization + explicit/granular instructions + object-type classification)
+Files created (core, tested): `Guidance/PhonePosture.swift`, `Guidance/SpokenPhrases.swift`, `Vision/ObstacleKind.swift`, `Tests/.../AccessibilityGuidanceTests.swift` (24 tests).
+Files created (app): `Waypoint/Vision/ObstacleIdentifier.swift` (mesh class lookup + Vision `VNClassifyImageRequest` on a crop).
+Files edited (code): `Guidance/FeedbackPlanner.swift` (REWRITTEN: posture, obstacle kinds + repeat, briefing, 10/5/2 m countdown, landmarks; new haptic cue `.holdPhoneUpright`), `Routing/GuidanceInstruction.swift` (+`Maneuver`, `Landmark`, optional fields), `Routing/RouteFollower.swift` (look-ahead along the route, landmarks),
+  `Geometry/Geometry.swift` (`cameraTransform` now ARKit's real portrait convention + pitch/roll; `cameraLocalToUser`), `Tests/.../ScanAndSimulationTests.swift` (camera test updated), `Waypoint/Vision/ObstacleDetector.swift` (REWRITTEN), `Waypoint/Navigation/NavigationController.swift`, `Waypoint/Relocalization/Relocalizer.swift` (labelled mesh during navigation),
+  `Waypoint/Guidance/HapticsGuide.swift`, `Waypoint/UI/NavigatorView.swift` (obstacle-type and phone-held pickers, on-screen "what was just said"), `Waypoint/Capture/CaptureController.swift` (posture reading in the scan monitor), `Waypoint/App/E2ESelfTest.swift` (+posture, phrases, Vision vocabulary), `WaypointUITests/WaypointUITests.swift` (+2 tests).
+Docs (strike/update): `docs/DECISIONS.md` (D-022), `docs/TESTING.md` (accessibility checks A1-A7), `docs/ROADMAP.md` (A11Y-1..6), `docs/MODULES.md`.
+REAL BUG FOUND while designing posture: ARKit's camera frame is fixed to the sensor (portrait: +x toward the BOTTOM of the phone, +y toward the user's right). The real-device audio beacon treated camera-local x as "right"; the simulation's fake camera hid it. Fixed centrally (`Geometry.cameraLocalToUser`); the old depth region was also the wrong shape for portrait and the floor could look like an obstacle (now world-space + `ObstacleBand`).
+  These fixes are derived from Apple's documented axes and proven only with synthetic poses -> MUST be confirmed on a real phone (TESTING.md A1-A5).
+Verified: `make test` 81/81 (24 new: posture round trip at any heading, dwell/hysteresis/repeat/recovery, label mapping with whole-word matching, every spoken sentence verbatim, look-ahead turn/stairs/arrival distances along the route, landmarks, planner countdown with no bursts, posture mutes guidance but not obstacle warnings);
+  `make typecheck` OK (22 app files + UI tests). ON DEVICE (iPhone 16 Pro Max): `make selftest-e2e` -> 20 passed, 0 failed, 1 skipped (cloud): posture math ok (upright 0/0, down -49, lean +39), the simulated L-shaped walk now says "Walk straight about 12 meters, then turn right. / In 10 meters... / E2E Room 1 on your right. / In 5 ... In 2 meters, turn right. / Turn right. ...  In 2 meters, you will arrive at E2E Room 2." and ends with arrival;
+  Vision on this phone: 1,303 labels incl. trash_can, chair/folding_chair/swivel_chair/armchair/wheelchair, door, stairs, table, window, plant/decorative_plant, cabinet; no label for "wall" or "person" was in the first list (so walls rely on the ARKit mesh class); the classifier runs without error.
+NOT verified: ~~(1) the two new UI tests and the rest of `make uitest` after these changes (phone locked); (2) the wider `vision.labels.*` printout (phone locked on the rerun; mapper extended with cabinet/wheelchair from the first list);~~ **Update 2026-10-17 (22:15): (1) and (2) are DONE, see the next entry.** (3) everything that needs a person holding the phone: real posture axes, ear/direction of the beacon, real depth hits, mesh-class and Vision naming of real objects, thresholds, haptic feel, and any blind-user review of the wording.
+Open: U1/U2 do TESTING.md A1-A7; U4 reviews wording; unlock the phone and run `make uitest` + `make selftest-e2e`.
+
+---
+
+## 2026-10-17 20:05 — Claude (agent, for Sachin) — End-to-end testing on the phone; found + fixed repeated "Continue straight."   [tags: BUILD, BUG]
+Area: D (E2E harness), B (planner fix); requested by U1 ("continue testing, how about e2e")
+Files created: `Waypoint/App/E2ESelfTest.swift` (A device capabilities, B storage + Keychain, C synthetic scan -> save -> reload -> share -> validate -> route -> simulated walk, D bundled resource, E optional cloud read).
+Files edited (code): `Waypoint/App/LaunchCommand.swift` (+`.e2e`, `-autoE2E YES`), `Waypoint/App/AppState.swift`, `Waypoint/UI/RootView.swift` (runs the E2E once then `exit(0/1)`), `Makefile` (+`selftest-e2e`),
+  `Package/.../Guidance/FeedbackPlanner.swift` (announce on change of instruction KIND, not on every new target; hazard announced once per hazardous target; reset clears it), `Tests/.../FeedbackAndVisionTests.swift` (+3 tests).
+Docs (strike/update where needed): `docs/TESTING.md` (new E2E section + layer table + plan for the real-backend layer), `AGENTS.md` (+`selftest-e2e` row).
+Bug found by the on-device E2E: with real-scan spacing (a node every 1.5 m) the planner spoke "Continue straight." at every waypoint (the sample map's 3 m spacing hid it). Fixed; unit tests 57/57.
+Verified ON DEVICE (iPhone 16 Pro Max, iOS 27.0.1): E2E run 1 -> 17 passed, 0 failed, 1 skipped (cloud not configured). Capability matrix: LiDAR mesh yes, mesh+classification yes, scene depth yes, haptics yes, en-US voice yes, text recognition yes, audio engine starts, Documents writable, Keychain round trip works.
+  Run 2 (after the planner fix): the walk spoke "Continue straight / Turn right / Continue straight / Turn left / Continue straight / arrived" (correct for an L-shaped hallway); my own assertion (<= 2 straights) was wrong -> 16 passed 1 failed; assertion corrected to "no phrase twice in a row".
+  `make selftest-sim` after the fix: Turn right, Continue straight, You have arrived at Room 204, PASS.
+NOT verified: the corrected E2E assertion on the phone (phone locked at the final rerun); real Supabase (SQL never executed anywhere; Docker daemon is not running here, no Supabase CLI); two-phone Multipeer; LiDAR geometry; relocalization; audio/haptic feel.
+Open: (1) U1 unlock the phone and rerun `make selftest-e2e` (expect 17/0/1). (2) Run it on other teammates' phones (esp. the non-LiDAR ones: expect `lidar.mesh false`). (3) Decide how to E2E-test the SQL: Supabase project (U3) or local Postgres via Docker/Homebrew (needs a download; not done without approval).
+
+---
+
+## 2026-10-17 19:20 — Claude (agent, for Sachin) — "Keep lossless": classification default ON + start-screen switch; test status check   [tags: BUILD, DOCS]
+Area: A (scan); requested by U1 ("keep lossless, implement the changes; what's happening with the current tests?")
+Files edited (code): `Waypoint/Capture/CaptureController.swift` (`start(mapName:recordSurfaceLabels:)`; classification ON by default, `-scanClassification NO` to disable; logs `surfaceLabels=`), `Waypoint/UI/VolunteerView.swift` (start form toggle "Record surface labels", id `scan.labels`),
+  `WaypointUITests/WaypointUITests.swift` (re-activate the app if it is not in the foreground; header warns not to use the phone during a run).
+Docs (strike/update): `docs/DECISIONS.md` (D-020 item 4 struck + updated; new D-021 lossless-first policy, vector layer parked, capture-vs-display reversibility rule), `docs/TESTING.md` (A/B step 4 wording; "do not touch the phone" note).
+Test status right now: unit tests 54/54 pass (`make test`); `make typecheck` OK (20 app files + 1 UI test file); `make check`/test-bundle build OK; ON THE PHONE `make uitest` 5/5 pass after the change (earlier today 5/5 too).
+Failures seen and explained: (1) toggle tapped in its middle (test bug, fixed); (2) one-off "Home screen missing" and (3) one-off "Navigate button missing": both runs started with the app NOT usable in the foreground; the recording for (3) shows the app launching over another app ("<| Instagram" in the status bar), i.e. the phone was being used mid-run. Not app bugs; mitigated with re-activation + the do-not-touch note.
+Not run / not verified: the lag A/B numbers (needs a real room + someone holding the phone), `make selftest-sim` after the latest change (UI test covers the same screen text), anything on LiDAR mesh content, relocalization, cloud.
+Open: U1 still owes TESTING 3.1-3.6 in a real room. Classification is now on, so expect slightly more compute while scanning; use the A/B recipe to see what it costs.
+
+---
+
+## 2026-10-17 18:40 — Claude (agent, for Sachin) — Scan lag: lossless performance pass   [tags: BUILD]
+Area: A (scan) ; requested by U1: "make this lag a lot less ... only if it's lossless"
+Diagnosis (from code, NOT yet measured on a phone - nobody had a real mesh running while I could observe): (1) RealityKit `.showSceneUnderstanding` redraws the whole mesh every frame; (2) box fit on the main thread, brute force, every 6th vertex only;
+(3) ~60 unnecessary SwiftUI re-renders/s from @Published writes of unchanged values; (4) plane detection on but unused; (5) per-face classification on but unused; (6) Debug (unoptimised) builds.
+Files created: `Package/.../Scan/ConvexHull2D.swift`. Files edited (code): `Scan/OrientedBox.swift` (`fitBest` now hull-based and EXACT; `fitBest(hull:minY:maxY:)`; brute force kept as `fitBestBruteForce` for tests), `Tests/.../ScanAndSimulationTests.swift` (+4 tests in `FastBoxFitTests`),
+  `Waypoint/Scan/MeshSampler.swift` (REWRITTEN: `measure` reads ALL vertices, per-anchor hulls), `Waypoint/Capture/CaptureController.swift` (background fit with no overlap, publish-only-on-change, classification/plane detection off by default, fps/fitMs/overlay telemetry, `showMeshOverlay`),
+  `Waypoint/Scan/LiveScanView.swift` (overlay switch, unused render effects off), `Waypoint/UI/VolunteerView.swift` (overlay toggle, id `scan.overlay`), `Makefile` (`EXTRA=` passes launch args to `selftest-scan`).
+Docs (strike/update): `Architecture.md` (risk row), `docs/DECISIONS.md` (D-020 rules + what was deliberately NOT done), `docs/TESTING.md` (new "Measuring scan performance" A/B recipe).
+Verified: `make test` -> 54 tests, 0 failures. The new equivalence test proves the fast box equals the brute-force box on 60 random clouds (that is what "lossless" means for the box); 300k-point fit in a DEBUG test build: brute force 484 ms vs hull 254 ms (sorting dominates there; in the app each anchor is hulled separately and off the main thread).
+  `make typecheck` OK; `make build` and `CONFIG=Release make build` -> BUILD SUCCEEDED (Debug installed on the phone).
+NOT verified: any improvement on a real phone (no before/after numbers yet); the app launch after this change (phone was LOCKED, so the regression run of `make selftest-sim` could not start); LiDAR mesh in a real room.
+Honest limits: if the dominant cost is ARKit's own mesh reconstruction + camera pipeline (system code), none of this can remove it; the remaining lossless lever is the overlay switch. Things that would help but are NOT lossless and were not done: lower video resolution/fps, decimating meshes, slower mesh updates.
+Next for U1: unlock the phone, run the 4-step A/B in docs/TESTING.md, paste the `scan:` lines. U2/U3 can reuse `EXTRA=` for other launch flags.
+
+---
+
+## 2026-10-17 18:00 — Claude (agent, for Sachin) — UI tests on the phone from the CLI (taps + screenshots); first scan-screen evidence   [tags: BUILD]
+Area: D (tests) with A/B findings; requested by U1 ("yes do 1 and 2")
+Tools check: I have NO desktop computer-use tool (twice searched; only browser/Figma-scoped ones surfaced), so no mirroring. Substitute built: scripted UI tests on the device itself.
+Files created: `WaypointUITests/WaypointUITests.swift` (5 tests; attaches screenshots + HUD values; interruption monitor accepts permission prompts; returns to Home at start).
+Files edited (code/config): `project.yml` (+`WaypointUITests` target `bundle.ui-testing`, explicit `Waypoint` scheme that runs it), `Makefile` (+`uitest`, `uitest-shots`, `ONLY=`), `scripts/typecheck.sh` (also type-checks the UI tests; needs `-F <platform>/Developer/Library/Frameworks -I <platform>/Developer/usr/lib`),
+  `Waypoint/UI/RootView.swift`, `VolunteerView.swift`, `NavigatorView.swift` (stable `.accessibilityIdentifier`s: mode.navigate, mode.scan, toolbar.home/share, scan.start/save/tag.*, hud.tracking/mapping/mesh/box, nav.simulate.*, nav.status/instruction/obstacle/injectObstacle/stop).
+Docs (strike/update where old text changed): `docs/TESTING.md` (new UI-test section; Level-3 "meshAnchors=0" explanation struck + updated), `AGENTS.md` (+`make uitest` row), `docs/SETUP.md` (+headless testing note).
+Verified ON DEVICE (iPhone 16 Pro Max): `make uitest` -> 5 of 5 passed. Along the way: (a) a UI-test compile error caught by `make typecheck` (helper named `wait(for:)` clashed with XCTest) -> fixed; (b) obstacle test first failed because tapping a Toggle row in its middle does not flip it (tap the switch at the right edge) -> fixed;
+  (c) one run failed with "Home screen missing": the app was on the Navigator picker at launch (cause not found; a normal launch is clean) -> made `setUp` return to Home; 5/5 afterwards. If it recurs, check `app launch command` lines in the console.
+Scan-screen evidence (phone lying on a desk): Tracking OK, Mapping not available, Nodes 1, Mesh 0 triangles, no box; screenshot shows live (blurry) camera + HUD + controls rendered. Conclusion: our AR delegate receives frames, so the "AR view steals the session" risk is ruled out; mesh/box on a real scene is STILL UNVERIFIED (needs the phone held up in a room).
+Observed: `devicectl list devices` also lists "Neeha's iPhone" (iPhone 17, unavailable) - a teammate's phone was connected to this Mac before; a non-LiDAR iPhone 17 can be used for the no-LiDAR QA (U4 tasks) once connected.
+NOT verified: LiDAR mesh/box in a real room; audio quality; haptic feel; cloud (not configured); relocalization.
+Open for U1: hold the phone in a room and run `DEVICE=00008140-000914590E01801C make selftest-scan` (or the Scan screen by hand) -> U1.4, then U1.5/U1.6.
+
+---
+
+## 2026-10-17 17:10 — Claude (agent, for Sachin) — Headless on-phone testing + first real device run; arrival-speech bug found and fixed   [tags: BUILD, BUG]
+Area: B (guidance) + D (harness); requested by U1 ("can you test this headless / CLI?")
+Findings before building anything:
+- I have NO tool that can see/click the Mac screen (only browser/Figma tools), so iPhone Mirroring cannot be driven by me. It is also unsuited to AR (phone must be locked while mirrored; camera/AR likely unavailable - not verified).
+- `devicectl --console` showed NOTHING from the app: it captures stdout/stderr only, and we logged with os.Logger. The earlier docs claim "make launch streams logs" was wrong (struck through in docs/TESTING.md).
+Files created: `Waypoint/App/LaunchCommand.swift` (launch-argument switches `-autoSimulate "<label>"`, `-autoFacingAway YES`, `-autoScan YES`).
+Files edited (code): `Waypoint/App/Log.swift` (REWRITTEN: `AppLog` writes to os.Logger AND stderr), `Waypoint/App/AppState.swift` (reads the launch command, picks the mode), `Waypoint/UI/NavigatorView.swift`
+  (auto-runs the simulated walk, exits 0/1/2), `Waypoint/UI/VolunteerView.swift` (auto-starts scanning), `Waypoint/Capture/CaptureController.swift` (1 Hz `scan:` status line),
+  `Waypoint/Navigation/NavigationController.swift` (logs instruction changes, haptics, beacon direction ~1/s), `Makefile` (`selftest-sim`, `selftest-scan`, `ROOM=`; app args need a `--` after the bundle id),
+  `Package/.../Guidance/FeedbackPlanner.swift` (arrival, turns, hazards now `.high` speech priority) and `Tests/.../FeedbackAndVisionTests.swift` (3 assertions updated).
+Files edited (docs, strike/update): `docs/TESTING.md` (logs claim corrected + new "Headless tests" section), `AGENTS.md` (command table +3 rows).
+Bug found by the on-phone test: `.normal` speech is skipped while the voice is busy, so "You have arrived at Room 204." was never spoken (it arrived while "Continue straight." was talking). Fixed by making arrival/turn/hazard speech `.high`
+  (interrupts); re-ran on the phone: arrival now spoken. Also found while building the test: my first harness picked `maps.first` (alphabetical), which was U1's own scan, so it failed with exit 2; now it searches all maps.
+Observed state: the phone already holds 2 maps (the seeded SAMPLE map and a map saved by U1 - name "Rice Hall, floor 1"), i.e. U1 has already saved at least one scan (U1.5 partly done; relocalization U1.6 still unmeasured).
+Verified ON DEVICE (iPhone 16 Pro Max, iOS 27, USB, unlocked): `make selftest-sim` -> instruction changes continueStraight -> turnRight(57 deg) -> continueStraight -> arrived; `say:` lines incl. arrival; `haptic: turnRight`, `haptic: arrived` (no haptic errors);
+  `spatial audio started` (no audio errors); beacon local x=+1.50 (to the right) at the right turn; `SELFTEST PASS`, exit 0. Also `make test` 50 pass, `make typecheck` OK (20 app files), build succeeded and installed.
+NOT verified: that the audio is actually audible/directional to a human (needs headphones + ears), that haptics are felt, `make selftest-scan` (not run yet), anything LiDAR/mesh/relocalization.
+Open: U1 to run `make selftest-scan` while walking (U1.4). U2 owns tuning audio now that the walk is reproducible with one command.
+
+---
+
+## 2026-10-17 16:20 — Claude (agent, for Sachin) — U1.1 signing: certificate found, Team ID set, app built + installed on iPhone 16 Pro Max   [tags: BUILD]
+Area: U1 (setup)
+What happened: Sachin created the Apple Development certificate in Xcode (Personal Team, certificate under khanalsachin@icloud.com). Read the real team id from the certificate OU
+  (5S33HP2CPC) and wrote `DEVELOPMENT_TEAM` and `WAYPOINT_DEV_SUFFIX = sachin` into the git-ignored `Config/Local.xcconfig`.
+Doc bug found and fixed: our instructions said the team id is the "(XXXXXXXXXX)" in `security find-identity`; that value is a certificate/person id (here YN84BMTT4S) and is NOT the team id.
+  Added `scripts/team-id.sh` + `make team-id`; corrected `Config/Local.xcconfig.example` (comment) and `docs/SETUP.md` (old text struck through, labelled Update).
+Verified (real device, not simulated):
+- `make doctor` all PASS, phone `connected`, Developer Mode Enabled (queried via devicectl).
+- `DEVICE=00008140-000914590E01801C make build` -> BUILD SUCCEEDED, signed with "Apple Development: khanalsachin@icloud.com", profile "iOS Team Provisioning Profile: io.github.sachin-khanal.waypoint.sachin".
+- `make install` -> "App installed", bundleID io.github.sachin-khanal.waypoint.sachin.
+NOT yet verified: launching. `make launch` was denied by iOS (error: "profile has not been explicitly trusted by the user"). Expected for free profiles: the developer must be trusted once on the phone
+  (Settings > General > VPN & Device Management > Apple Development: khanalsachin@icloud.com > Trust). After that U1.1 is done when the app opens and camera + local network prompts are accepted.
+Note for U2-U4: use `make team-id` for your own team id; each person's Apple ID gets its own id.
+
+---
+
+## 2026-10-17 15:40 — Claude (agent, for Sachin) — Bundle id prefix changed from edu.virginia.* to io.github.sachin-khanal.waypoint   [tags: BUILD, CONTRACT CHANGE]
+Area: shared (U1 asked while doing U1.1 signing)
+Why: I had used a UVA domain for bundle ids without asking; the team does not own or represent that domain. See D-019.
+Files edited (code/config): `Config/Base.xcconfig` (+`WAYPOINT_BUNDLE_PREFIX`), `project.yml` (`bundleIdPrefix`, `PRODUCT_BUNDLE_IDENTIFIER` now uses the variable),
+  `Makefile` (reads the prefix from xcconfig), `scripts/doctor.sh`, `Waypoint/App/Log.swift` (logger subsystem), `Package/.../Cloud/CloudModels.swift` (Keychain service),
+  `Package/.../Tests/.../CloudTests.swift`, `Config/Local.xcconfig.example` (comment).
+Files edited (docs, strike-through + Update): `Architecture.md` (setup checklist), `docs/SETUP.md` (troubleshooting row), `docs/TESTING.md` (log subsystem); `docs/DECISIONS.md` (+D-019).
+Effect for everyone: final bundle id is `io.github.sachin-khanal.waypoint.<WAYPOINT_DEV_SUFFIX>` (e.g. ...waypoint.sachin). Nothing else to do except pick a suffix in your `Config/Local.xcconfig`.
+  Anyone who had already installed a build would now see it as a different app (nobody had).
+Verified: `make test` -> 50 tests, 0 failures; `make typecheck` OK; `make check` -> BUILD SUCCEEDED; built Info.plist CFBundleIdentifier = `io.github.sachin-khanal.waypoint.<suffix from Local.xcconfig>` (it showed the unedited placeholder suffix `replacewithyourname`, so set a real suffix); `make doctor` shows the new prefix.
+NOT verified: signing/installing with the new id (no signing identity exists on this Mac yet; U1.1 in progress).
+
+---
+
+## 2026-10-17 15:10 — Claude (agent, for Sachin) — Detailed per-person roadmap (Revision 3)   [tags: DOCS]
+Area: shared (docs only, no code, tests not re-run)
+Request: "make a roadmap with explicit granular details from start to finish, what we have so far, and what is attributed to each user" with the real team: U1 Mac Pro + iPhone 16 Pro Max, U2 Mac Air + iPhone Pro, U3 Windows + iPhone Pro, U4 Windows + regular iPhone.
+Files edited (strike-through + Update rule respected, nothing deleted):
+- `docs/ROADMAP.md` — old per-letter "Recommended assignment" struck through with a pointer; appended **Revision 3**: device capability matrix, state-of-the-project table, phases P0-P6 with gates G1-G5 and the critical path,
+  full task tables for U1-U4 (ID, estimate, blocked-by, done-when), dependency sketch, branch/merge rules, check-in rhythm, cut order with owners, open questions.
+- `AGENTS.md` (Human team) and `docs/MODULES.md` (team line): struck the "fill in names" placeholders, added the U1-U4 mapping (A=U1, B=U2, C=U2+U3, D=U2+U3+U4).
+Assumptions to confirm: about 24 h remain; U3/U4 cannot build iOS so they get backend/web/tooling and field/QA/demo lanes (Swift changes via Live Share on a Mac host); the regular iPhone has no LiDAR, so no scanning or obstacle detection there.
+New task IDs introduced: INF-1 (`make ipa` + sideload path), INF-2 (CI workflow); both unbuilt.
+Verified: nothing to run (docs). Open: see "Open questions" at the end of Revision 3.
+
+---
+
+## 2026-10-17 14:40 — Claude (agent, for Sachin) — Security fixes: unsafe segment ids (path traversal) + Keychain session   [tags: BUG, CONTRACT CHANGE]
+Area: D (cloud/sync) + shared Model
+Trigger: automated commit-time security review, 2 findings (both MEDIUM, both judged valid):
+1. Path traversal: `segmentId` from untrusted maps flowed into the Storage download path AND, worse than reported, into the LOCAL file name in
+   `MapStore` (`worldmap-<segmentId>.arworldmap`) - a hostile map/bundle could write outside its folder.
+2. Session tokens were stored in UserDefaults.
+Files edited (code):
+- `Model/MapTypes.swift` (+`SegmentID.isValid`: `[A-Za-z0-9_-]`, 1-64 bytes).
+- `Model/MapStore.swift` (`MapBundle.validate()` checks node segment ids and world-map keys; `saveWorldMap`/`loadWorldMap` refuse unsafe ids).
+- `Cloud/SyncEngine.swift` (`worldMapPath` now `throws` and requires a safe segment + UUID owner; `push`/`fetchBundle` updated; `fetchBundle` validates the
+  map before any URL is built).
+- `Cloud/CloudModels.swift` (`UserDefaultsSessionStore` REMOVED, `KeychainSessionStore` added: generic password, AfterFirstUnlockThisDeviceOnly; `import Security`).
+- `Waypoint/Cloud/CloudController.swift` (uses `KeychainSessionStore`).
+Tests added (+5, total 50): `testSegmentIdAlphabet`, `testValidationRejectsPathTraversalSegments`, `testStoreNeverWritesOutsideItsFolderForHostileSegments`,
+  `testHostileSegmentIdNeverReachesAURL` (asserts zero /storage/ requests), `testKeychainSessionStoreRoundTrip` (skips itself if no keychain).
+Docs (strike-through + Update per the new markdown rule): `docs/DECISIONS.md` (D-015 update, new D-018), `Architecture.md` §10.3 notes.
+Contract note: `MapNode.segmentId` values outside the safe alphabet are now rejected on import/push. Maps created by the app use "seg1" and are unaffected.
+Verified: `make test` -> 50 tests, 0 failures (Keychain test executed, not skipped); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: Keychain behaviour on a real iPhone (the code path is the standard Security API; test ran on macOS); nothing against a live Supabase project.
+Open: a sideloaded free-profile build can use the Keychain without extra entitlements, but if a device ever reports a keychain error the app simply
+re-signs-in anonymously (new user id), it does not crash. Anonymous users that lose their session cannot see their old private rows - acceptable for the demo, note for D.
+
+---
+
+## 2026-10-17 14:10 — Claude (agent, for Sachin) — New markdown rule + stale-docs pass (strike-through + labelled updates)   [tags: DOCS]
+Area: shared (docs only; NO code changed, so tests/typecheck were not re-run)
+Trigger: team rule: "for changes in markdown files, don't overwrite/delete — strike through the old text and add the new text (label updates)". Does not apply to code.
+Files edited (all additive or strike-through; nothing deleted):
+- `AGENTS.md` — new hard rule 11 (the convention, exceptions, how to handle tables/headings/code blocks/WORKLOG) + pointer to ROADMAP/TESTING in "Orient yourself".
+- `docs/WORKFLOW.md` — principle 6 (same rule).
+- `Architecture.md` — struck + updated: §1 constraint rows (no backend / Multipeer), §2 note (cloud, simulator), §3 note (Node/Edge -> MapNode/MapEdge),
+  §4.7 note (cloud primary, Multipeer fallback, approvals), §5 note (original layout lines restored from git commit 370d66f as struck text), §6 owners/timeline notes,
+  §7 four new risk rows + nice-to-have line, §9 three new open decisions, §10 heading/status ("PROPOSED" struck -> IN PROGRESS), new §10.5 implementation-status table.
+- `docs/DECISIONS.md` — D-007 amended note; D-013..D-016 "PROPOSED" struck with labelled status updates (D-014 flagged as "REST was my default, not explicitly confirmed");
+  new D-017 recording the markdown rule.
+- `docs/ROADMAP.md` — header status struck/updated; new "status after build block 1" table; "start right now" items marked done.
+- `docs/MODULES.md` — update note under the legend; "backlog additions after build block 1" per owner appended.
+- `README.md` — "no server" sentence struck + updated; repo map gains `supabase/`; status paragraph gets a block-1 update.
+- `docs/SETUP.md` — CoreSimulator known issue marked resolved on Sachin's Mac.
+Not changed on purpose: older WORKLOG entries (history; they remain accurate for their time), `docs/TESTING.md` (new today).
+Known imperfection: earlier today I overwrote a few numeric strings in place before this rule existed (test counts 25/27 -> 45 in README.md and docs/SETUP.md). They are plain count corrections; git history holds the old values.
+Verified: grep shows each struck phrase still present next to its labelled update; `git diff --stat` touches only `.md` files in this pass.
+Open: none new. If you want the old counts restored as struck text too, say so.
+
+---
+
+## 2026-10-17 13:30 — Claude (agent, for Sachin) — Build block 1: live scanner, simulate mode, Supabase client + schema   [tags: BUILD, CONTRACT CHANGE]
+Area: A (scan view), B (simulation), D (cloud), C (budget) - scaffolded together; owners should take over each part.
+Why: user said "continue building" and to integrate Supabase while building (ROADMAP.md revision 2).
+
+Files created - WaypointCore (all unit-tested):
+- `Scan/OrientedBox.swift` (gravity-aligned box, yaw search, contains/corners/expanded), `Scan/ExportBudget.swift`
+  (40 MB cap vs Supabase 50 MB/file limit).
+- `Simulation/PoseSimulator.swift` (virtual walker that turns before walking).
+- `Cloud/HTTPTransport.swift`, `Cloud/CloudModels.swift` (SupabaseConfig, AuthSession, SessionStore, BuildingRow,
+  RemoteMap, CloudError), `Cloud/SupabaseClient.swift` (actor: anonymous auth + refresh + one 401 retry, PostgREST
+  upsert/list, Storage upload/download; plain REST, no SDK), `Cloud/SyncEngine.swift` (push uploads world maps
+  BEFORE the row; fetch validates).
+- Tests: `ScanAndSimulationTests` (6), `CloudTests` (11, mock transport) -> **45 tests total**.
+Files created - app (type-checked only): `Waypoint/Scan/MeshSampler.swift`, `Waypoint/Scan/LiveScanView.swift` (RealityKit
+  ARView + `.showSceneUnderstanding` mesh overlay + green wireframe box), `Waypoint/Cloud/CloudController.swift`.
+Files created - other: `supabase/migrations/0001_init.sql` (tables buildings/scans, RLS, private buckets
+  worldmaps/meshes, storage policies, updated_at trigger), `docs/TESTING.md`.
+Files edited:
+- `Geometry/Geometry.swift` (+`cameraTransform(position:forward:)`).
+- `Waypoint/Capture/CaptureController.swift` (meshWithClassification, ~1 Hz box fit, stats, `adjustBoxMargin`).
+- `Waypoint/Navigation/NavigationController.swift` (REWRITTEN: shared `tick` loop driven by AR frames OR the simulator;
+  `startSimulation`, `simulatedObstacle`).
+- `Waypoint/UI/VolunteerView.swift` (full-screen live scan + HUD + box controls), `NavigatorView.swift` (Simulate section +
+  obstacle toggle), `SyncView.swift` (Cloud section as its own observing view `CloudSection`).
+- `Waypoint/App/AppState.swift` (+`cloud`), `project.yml` + `Config/Base.xcconfig` + `Config/Local.xcconfig.example`
+  (SUPABASE_URL / SUPABASE_ANON_KEY -> Info.plist keys `SupabaseURL`/`SupabaseAnonKey`; empty = cloud disabled).
+- Docs: `docs/SETUP.md` (+Supabase section §5), `docs/MODULES.md`, `README.md`.
+Data contract: `BuildingRow`/table `buildings` is new (one row per owner+map_id; clients merge). `BuildingMap` unchanged.
+Bugs found by tests while building: mock matched "/authenticated/" as "auth" (test bug); 401-retry test logic (test bug).
+  One real review catch: SyncView did not observe CloudController (would not redraw) -> fixed with `CloudSection`.
+Verified: `make test` -> **45 tests, 0 failures**; `make typecheck` OK (19 app files); `make check` (xcodebuild, unsigned) ->
+  BUILD SUCCEEDED, no warnings.
+NOT verified (UNVERIFIED ON DEVICE / vs real server): live mesh overlay and box on a phone; ARView sharing our ARSession
+  (we rely on ARView NOT replacing the session delegate); mesh vertex reading layout; simulate-mode audio; every Supabase
+  call against a real project (SQL never executed; Anonymous Sign-Ins must be enabled by a human); cloud UI.
+Open / handoff:
+1. Someone creates the Supabase project and follows SETUP.md §5, then runs TESTING.md level 2.9.
+2. A: validate 3.1-3.5 in docs/TESTING.md; replace debug mesh overlay with per-anchor coloured entities; MeshExporter (USDZ) +
+   viewer are NOT built yet (C).
+3. B: TESTING.md 2.2-2.6 with headphones; tune cues.
+4. Security note: nothing in the repo contains a Supabase key; never commit the service_role key.
+
+---
+
+## 2026-10-17 12:30 — Claude (agent, for Sachin) — Direction change: Supabase + Polycam-style scanner (docs only)   [tags: DOCS]
+Area: shared
+Trigger: user said the app is native-iPhone-only (not published), uses Supabase free tier, and needs a
+live bounding-box -> 3D LiDAR scanner like Polycam.
+Files created: `docs/ROADMAP.md` (workstreams 0-7, owners, milestones M0-M5, cut lines, tasks an agent
+can start without a phone).
+Files edited: `Architecture.md` (+section 10 "Revision 2", PROPOSED); `docs/DECISIONS.md` (+D-013..D-016, all
+PROPOSED; D-016 amends D-007).
+Code changed: none. No tests affected.
+Verified: nothing to run (docs only).
+Open: team must approve the proposals; then start stream 0 (device bring-up) and the phone-free tasks in
+ROADMAP.md. Supabase project must be created by a human (needs their account); never commit the service-role key,
+only the public anon key belongs in the app config.
+
+---
+
+## 2026-10-17 12:05 — Claude (agent, for Sachin) — xcodebuild now works; first full app build succeeds   [tags: BUILD]
+Area: shared
+Context: after the CoreSimulator fix (`sudo xcodebuild -runFirstLaunch`, run by Sachin), retried the build.
+Files edited: `project.yml` (+`UIRequiresFullScreen: true` to silence the "all orientations" build
+warning; app is portrait-only); `Waypoint/Info.plist` regenerated by `make gen`.
+Verified: `make doctor` -> CoreSimulator PASS; `make check` (unsigned `xcodebuild`, generic iOS) ->
+**BUILD SUCCEEDED**, no warnings after the orientation fix; `make test` -> 27 pass.
+NOT verified: signing (`make build`/`run` need `Config/Local.xcconfig` + Apple ID, none set up on this
+Mac yet), installing on a phone, and any runtime behaviour. No iPhone was connected.
+Handoff: next step is SETUP.md section 3 (Apple ID, team id, Developer Mode, trust), then `DEVICE=<id> make run`.
+
+---
+
+## 2026-10-17 11:40 — Claude (agent, for Sachin) — Security fix for map sync (approval + validation)   [tags: BUG, CONTRACT CHANGE]
+Area: D (Sync) + shared Model
+Trigger: automated background security review flagged `MapSync.swift`: it auto-accepted every
+Multipeer invitation and auto-imported any received map (MEDIUM, missing auth / untrusted import).
+Judged valid: a hostile map could steer a blind user somewhere unsafe.
+Files edited:
+- `Package/WaypointCore/Sources/WaypointCore/Model/MapStore.swift` — added `MapStoreError.rejected`,
+  `MapBundle.validate()` (limits, finite positions, unique ids, edges reference nodes, distance vs
+  geometry), `importBundle` now validates and refuses NEW edges between two already-known nodes when
+  merging. `import simd` added.
+- `Waypoint/Sync/MapSync.swift` — invitations held in `pendingInvitation` until
+  `respondToInvitation`; received files are size-checked, decoded, validated, then held in
+  `pendingMap` until `respondToIncomingMap(accept:)`; nothing touches disk before approval.
+- `Waypoint/UI/SyncView.swift` — two alerts: "Connect to <phone>?" and "Import this map?" (shows name,
+  sender, node/edge counts).
+- `Package/WaypointCore/Tests/WaypointCoreTests/ModelTests.swift` — +2 tests
+  (`testValidationRejectsHostileBundles`, `testImportRefusesNewEdgeBetweenExistingNodes`); `import simd`.
+- `docs/DECISIONS.md` (D-012), `README.md` and `docs/SETUP.md` (test count 25 -> 27).
+Verified: `make test` -> **27 tests, 0 failures**; `make typecheck` -> OK (16 app files).
+NOT verified: **UNVERIFIED ON DEVICE** - the alerts and Multipeer flow have never run on phones.
+Known limits / handoff:
+- Multipeer has no strong peer identity; the human approval is the control. A pairing code in the
+  invitation context would be a stronger, optional upgrade (D).
+- Loop-closing between two existing nodes is blocked on merge (documented in D-012).
+- The AirDrop/Files import path has no UI yet; when D adds an "open .waypointmap" handler it must
+  show the same approval step before calling `importBundle` (which validates but does not ask).
+
+---
+
+## 2026-10-17 11:15 — Claude (agent, for Sachin) — Initial scaffold of the whole project   [tags: BUILD, DOCS, CONTRACT CHANGE]
+Area: shared (all four areas scaffolded; nothing here was written by A/B/C/D individually yet)
+
+**Why:** team has 24 hours, 4 people, free Apple ID signing, Live Share and/or git (undecided);
+wanted a CLI-first build and docs readable by humans and agents.
+
+### Tooling installed on this Mac
+- `brew install xcodegen` (v2.46.0). Nothing else installed. No sudo used.
+
+### Files created — build system and config
+- `project.yml` — XcodeGen spec: app target `Waypoint` (iPhone only, iOS 17, Swift 5 mode), local
+  package dependency `WaypointCore`, Info.plist keys (camera, local network + Bonjour
+  `_waypoint-map._tcp/_udp`, arkit capability, Files-app sharing), bundles `Samples/` as resources.
+- `Config/Base.xcconfig` — defaults + optional `#include? Local.xcconfig`.
+- `Config/Local.xcconfig.example` — template for per-developer team id + bundle suffix.
+- `Makefile` — targets: help, setup, doctor, gen, test, typecheck, check, build, install, launch,
+  run, logs, devices, open, clean, clean-all. Builds into `~/Library/Caches/Waypoint` (D-005).
+- `scripts/doctor.sh` — machine diagnostics. `scripts/typecheck.sh` — builds WaypointCore for the
+  iOS SDK and `swiftc -typecheck`s the whole app without xcodebuild.
+- `.gitignore` — ignores `*.xcodeproj`, `Config/Local.xcconfig`, build dirs, `.DS_Store`.
+- `Waypoint/Info.plist` — GENERATED by XcodeGen from `project.yml` (edit the yml, not this file).
+
+### Files created — docs
+- `AGENTS.md` (rules for agents/humans), `CLAUDE.md` (imports AGENTS.md), `docs/SETUP.md`,
+  `docs/WORKFLOW.md` (Live Share vs git), `docs/MODULES.md` (ownership/status/interfaces),
+  `docs/DECISIONS.md` (D-001..D-011), this file. `README.md` rewritten (was one line).
+- `Architecture.md` (created earlier in the session) edited: type names, repo layout, build system.
+
+### Files created — `Package/WaypointCore` (pure logic, tested; no Apple UI/AR frameworks)
+- `Package.swift` — SwiftPM manifest (iOS 17 + macOS 14 so `swift test` runs on the Mac).
+- `Model/MapTypes.swift` — `NodeKind`, `Hazard`, `MapNode`, `MapEdge`, `MarkerRef`.
+- `Model/BuildingMap.swift` — the map document, JSON helpers, `merged(with:)` (union by id,
+  local copy wins, version = max+1), `destinations`, `segmentIds`.
+- `Model/MapStore.swift` — disk layout `<Documents>/Maps/<uuid>/map.json` + `worldmap-<seg>.arworldmap`;
+  `MapBundle` (+ `.waypointmap` export file, import-with-merge).
+- `Model/MapBuilder.swift` — breadcrumb every 1.5 m + POI nodes attached to last breadcrumb.
+- `Geometry/Geometry.swift` — point/direction transforms, `signedBearing` (right = positive),
+  `rotationY`, marker -> `mapToWorldTransform`.
+- `Routing/WaypointGraph.swift`, `Router.swift` (A*, stairs penalty 1000 unless allowed),
+  `GuidanceInstruction.swift`, `RouteFollower.swift` (advance within 1 m; straight < 25°, turn-around > 135°).
+- `Guidance/FeedbackPlanner.swift` — priority/de-dupe rules producing `speak/haptic/beacon` actions.
+- `Vision/ObstacleClassifier.swift` — stop <0.6 m, caution <1.2 m, 0.15 m hysteresis.
+- `Vision/RoomNumberParser.swift` — `\b\d{3}[A-Z]?\b` extraction + `ConsensusFilter` (3 reads).
+- Tests: `ModelTests` (5), `RoutingTests` (13), `FeedbackAndVisionTests` (7) = **25 tests**.
+
+### Files created — iOS app target `Waypoint/` (needs a phone)
+- `App/WaypointApp.swift`, `App/AppState.swift` (seeds the sample map on first launch), `App/Log.swift`.
+- `UI/RootView.swift`, `UI/VolunteerView.swift`, `UI/NavigatorView.swift`, `UI/SyncView.swift`.
+- `Capture/CaptureController.swift` (ARSession + LiDAR mesh, breadcrumbs, POI tag, save ARWorldMap).
+- `Relocalization/Relocalizer.swift` (initialWorldMap + optional marker fallback).
+- `Navigation/NavigationController.swift` (per-frame integration loop).
+- `Guidance/SpatialAudioGuide.swift` (AVAudioEnvironmentNode ping), `HapticsGuide.swift`
+  (CoreHaptics: 1 tap = left, 2 = right), `SpeechGuide.swift`.
+- `Vision/ObstacleDetector.swift` (LiDAR depth region min), `Vision/SignReader.swift` (Vision OCR, NOT wired in).
+- `Sync/MapSync.swift` (MultipeerConnectivity, `sendResource` of `.waypointmap`).
+- `Samples/rice-hall-sample.json` — HAND-WRITTEN fake corridor with Room 204/206, stairs, door.
+  It is test data, not a real scan of Rice Hall.
+
+### Commands run and results
+- `swift test` (default build dir inside repo) -> compiled, then **FAILED at codesign**:
+  `resource fork, Finder information, or similar detritus not allowed`. Cause: repo is under
+  iCloud-synced `~/Desktop`. Fix: build outside the repo (D-005). Stray `.build` dir deleted.
+- `make test` -> **25 tests, 0 failures**.
+- `make typecheck` -> **OK, 16 app files** (builds WaypointCore for the iPhoneOS 27.1 SDK, then
+  type-checks every app file; no errors or warnings).
+- `make gen` -> generates `Waypoint.xcodeproj` successfully.
+- `make check` (xcodebuild) -> **FAILS on this Mac before compiling anything**:
+  `IDESimulatorFoundation ... CoreSimulator.framework ... no such file` ("A required plugin
+  failed to load"). Needs `sudo xcodebuild -runFirstLaunch` by a human (not run by the agent).
+  Also `xcrun simctl` is unusable for the same reason. `make doctor` now flags this.
+- `make doctor` -> works; no devices connected, no `Local.xcconfig` yet, no signing identity yet.
+
+### NOT verified (important)
+- **UNVERIFIED ON DEVICE:** everything under `Waypoint/` at runtime — ARKit capture, world-map
+  save/relocalize, marker fallback, LiDAR depth read, spatial audio, haptics, speech, OCR,
+  Multipeer sync, all screens. It type-checks against the iOS SDK; it has never run.
+- **Never built with xcodebuild or signed.** Signing flow in `docs/SETUP.md` is unexercised.
+- Depth-region orientation, audio coordinate handling, and the marker yaw convention are
+  best-effort and flagged with TODOs in the file headers.
+
+### Open problems / handoff
+1. Someone with admin rights must run `sudo xcodebuild -runFirstLaunch` on each Mac (see SETUP.md).
+2. Each dev: `make setup`, fill `Config/Local.xcconfig`, do the one-time Xcode signing run (SETUP.md §3).
+3. First integration target: install on a Pro iPhone, choose Navigate -> the seeded SAMPLE map ->
+   confirm the app launches and permission prompts appear. (Navigation on the sample map cannot
+   relocalize without a real world map; it will sit in "Looking for your position" until A's
+   scan/marker path works. B/C can still test audio/haptics/obstacles by temporarily feeding fake poses.)
+4. Fill in team names in `docs/MODULES.md`; decide Live Share vs git (`docs/WORKFLOW.md`).
+5. Known logic gaps are listed per owner at the bottom of `docs/MODULES.md`.
+
+**Update 2026-10-18 (Codex):** resolved merge committed locally as integrate-u3 (initial commit 4e28273; this note may amend its hash). Attempted integration-branch push was rejected by automatic approval review: user authorization specified main, not new integrate-u3 branch/code egress. No push occurred; main unchanged. Local commit approved independently. User approval requested for integration-branch publication; native Mac checks remain required before main push.

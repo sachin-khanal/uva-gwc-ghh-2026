@@ -8,6 +8,7 @@ Does not check real-world accuracy or the safety of a route.
 import argparse
 import base64
 import glob
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -176,6 +177,17 @@ def validate(document):
         positions[node_id] = position(node.get("position"), path + ".position")
     check_extents(nodes)
     check_mesh_assets(data.get("meshAssets"), nodes)
+    if "map" in document and document.get("meshFiles") is not None:
+        manifest = {uuid_value(a["id"], "mesh id"): a for a in data.get("meshAssets", []) or []}
+        for asset_key, payload in object_value(document["meshFiles"], "meshFiles").items():
+            asset = manifest.get(uuid_value(asset_key, "meshFiles key"))
+            require(asset is not None and isinstance(payload, str), "unknown mesh payload")
+            require(len(payload) <= 4 * ((40_000_000 + 2) // 3), "mesh payload too large")
+            try:
+                raw = base64.b64decode(payload, validate=True)
+            except ValueError:
+                raise ValueError("invalid mesh base64") from None
+            require(len(raw) == asset["byteCount"] and hashlib.sha256(raw).hexdigest() == asset["sha256"], "mesh integrity mismatch")
     for i, edge in enumerate(edges):
         path = f"edges[{i}]"
         object_value(edge, path)

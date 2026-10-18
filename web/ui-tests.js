@@ -1,3 +1,4 @@
+import {buildEstimatedBuilding} from "./building-model.js";
 // Owner: U3. Real DOM interactions in an isolated same-origin iframe; cloud is mocked.
 import { projectionForMap } from "./geometry3d.js";
 const iframe = document.getElementById("viewer"), results = [];
@@ -21,6 +22,30 @@ try {
     assert($("map-source").textContent.includes("NOT A REAL SCAN"));
     assert($("map-canvas").width > 0);
   });
+  await check("Unlabeled breadcrumbs hidden without changing routing",()=>{
+    assert($('show-all-points').checked===false);
+    assert(Number($('map-canvas').dataset.visiblePoints)===sample.nodes.filter(n=>n.label?.trim()).length);
+    assert($('start-node').options.length===sample.nodes.length);
+    $('show-all-points').checked=true;$('show-all-points').dispatchEvent(new win.Event('input'));
+    assert(Number($('map-canvas').dataset.visiblePoints)===sample.nodes.length);
+    $('show-all-points').checked=false;$('show-all-points').dispatchEvent(new win.Event('input'));
+  });
+  await check("Walkthrough enters perspective and Fit restores overview",()=>{
+    $('walk-toggle').click();assert($('map-canvas').dataset.view==='walk');
+    assert($('walk-toggle').getAttribute('aria-pressed')==='true');
+    assert($('walk-status').textContent.includes('Walking around the floor'));assert($('route-result').textContent.includes('Floor tour'));
+    $('fit-map').click();assert($('map-canvas').dataset.view==='overview');
+    assert($('walk-toggle').getAttribute('aria-pressed')==='false');
+  });
+  await check("Double-click and double-tap a labeled place start walking",()=>{
+    const c=$('map-canvas'),rect=c.getBoundingClientRect(),target=sample.nodes.find(n=>n.label==='Room 204');
+    const building=buildEstimatedBuilding(sample);const point=projectionForMap({...sample,meshAssets:[building]},c.clientWidth,c.clientHeight).project(target.position);
+    const coords={clientX:rect.left+point.x,clientY:rect.top+point.y,bubbles:true};
+    c.dispatchEvent(new win.MouseEvent('dblclick',coords));assert(c.dataset.view==='walk');
+    $('fit-map').click();
+    for(let i=0;i<2;i++)c.dispatchEvent(new win.PointerEvent('pointerup',{...coords,pointerType:'touch',pointerId:1}));
+    assert(c.dataset.view==='walk');$('fit-map').click();
+  });
   await check("Destination click updates route and selector", () => {
     [...$("destinations").querySelectorAll("button")].find((b) => b.textContent.includes("Room 206")).click();
     assert($("route-result").textContent.includes("13.5 m"));
@@ -28,7 +53,7 @@ try {
   });
   await check("Clicking a plan marker selects its destination", () => {
     const canvas = $("map-canvas"), rect = canvas.getBoundingClientRect();
-    const point = projectionForMap(sample,canvas.clientWidth,canvas.clientHeight).project(sample.nodes[5].position);
+    const point = projectionForMap({...sample,meshAssets:[buildEstimatedBuilding(sample)]},canvas.clientWidth,canvas.clientHeight).project(sample.nodes[5].position);
     canvas.dispatchEvent(new win.MouseEvent("click", { clientX: rect.left + point.x,
       clientY: rect.top + point.y, bubbles: true }));
     assert($("goal-node").value === sample.nodes[5].id.toLowerCase());
@@ -61,6 +86,12 @@ try {
     $("map-file").files = transfer.files; change($("map-file"));
     await waitFor(() => $("map-file").value === "");
   };
+  await check("Start route walks to completion and reports the selected room",async()=>{
+    const start={...sample.nodes[0],position:[0,0,0]},goal={...sample.nodes[5],label:'Arrival test',position:[1,0,0]};delete goal.extent;
+    await openFile({...sample,name:'Short arrival fixture',nodes:[start,goal],edges:[{from:start.id,to:goal.id,distance:1}],meshAssets:[]});
+    $('start-route').click();await waitFor(()=>$('walk-status').textContent==='Arrived at Arrival test.');
+    assert($('goal-node').value===goal.id.toLowerCase());assert($('map-canvas').dataset.view==='walk');$('fit-map').click();
+  });
   await check("Local map import renders untrusted names as plain text", async () => {
     const map = structuredClone(sample); map.name = "<img src=x onerror=alert(1)>";
     await openFile(map);
@@ -120,6 +151,23 @@ try {
     assert(requests[1][0].includes("canonical_buildings"));
     $("refresh").click(); await waitFor(() => !$("refresh").disabled);
     assert(requests.filter(([url]) => url.includes("/auth/")).length === 1);
+  });
+  await check("Selecting a room reveals route and Start route uses that destination",()=>{
+    // Return to a known connected map after the cloud/import cases.
+    [...$('buildings').querySelectorAll('button')].find(b=>b.textContent.includes('sample')).click();
+    const destination=[...$('destinations').querySelectorAll('button')].find(b=>b.textContent.includes('Room 206'));
+    destination.click();assert($('show-overlay').checked);assert(!$('start-route').disabled);
+    $('start-route').click();assert($('map-canvas').dataset.view==='walk');
+    assert($('goal-node').value===sample.nodes[6].id.toLowerCase());
+    [...$('destinations').querySelectorAll('button')].find(b=>b.textContent.includes('Room 204')).click();
+    assert($('goal-node').value===sample.nodes[5].id.toLowerCase());assert($('show-overlay').checked);
+    $('fit-map').click();
+  });
+  await check("Expand map gives the canvas more room and restores",()=>{
+    const before=$('map-canvas').clientWidth;$('expand-map').click();
+    assert($('expand-map').getAttribute('aria-pressed')==='true');
+    assert($('map-canvas').clientWidth>=before,'canvas before='+before+' after='+$('map-canvas').clientWidth);$('expand-map').click();
+    assert($('expand-map').getAttribute('aria-pressed')==='false');
   });
   await check("Empty shared library keeps the sample available", async () => {
     win.fetch = async (url) => new win.Response(JSON.stringify(String(url).includes("/auth/")

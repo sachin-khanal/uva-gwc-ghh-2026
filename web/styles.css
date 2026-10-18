@@ -8,3 +8,12 @@
 .geometry-status{margin:0;padding:0 24px 14px}
 
 #surface-canvas{position:absolute;inset:0;pointer-events:none}#map-canvas{position:relative}.surface-controls{display:flex;gap:14px;flex-wrap:wrap;padding:0 24px 14px;font-size:11px;align-items:center}.surface-controls label{display:flex;align-items:center;gap:5px}.surface-controls input[type=range]{width:95px;min-height:20px;padding:0}.surface-controls span{color:var(--muted)}
+
+.walk-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 22px}.walk-toolbar label{font-size:12px;color:#647871}#walk-status{padding:0 22px;line-height:1.5}
+
+/* More space for long floor layouts; expansion retains route controls. */
+main{max-width:2100px;padding-left:2%;padding-right:2%}.workspace{grid-template-columns:205px minmax(400px,1fr) 270px}.canvas-wrap{height:clamp(580px,68vh,900px)}.start-route{width:100%;margin:0 0 14px}.map-heading{flex-wrap:wrap}.zoom-controls{flex-wrap:wrap}.workspace.map-expanded{grid-template-columns:minmax(0,1fr) 270px}.map-expanded .library{display:none}.map-expanded .canvas-wrap{height:clamp(650px,78vh,1050px)}
+@media(max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr) 260px}.library{grid-column:1/-1;min-height:0}.library-bottom{padding-top:10px}.building-list{display:flex;flex-direction:row;overflow:auto}.building-card{min-width:160px}.map-expanded .library{display:none}}
+@media(max-width:650px){main{padding:0 4%}.workspace,.workspace.map-expanded{display:flex;flex-direction:column}.canvas-wrap,.map-expanded .canvas-wrap{height:65vh;min-height:440px}.map-expanded .route-panel{display:block}.map-heading{padding:16px}.zoom-controls{gap:4px}}
+
+@media(min-width:651px) and (max-width:1100px){.route-panel{grid-column:auto}.workspace.map-expanded{grid-template-columns:minmax(0,1fr)}.map-expanded .route-panel{grid-column:1}}

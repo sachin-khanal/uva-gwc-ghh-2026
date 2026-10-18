@@ -138,6 +138,12 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     public func merged(with other: BuildingMap) -> BuildingMap {
         var result = self
 
+        // Fill absent geometry without changing an existing place or discarding keyframes.
+        for incoming in other.nodes {
+            if let i = result.nodes.firstIndex(where: { $0.id == incoming.id }), result.nodes[i].extent == nil {
+                result.nodes[i].extent = incoming.extent
+            }
+        }
         let knownNodeIds = Set(nodes.map(\.id))
         for n in other.nodes where !knownNodeIds.contains(n.id) {
             result.nodes.append(n)
@@ -153,11 +159,15 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
             result.keyframes.append(k)
         }
         if result.marker == nil { result.marker = other.marker }
-        // 3D surface files: keep ours, add any of theirs we do not have (matched by id).
-        if let theirs = other.meshAssets, !theirs.isEmpty {
-            let known = Set((result.meshAssets ?? []).map(\.id))
-            result.meshAssets = (result.meshAssets ?? []) + theirs.filter { !known.contains($0.id) }
+        var assets = result.meshAssets ?? []
+        for asset in other.meshAssets ?? [] {
+            if let i = assets.firstIndex(where: { $0.id == asset.id }) {
+                var old = assets[i], incoming = asset
+                old.storageOwner = nil; incoming.storageOwner = nil
+                if old == incoming, assets[i].storageOwner == nil { assets[i].storageOwner = asset.storageOwner }
+            } else { assets.append(asset) }
         }
+        if !assets.isEmpty { result.meshAssets = assets }
         result.version = max(version, other.version) + 1
         return result
     }

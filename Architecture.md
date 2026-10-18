@@ -1,5 +1,15 @@
 # Waypoint — Architecture
 
+**Update 2026-10-17 (Codex, U3 CONTRACT CHANGE):** personal U3 implements schema
+3 on top of main's serialized MapSchema versions: optional room footprints,
+separate integrity-checked OBJ assets in map-frame meters, local bundle payloads,
+and canonical cloud preservation via migration 0004. This extends the older map
+descriptions below; full fields/limits/compatibility are in `docs/MAP_FORMAT.md`.
+The web viewer can orbit XYZ geometry and load real OBJ files when present.
+Native capture and new SQL still need verification; main's schema-2 readers must
+be updated before shared writes begin producing schema 3. No live migration or
+main merge has been performed by the agent.
+
 Indoor navigation for blind users. A sighted volunteer scans a building once; a blind user later navigates it by spatial audio and haptics. Demo: blindfolded judge walks to a room in Rice Hall.
 
 **Budget:** 24 hours, 4 people. **Signing:** free Apple ID (no paid developer profile).
