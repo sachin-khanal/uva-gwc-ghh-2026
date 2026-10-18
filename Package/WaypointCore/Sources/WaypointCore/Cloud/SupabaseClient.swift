@@ -101,7 +101,7 @@ public actor SupabaseClient {
             body: body)
     }
 
-    /// Lists 3D surface files (OBJ) of a building that the caller has already uploaded (requires migration 0007). The server checks
+    /// Lists 3D surface files (OBJ) of a building that the caller has already uploaded (requires migration 0008). The server checks
     /// that every file belongs to a scan segment THIS user contributed; assets are append-only.
     public func publishMeshAssets(mapId: UUID, assets: [MeshAsset]) async throws {
         struct Args: Encodable { let building: UUID; let assets: [MeshAsset] }

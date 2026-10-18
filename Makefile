@@ -117,7 +117,7 @@ selftest-sim: ## HEADLESS on-phone test: run the simulated walk to ROOM (default
 
 selftest-e2e: ## HEADLESS end-to-end self-test on the phone: capabilities, storage, Keychain, synthetic scan -> save -> reload -> share -> simulated walk, cloud (if configured). Prints PASS/FAIL per check (DEVICE=...)
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
-	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoE2E YES
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoE2E YES $(EXTRA)
 
 selftest-scan: ## HEADLESS scan monitor: app starts scanning by itself and prints tracking/mesh/box stats once per second (DEVICE=...). Walk with the phone; Ctrl-C to stop.
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }

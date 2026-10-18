@@ -1,8 +1,8 @@
 -- File:   supabase/tests/mesh_publish_and_read.sql
 -- Owner:  U3 / U1 (added 2026-10-18, branch feature/web-mesh-obj)
--- Purpose: proves migration 0007: publish_mesh_assets accepts only the segment owner's well-formed, append-only OBJ entries, and the
+-- Purpose: proves migration 0008: publish_mesh_assets accepts only the segment owner's well-formed, append-only OBJ entries, and the
 --          meshes read rule lets ANOTHER signed-in user download exactly the listed paths and nothing else.
--- Run:    needs migrations 0001..0005 and 0007 applied in a THROWAWAY Postgres (it inserts test rows and deletes them). Locally:
+-- Run:    needs migrations 0001..0005 and 0008 applied in a THROWAWAY Postgres (it inserts test rows and deletes them). Locally:
 --           docker run -d --name wp-pg -e POSTGRES_PASSWORD=pw public.ecr.aws/supabase/postgres:17.6.1.136   (wait for pg_isready)
 --           the bare image has no `storage` service tables: create stand-ins for storage.buckets/objects/foldername/filename first
 --           then: docker exec wp-pg psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -f /tmp/<file>.sql  for each migration, then this file
@@ -107,10 +107,10 @@ insert into storage.objects(bucket_id, name, metadata) values
   ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj', '{"size": 1000}');
 -- A first publication carrying meshAssets has them stripped by the trigger.
 insert into public.canonical_buildings(map_id, owner, name, version, map_json, segment_owners) values
-  ('77777777-0000-4000-8000-000000000007', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ZZ STRIP', 1,
-   '{"schemaVersion":3,"id":"77777777-0000-4000-8000-000000000007","name":"ZZ STRIP","version":1,"nodes":[],"edges":[],"meshAssets":[]}', '{}');
+  ('77777777-0000-4000-8000-000000000008', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ZZ STRIP', 1,
+   '{"schemaVersion":3,"id":"77777777-0000-4000-8000-000000000008","name":"ZZ STRIP","version":1,"nodes":[],"edges":[],"meshAssets":[]}', '{}');
 do $$ begin
-  assert not (select map_json ? 'meshAssets' from public.canonical_buildings where map_id = '77777777-0000-4000-8000-000000000007'), 'meshAssets stripped on first publication';
+  assert not (select map_json ? 'meshAssets' from public.canonical_buildings where map_id = '77777777-0000-4000-8000-000000000008'), 'meshAssets stripped on first publication';
   raise notice 'PASS meshAssets stripped on first publication';
 end $$;
 
