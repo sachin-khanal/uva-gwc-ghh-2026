@@ -177,10 +177,18 @@ struct LiveScanScreen: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: Theme.Space.s) {
                             ForEach(s.placesToStandAt) { place in
-                                Button(place.label) { model.confirmPlace(place.id) }
-                                    .buttonStyle(.bordered)
+                                Button(place.id == s.confirmedPlaceId ? "\(place.label) ✓" : place.label) {
+                                    model.confirmPlace(place.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(place.id == s.confirmedPlaceId)
                             }
                         }
+                    }
+                    if s.confirmedPlaceCount > 0 {
+                        Button("Start over") { model.restartPlaceConfirmation() }
+                            .font(.footnote)
+                            .accessibilityIdentifier("scan.extension.startOver")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

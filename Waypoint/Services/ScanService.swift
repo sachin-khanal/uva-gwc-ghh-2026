@@ -61,6 +61,8 @@ struct ScanSnapshot: Equatable {
     var placesToStandAt: [StandPlace] = []
     /// How many of those have been confirmed (0 or 1). Two solves the alignment and attaches.
     var confirmedPlaceCount = 0
+    /// The place already confirmed, so the screen can tick it and stop it being tapped twice.
+    var confirmedPlaceId: UUID?
 
     var labelledTagCount: Int { tags.filter(\.hasLabel).count }
     var finishGate: FinishGate { FinishGate.evaluate(quality: quality, labelledTagCount: labelledTagCount,
@@ -103,6 +105,8 @@ protocol ScanService: AnyObject {
     /// with no compiler complaint (device report 2026-10-18). Requiring every conformer to say what it does
     /// turns that class of mistake back into a build error.
     func confirmPlace(id: UUID)
+    /// Forget the places confirmed so far. There is always a way out of a refused alignment.
+    func restartPlaceConfirmation()
     func dismissSuggestion()
     func adjustBox(by delta: Float)
     /// Saves the map; completion on the main thread.

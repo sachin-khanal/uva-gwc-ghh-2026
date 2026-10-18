@@ -42,10 +42,16 @@ public enum ManualAlignment {
     /// ten metres down the corridor.
     public static let minSeparationMeters: Float = 2
 
-    /// How much the walked distance may disagree with the map distance before we refuse. Generous
-    /// enough for normal standing-position slop (you cannot stand exactly on a node, and the node is
-    /// itself only roughly where the volunteer walked), tight enough to catch tapping the wrong door.
-    public static let maxLengthMismatchMeters: Float = 1.0
+    /// How much the walked distance may disagree with the map distance before we refuse.
+    ///
+    /// 1.0 m was TOO TIGHT BY CONSTRUCTION and refused correct pairs (device report 2026-10-18).
+    /// `CaptureController.tagPOI` drops a labelled place about a metre IN FRONT of where the volunteer
+    /// was standing, in whatever direction they happened to be facing - so the node is already ~1 m
+    /// from where a person naturally stands to confirm it, and that offset applies at BOTH ends in
+    /// unrelated directions. Two correct taps can therefore disagree with the map by roughly 2 m
+    /// before anyone has made a mistake. 3.0 m still catches tapping the wrong door in a building
+    /// where labelled places are metres apart, which is the failure this check exists for.
+    public static let maxLengthMismatchMeters: Float = 3.0
 
     /// Why an alignment was refused, so the UI can say something a person can act on.
     public enum Failure: Error, Equatable, Sendable {

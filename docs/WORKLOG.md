@@ -1,5 +1,37 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Manual alignment refused a CORRECT pair and then left the volunteer stuck   [tags: BUG]
+Area: A (capture) + U3 (scanner UI). Branch `stairs-multifloor`.
+Anmol, extending a real map: confirmed "Start", walked to "Rear Stairwell", confirmed that - and was asked for
+another labelled place. There were only two in the map, so there was nothing left to tap and no way forward.
+
+CAUSE 1, and it is a design error in my own check: `maxLengthMismatchMeters` was 1.0 m, which is TOO TIGHT BY
+CONSTRUCTION. `CaptureController.tagPOI` drops a labelled place about a metre IN FRONT of where the volunteer was
+standing, in whatever direction they happened to be facing. So the node is already ~1 m from where a person
+naturally stands to confirm it - and that offset applies at BOTH ends, in unrelated directions. Two perfectly
+correct taps can therefore disagree with the map by roughly 2 m before anybody has made a mistake, and the check
+refused them. Raised to 3.0 m, which still catches tapping the wrong door in a building whose labelled places are
+metres apart - the failure the check actually exists for. New test pins the offset case.
+
+CAUSE 2: the refusal was a DEAD END. `lengthMismatch` cleared the first confirmed place, so the screen looked as
+though nothing had happened, and with only two labelled places the volunteer had already used both. No tap did
+anything.
+Fixed: a refusal now KEEPS the first place (retry the other one immediately), every refusal names the actual
+numbers ("the map puts those places 11.4 m apart but you walked 7.2 m") and is logged, confirming the SAME place
+twice has its own message instead of a confusing "too close", the already-confirmed place is ticked and disabled
+in the list, and there is an explicit "Start over" button - there must always be a way out.
+
+Verified: `make test` -> **396 tests, 0 failures** (395 before; 1 new: a pair carrying the POI offset that
+tagging itself introduces must be accepted). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Whether 3.0 m is now right is exactly what the next attempt will say - the
+log lines added here ("alignment refused: map X m vs walked Y m") are there to calibrate it rather than guess
+again.
+Open: the underlying POI offset is still there - a labelled place is a metre from where you stand to see it, in
+an unknown direction. Tagging the place AT the volunteer's own position (not a metre ahead) would remove the
+error at the source, but it would move every existing node's meaning and is not a change to make mid-testing.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — CONTRACT CHANGE: format 4, stairs metadata and the checks that keep a stairwell usable   [tags: CONTRACT CHANGE, FEATURE]
 Area: A (maps) + U3 (scanner UI). Branch `stairs-multifloor`.
 Design agreed with Anmol first: the two ends of one staircase live in SEPARATE maps (one per floor) and are

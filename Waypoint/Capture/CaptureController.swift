@@ -99,6 +99,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var confirmedPlaceCount = 0
     /// The volunteer located themselves by hand, so ARKit does not have to recognise the space.
     private var alignedByHand = false
+    /// Id of the place already confirmed, so the screen can tick it and refuse a second tap on it.
+    @Published private(set) var confirmedPlaceId: UUID?
     /// A save is in flight. Published and readable so `LiveScanService` can tell "still working" from
     /// "stalled" instead of failing the save on a fixed timer.
     @Published private(set) var isSaving = false
@@ -215,6 +217,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         worldToMap = matrix_identity_float4x4
         confirmedPlaces = []
         confirmedPlaceCount = 0
+        confirmedPlaceId = nil
         alignedByHand = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
@@ -392,23 +395,31 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
         let world = Geometry.translation(of: frame.camera.transform)
+        if let first = confirmedPlaces.first, first.map == node.position {
+            extensionStatus = "That is the place you already confirmed. Walk to a DIFFERENT one and tap that."
+            return
+        }
         guard let first = confirmedPlaces.first else {
             confirmedPlaces = [(map: node.position, world: world)]
             confirmedPlaceCount = 1
+            confirmedPlaceId = node.id
             extensionStatus = "Got it. Now walk to another labelled place at least \(Int(ManualAlignment.minSeparationMeters)) meters away and confirm that one."
             Log.capture.info("alignment: first place \(node.label ?? "-")")
             return
         }
         switch ManualAlignment.worldToMap(mapA: first.map, worldA: first.world,
                                           mapB: node.position, worldB: world) {
-        case .failure(.tooClose):
-            extensionStatus = "Those two places are too close together to tell which way you are facing. Pick one further away."
+        case .failure(.tooClose(let apart)):
+            extensionStatus = String(format: "Those two places are only %.1f m apart - too close to tell which way you are facing. Pick one further away, or tap Start over.", apart)
+            Log.capture.info(String(format: "alignment refused: only %.2f m apart", apart))
         case .failure(.lengthMismatch(let mapMeters, let walked)):
-            extensionStatus = String(format: "That does not add up: the map puts those places %.0f m apart but you walked %.0f m. Start again from the first place.", mapMeters, walked)
-            confirmedPlaces = []
-            confirmedPlaceCount = 0
+            // Do NOT clear the first place here. Clearing it looked like nothing had happened, and with
+            // only two labelled places in the map the volunteer was left with nowhere to go at all
+            // (device report 2026-10-18). They keep their first place and can retry or start over.
+            extensionStatus = String(format: "That does not add up: the map puts those places %.1f m apart but you walked %.1f m. Try the other place, or tap Start over.", mapMeters, walked)
+            Log.capture.info(String(format: "alignment refused: map %.2f m vs walked %.2f m", mapMeters, walked))
         case .failure(.notFinite):
-            extensionStatus = "Lost track of where you walked. Start again from the first place."
+            extensionStatus = "Lost track of where you walked. Tap Start over and confirm the first place again."
             confirmedPlaces = []
             confirmedPlaceCount = 0
         case .success(let transform):
@@ -418,6 +429,16 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             Log.capture.info("alignment: solved from two places, yaw \(Geometry.yawAboutY(of: transform) * 180 / .pi) deg")
             beginExtension()
         }
+    }
+
+    /// Forget the places confirmed so far. There must always be a way out of a refused alignment: with
+    /// only two labelled places in the map, a volunteer who has used both and been refused would
+    /// otherwise be stuck with no tap that does anything (device report 2026-10-18).
+    func restartPlaceConfirmation() {
+        confirmedPlaces = []
+        confirmedPlaceCount = 0
+        confirmedPlaceId = nil
+        extensionStatus = "Starting over. Stand at a labelled place and tap it."
     }
 
     /// Volunteer confirms they are in the mapped corridor after ARKit has relocalized.

@@ -90,6 +90,12 @@ final class ScanSessionModel: ObservableObject {
         showToast("\(kind.displayName) \u{201C}\(name)\u{201D} tagged")
     }
 
+    func restartPlaceConfirmation() {
+        service.restartPlaceConfirmation()
+        snapshot = service.snapshot
+        if let status = snapshot.extensionStatus { Announcer.voiceOverOnly(status) }
+    }
+
     func tag(_ kind: NodeKind) {
         guard !isPaused, snapshot.canRecord else { return }
         let label = labelDraft.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -74,6 +74,17 @@ final class ManualAlignmentTests: XCTestCase {
         guard case .failure(.tooClose) = r else { return XCTFail("\(r)") }
     }
 
+    /// A labelled place sits about a metre in front of where the volunteer stood when they tagged it,
+    /// at both ends and in unrelated directions, so a CORRECT pair can disagree with the map by about
+    /// 2 m. That must be accepted - refusing it left the volunteer with no usable pair at all.
+    func testAcceptsThePoiOffsetThatTaggingItselfIntroduces() throws {
+        let mapA = SIMD3<Float>(0, 0, 0), mapB = SIMD3<Float>(0, 0, -10)
+        // Walked 8.1 m where the map says 10: both nodes offset ~1 m the "wrong" way.
+        let r = ManualAlignment.worldToMap(mapA: mapA, worldA: SIMD3(0, 0, 0),
+                                           mapB: mapB, worldB: SIMD3(0, 0, -8.1))
+        guard case .success = r else { return XCTFail("a correct pair must not be refused: \(r)") }
+    }
+
     /// The map says those two doors are 12 m apart; the volunteer walked 3 m. They tapped the wrong
     /// one, and guessing would scatter the new corridor across the building.
     func testRefusesWhenTheWalkDoesNotMatchTheMap() {

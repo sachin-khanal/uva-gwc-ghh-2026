@@ -85,6 +85,11 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
+    func restartPlaceConfirmation() {
+        controller.restartPlaceConfirmation()
+        refresh()
+    }
+
     func tagStairs(kind: NodeKind, label: String?, info: StairsInfo) {
         guard controller.isRunning, !isPaused else { return }
         let before = controller.nodeCount
@@ -198,6 +203,7 @@ final class LiveScanService: ScanService {
         }
         s.confirmedPlaceCount = controller.confirmedPlaceCount
         s.knownStairwellNames = controller.knownStairwellNames
+        s.confirmedPlaceId = controller.confirmedPlaceId
         snapshot = s
     }
 
