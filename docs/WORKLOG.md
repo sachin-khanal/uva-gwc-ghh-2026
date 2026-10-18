@@ -1,5 +1,10 @@
 # Work log
 
+## 2026-10-18 13:25 — Claude (agent, for Sachin) — Live-LiDAR export probe PASS (USDZ and OBJ web copy)   [tags: BUILD]
+Command: `DEVICE=<id> make selftest-scan EXTRA="-scanExportProbe YES"` for 100 s on Sachin's iPhone 16 Pro Max, hand held at a room, build 4c2ee81 already installed. Nothing was saved to the map store (the probe deletes its temp file).
+Verified ON THE PHONE with real ARKit mesh anchors: "EXPORT PROBE PASS: 16 anchors -> 30427 triangles (read back 30427), 2193085 bytes, fits=true, 480 ms" and "EXPORT PROBE OBJ PASS: 17440 vertices, 30427 triangles, 1152638 bytes, sha b2a30bd1, 179 ms". Tracking was OK for the whole run; the scene grew to 59 mesh anchors / 308k triangles.
+NOT verified: the probe fires at the FIRST 3000+ triangles, so it exported only 16 anchors (30k triangles), not the full 300k-triangle scene; a full-size export time and the 30 MB fit on the phone are still open (the Mac test of the 466k-triangle Floor 4 mesh gave 17.2 MB in 0.16 s). Also still open: a real Save showing "web copy N MB", the cloud upload, 0007 on the real project, the web viewer showing a phone-made file.
+
 ## 2026-10-18 13:05 — Claude (agent, for Sachin) — Phone run of the web-viewer OBJ export: in-app E2E + UI tests PASS; live-LiDAR probe NOT run   [tags: BUILD]
 Area: branch `feature/web-mesh-obj` on Sachin's iPhone 16 Pro Max (id in the device-testing notes). Files edited: `Waypoint/App/E2ESelfTest.swift` (new check `export.obj`: synthetic 41x41 grid -> `ObjExport.make` -> `MapStore.attachMesh` -> reload from disk, compares bytes, SHA-256 and face count), `Waypoint/Capture/CaptureController.swift` (the headless `-scanExportProbe` now also runs `MeshExporter.exportSurface` on the live anchors and logs "EXPORT PROBE OBJ PASS/FAIL").
 Commands: `make typecheck`; `DEVICE=<id> make build install` (maps backed up first: 20261018-103136); `make selftest-e2e`; `make uitest` (backup 20261018-103156); `make selftest-scan EXTRA="-scanExportProbe YES"` for 95 s.
