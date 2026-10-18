@@ -42,6 +42,10 @@ public struct CoverageTracker: Equatable {
 
     private struct Cell: Hashable { var x: Int; var z: Int }
     private var seen: [Cell: Set<Int>] = [:]
+    /// Cells an EARLIER scan already covered (an extension re-walks them to reach the new part). They
+    /// are excluded from the score entirely, so the volunteer is never asked to walk back over ground
+    /// that is already in the map just because they crossed it on the way (device report 2026-10-18).
+    private var alreadyCovered: Set<Cell> = []
 
     public init(
         bucketMetres: Float = 2,
@@ -66,15 +70,31 @@ public struct CoverageTracker: Equatable {
         seen[cell, default: []].insert(octant(of: yaw))
     }
 
-    /// How many distinct places the volunteer has stood.
-    public var visitedCellCount: Int { seen.count }
+    /// Tell the tracker which ground an earlier scan already holds, so only genuinely NEW territory is
+    /// judged. Positions are MAP-frame breadcrumbs from the map being extended.
+    ///
+    /// Why this is the right approximation: we do not store per-cell headings in the map, only where the
+    /// volunteer walked. But the earlier scan was saved, so whatever its coverage was, it was accepted -
+    /// re-walking it adds nothing. Asking otherwise made extending a map harder the MORE of it already
+    /// existed, which is backwards.
+    public mutating func markAlreadyCovered(_ positions: [SIMD3<Float>]) {
+        for p in positions where p.x.isFinite && p.z.isFinite {
+            alreadyCovered.insert(Cell(x: Int((p.x / bucketMetres).rounded(.down)),
+                                       z: Int((p.z / bucketMetres).rounded(.down))))
+        }
+    }
+
+    /// How many distinct places the volunteer has stood. Counts only ground not already in the map.
+    public var visitedCellCount: Int { seen.keys.filter { !alreadyCovered.contains($0) }.count }
 
     /// Fraction of visited places that have been seen from roughly opposite directions, 0...1.
     /// 0 when nothing has been visited, so an empty tracker never claims coverage.
     public var returnCoverage: Float {
-        guard !seen.isEmpty else { return 0 }
-        let covered = seen.values.count(where: hasOppositePair)
-        return Float(covered) / Float(seen.count)
+        let fresh = seen.filter { !alreadyCovered.contains($0.key) }
+        // Nothing new walked yet. 0 while there is also nothing old, so an empty tracker never claims
+        // coverage; 1 when everything walked was already in the map, because there is nothing to ask for.
+        guard !fresh.isEmpty else { return alreadyCovered.isEmpty ? 0 : 1 }
+        return Float(fresh.values.count(where: hasOppositePair)) / Float(fresh.count)
     }
 
     /// Ask the volunteer to walk back. False for a walk too short to judge, so a quick scan of one
@@ -83,7 +103,15 @@ public struct CoverageTracker: Equatable {
         visitedCellCount >= minimumCellsToJudge && returnCoverage < promptBelowCoverage
     }
 
+    /// Forget the walk. Ground marked as already covered is KEPT: it describes the saved map being
+    /// extended, not this session.
     public mutating func reset() { seen.removeAll() }
+
+    /// Forget everything, including which ground an earlier scan held.
+    public mutating func resetAll() {
+        seen.removeAll()
+        alreadyCovered.removeAll()
+    }
 
     // MARK: Private
 

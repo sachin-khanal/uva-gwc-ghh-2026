@@ -206,7 +206,15 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         keyframes = []
         isMakingKeyframe = false
         lastKeyframeAttempt = -.greatestFiniteMagnitude
-        coverage.reset()
+        coverage.resetAll()
+        // Extending: the ground this map already holds is not the volunteer's problem. Only genuinely
+        // new territory is judged for the walk-back rule, so crossing an existing corridor to reach the
+        // new wing does not drag the score down (device report 2026-10-18).
+        if let map {
+            coverage.markAlreadyCovered(map.nodes
+                .filter { $0.kind == .corridor || $0.kind == .junction }
+                .map(\.position))
+        }
         returnCoverage = 0
         shouldWalkBack = false
         lastCoverageSample = -.greatestFiniteMagnitude
@@ -263,8 +271,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         lastCoverageSample = frame.timestamp
 
         let transform = frame.camera.transform
-        let forward = Geometry.cameraForward(of: transform)
-        coverage.observe(position: Geometry.translation(of: transform),
+        // MAP frame, not the session's. The ground an earlier scan already covered is recorded in map
+        // coordinates, and after a hand alignment the two frames differ - fed in session coordinates the
+        // cells would never line up and every re-walked corridor would look new.
+        let forward = mapDirection(Geometry.cameraForward(of: transform))
+        coverage.observe(position: mapPoint(Geometry.translation(of: transform)),
                          yaw: atan2(forward.x, -forward.z))
         // Same rule as the HUD values below: only publish real changes, this runs several times a second.
         let fraction = coverage.returnCoverage

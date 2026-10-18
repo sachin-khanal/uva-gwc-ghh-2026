@@ -1,5 +1,40 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Extending a map asked the volunteer to re-walk ground it already had   [tags: BUG]
+Area: A (scan). Branch `stairs-multifloor`.
+Anmol: after calibrating by standing at labelled places, continuing the scan re-covered already-scanned corridor,
+and the walk-back rule counted it - so he was told to walk back over parts that were already in the map, instead
+of the rule focusing on what is genuinely new. His point: it already knows where it is, from the calibration.
+
+CAUSE 1: `CoverageTracker` starts empty on every scan, so during an EXTENSION every cell counts as new - including
+the corridor you must cross to reach the new wing. That makes extending a map harder the MORE of it already
+exists, which is backwards.
+CAUSE 2, found while fixing the first and worse: `coverage.observe` was fed the SESSION-frame camera position and
+yaw. After a hand alignment the session frame and the map frame differ, so the cells would never have lined up
+with anything recorded in the map - the seeding in cause 1 would have silently done nothing.
+
+Fixed:
+* `CoverageTracker.markAlreadyCovered(_:)` takes MAP-frame breadcrumbs from the map being extended and EXCLUDES
+  those cells from the score entirely - numerator and denominator both. `returnCoverage` returns 1 (not 0) when
+  everything walked was already in the map, because there is nothing left to ask for, while an empty tracker
+  still returns 0 and never claims coverage. `reset()` keeps that ground (it describes the saved map, not this
+  walk); new `resetAll()` clears everything and is what a plain scan uses.
+  The approximation, stated plainly: we do not store per-cell headings in a map, only where the volunteer walked.
+  But that earlier scan was SAVED, so whatever its coverage was, it was accepted; re-walking it adds nothing.
+* `CaptureController`: seeds from the extended map's corridor and junction nodes at `start`, and now feeds
+  `coverage.observe` through `mapPoint`/`mapDirection` so position and yaw are in the map frame.
+
+Verified: `make test` -> **402 tests, 0 failures** (396 before; 6 new: old ground not judged, new ground still
+judged, walking the new wing both ways is enough, a plain scan unaffected, an empty tracker claims nothing, and
+`reset` vs `resetAll`). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone dropped off before this and the previous fix
+could be flashed. Both are committed and pushed.
+Open: the exemption is per CELL (2 m), so a new corridor that happens to pass through one old cell has that cell
+excused. That is the intended trade - it errs toward not nagging - but it means a volunteer could technically
+walk a new wing one way, cross an old cell, and see a slightly better score than the new ground deserves.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Manual alignment refused a CORRECT pair and then left the volunteer stuck   [tags: BUG]
 Area: A (capture) + U3 (scanner UI). Branch `stairs-multifloor`.
 Anmol, extending a real map: confirmed "Start", walked to "Rear Stairwell", confirmed that - and was asked for

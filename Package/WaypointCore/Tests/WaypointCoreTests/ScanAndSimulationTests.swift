@@ -398,6 +398,67 @@ final class CoverageTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.shouldPromptReturnWalk)
     }
 
+    // MARK: Extending a map - ground already scanned is not the volunteer's problem (2026-10-18)
+
+    /// Walking THROUGH an existing corridor to reach the new wing must not drag the score down, or
+    /// extending a map gets harder the more of it already exists.
+    func testGroundAlreadyInTheMapIsNotJudged() {
+        var tracker = CoverageTracker()
+        tracker.markAlreadyCovered((0...5).map { SIMD3<Float>(Float($0) * 2, 0, 0) })
+        // Walk that old corridor one way only...
+        for i in 0...5 { tracker.observe(position: SIMD3(Float(i) * 2, 0, 0), yaw: 0) }
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6,
+                       "all of it was already in the map: nothing to ask for")
+        XCTAssertFalse(tracker.shouldPromptReturnWalk)
+    }
+
+    /// ...but genuinely NEW ground is still judged normally.
+    func testNewGroundIsStillJudged() {
+        var tracker = CoverageTracker()
+        tracker.markAlreadyCovered((0...5).map { SIMD3<Float>(Float($0) * 2, 0, 0) })
+        for i in 0...5 { tracker.observe(position: SIMD3(Float(i) * 2, 0, 0), yaw: 0) }   // old ground
+        for i in 1...6 { tracker.observe(position: SIMD3(10 + Float(i) * 2, 0, 0), yaw: 0) } // new wing, one way
+        XCTAssertEqual(tracker.returnCoverage, 0, accuracy: 1e-6, "the new wing has only been walked one way")
+        XCTAssertTrue(tracker.shouldPromptReturnWalk)
+    }
+
+    /// Walking the new wing BOTH ways satisfies the rule, with the old corridor still ignored.
+    func testWalkingTheNewWingBothWaysIsEnough() {
+        var tracker = CoverageTracker()
+        tracker.markAlreadyCovered((0...5).map { SIMD3<Float>(Float($0) * 2, 0, 0) })
+        for i in 0...5 { tracker.observe(position: SIMD3(Float(i) * 2, 0, 0), yaw: 0) }
+        for i in 1...6 { tracker.observe(position: SIMD3(10 + Float(i) * 2, 0, 0), yaw: 0) }
+        for i in (1...6).reversed() { tracker.observe(position: SIMD3(10 + Float(i) * 2, 0, 0), yaw: .pi) }
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6)
+        XCTAssertFalse(tracker.shouldPromptReturnWalk)
+    }
+
+    /// A fresh scan, with nothing marked, behaves exactly as before.
+    func testAPlainScanIsUnaffected() {
+        var tracker = CoverageTracker()
+        for i in 0...5 { tracker.observe(position: SIMD3(Float(i) * 2, 0, 0), yaw: 0) }
+        XCTAssertEqual(tracker.returnCoverage, 0, accuracy: 1e-6)
+        XCTAssertEqual(tracker.visitedCellCount, 6)
+    }
+
+    /// An empty tracker must never claim coverage.
+    func testAnEmptyTrackerClaimsNothing() {
+        XCTAssertEqual(CoverageTracker().returnCoverage, 0)
+    }
+
+    /// `reset` keeps what the saved map holds (it describes the map, not this walk); `resetAll` clears it.
+    func testResetKeepsTheMapsGroundAndResetAllClearsIt() {
+        var tracker = CoverageTracker()
+        tracker.markAlreadyCovered([SIMD3(0, 0, 0)])
+        tracker.observe(position: SIMD3(0, 0, 0), yaw: 0)
+        tracker.reset()
+        tracker.observe(position: SIMD3(0, 0, 0), yaw: 0)
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6, "still known to be old ground")
+        tracker.resetAll()
+        tracker.observe(position: SIMD3(0, 0, 0), yaw: 0)
+        XCTAssertEqual(tracker.returnCoverage, 0, accuracy: 1e-6, "now it is new ground again")
+    }
+
     func testHalfAReturnWalkScoresInBetween() {
         var tracker = CoverageTracker()
         walkOneWay(&tracker, metres: 20)
