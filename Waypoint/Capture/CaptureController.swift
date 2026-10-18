@@ -374,7 +374,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             Log.capture.info("room extent: no classified wall faces nearby (classification off?)")
             return nil
         }
-        guard let result = RoomExtractor.extract(seed: position, wallPoints: points, floorY: position.y - eyeHeight) else {
+        guard let result = RoomExtractor.extract(seed: position, wallPoints: points, floorY: MeshExporter.floorHeight(anchors, near: position) ?? (position.y - eyeHeight)) else {
             Log.capture.info("room extent: no enclosing walls found; falling back to a radius")
             return nil
         }
@@ -407,6 +407,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         isSaving = true
         // Snapshot the mesh now (before stop() pauses the session) for the 3D model export that follows the save.
         let meshAnchors = session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
+        let objSnapshot: MeshExporter.Snapshot?
+        do { objSnapshot = try MeshExporter.snapshot(meshAnchors) }
+        catch { objSnapshot = nil; Log.capture.error("OBJ snapshot failed: \(error.localizedDescription)") }
         let exportBox = scanBox
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
@@ -424,6 +427,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
                     let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
                     self.savedMap = saved
+                    if let snapshot = objSnapshot, !snapshot.triangles.isEmpty {
+                        self.exportWebMesh(snapshot, mapId: saved.id, segment: savedSegment)
+                    }
                     self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
                     self.stop()
                     Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
@@ -431,6 +437,24 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     self.errorMessage = "Save failed: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    /// A failed OBJ export never discards the local scan or its independent USDZ export.
+    private func exportWebMesh(_ snapshot: MeshExporter.Snapshot, mapId: UUID, segment: String) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                let (asset, bytes) = try OBJEncoder.encode(vertices: snapshot.vertices, triangles: snapshot.triangles, segmentId: segment)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    do {
+                        var latest = try self.store.load(id: mapId)
+                        latest.meshAssets = (latest.meshAssets ?? []) + [asset]
+                        self.savedMap = try self.store.importBundle(MapBundle(map: latest, meshFiles: [asset.id.uuidString: bytes]))
+                        Log.capture.info("OBJ saved for web viewer: \(bytes.count) bytes")
+                    } catch { Log.capture.error("OBJ attachment failed: \(error.localizedDescription)") }
+                }
+            } catch { Log.capture.error("OBJ encoding failed: \(error.localizedDescription)") }
         }
     }
 

@@ -43,6 +43,46 @@ private func makeClient(_ transport: MockTransport, store: SessionStore = InMemo
 
 final class CloudTests: XCTestCase {
 
+    func testSchema3UploadsMeshBeforeCanonicalManifest() async throws {
+        let transport = MockTransport { request in
+            request.url.path.hasPrefix("/auth/") ? HTTPResponse(status: 200, body: authJSON()) : HTTPResponse(status: 200)
+        }
+        let store = tempStore()
+        var map = try loadSampleMap()
+        let (asset, bytes) = try OBJEncoder.encode(vertices: [[0,0,0],[1,0,0],[0,1,0]],
+                                                   triangles: [[0,1,2]], segmentId: "seg1")
+        map.meshAssets = [asset]
+        _ = try store.importBundle(MapBundle(map: map, meshFiles: [asset.id.uuidString: bytes]))
+        try await SyncEngine(client: makeClient(transport), store: store).push(mapId: map.id, share: true)
+        let calls = transport.requests.filter { !$0.url.path.hasPrefix("/auth/") }
+        XCTAssertTrue(calls[0].url.path.hasPrefix("/storage/v1/object/meshes/"))
+        XCTAssertEqual(calls[0].body, bytes)
+        XCTAssertEqual(calls.last?.url.path, "/rest/v1/rpc/extend_building")
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(calls.last?.body)) as? [String: Any])
+        let incoming = try XCTUnwrap(payload["incoming"] as? [String: Any])
+        let assets = try XCTUnwrap(incoming["meshAssets"] as? [[String: Any]])
+        XCTAssertEqual((assets[0]["storageOwner"] as? String)?.lowercased(), userId)
+    }
+
+    func testSchema3CorruptCloudMeshIsRejected() async throws {
+        var map = try loadSampleMap()
+        var asset = try OBJEncoder.encode(vertices: [[0,0,0],[1,0,0],[0,1,0]],
+                                          triangles: [[0,1,2]], segmentId: "seg1").0
+        asset.storageOwner = UUID(uuidString: userId)
+        map.meshAssets = [asset]
+        let row = BuildingRow(mapId: map.id, owner: UUID(uuidString: userId), name: map.name,
+                              version: 1, map: map, isShared: true)
+        let transport = MockTransport { request in
+            if request.url.path.hasPrefix("/auth/") { return HTTPResponse(status: 200, body: authJSON()) }
+            return HTTPResponse(status: 200, body: Data([0]))
+        }
+        do {
+            _ = try await SyncEngine(client: makeClient(transport), store: tempStore())
+                .fetchBundle(RemoteMap(row: row, isMine: false))
+            XCTFail("Expected mesh checksum/size rejection")
+        } catch is MapStoreError {}
+    }
+
     func testConfigValidation() {
         XCTAssertNotNil(SupabaseConfig.validated(urlString: "https://abc.supabase.co", anonKey: "eyJ..."))
         XCTAssertNil(SupabaseConfig.validated(urlString: "", anonKey: "k"))

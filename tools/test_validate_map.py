@@ -99,7 +99,7 @@ class MapValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             broken = Path(folder) / "broken.json"
             broken.write_text("{invalid", encoding="utf-8")
-            for paths, expected in [([str(SAMPLE)], 0), ([str(broken)], 1),
+            for paths, expected in [([], 0), ([str(SAMPLE)], 0), ([str(broken)], 1),
                                     ([str(Path(folder) / "missing*.json")], 1),
                                     ([str(SAMPLE), str(broken)], 1)]:
                 result = subprocess.run([sys.executable, script, *paths],

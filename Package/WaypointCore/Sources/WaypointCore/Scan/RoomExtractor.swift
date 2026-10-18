@@ -53,10 +53,12 @@ public enum RoomExtractor {
         resolution: Float = defaultResolution,
         maxRadius: Float = defaultMaxRadius
     ) -> Result? {
-        guard resolution > 0, maxRadius > resolution else { return nil }
+        guard seed.x.isFinite, seed.y.isFinite, seed.z.isFinite, floorY.isFinite,
+              resolution.isFinite, maxRadius.isFinite, resolution > 0, maxRadius > resolution else { return nil }
 
         let side = Int((maxRadius * 2 / resolution).rounded(.up)) + 1
         guard side > 2, side <= 4096 else { return nil }
+        let wallPoints = wallPoints.filter { $0.x.isFinite && $0.y.isFinite }
         let origin = SIMD2<Float>(seed.x, seed.z) - SIMD2<Float>(repeating: maxRadius)
 
         func index(_ x: Int, _ y: Int) -> Int { y * side + x }
