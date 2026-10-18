@@ -11,6 +11,14 @@ export async function runGeometryChecks(sample) {
     try { await fn(); results.push({name,pass:true}); }
     catch(error){results.push({name,pass:false,error:error.message});}
   };
+  await check("Schema 4 stair metadata survives validation",()=>{
+    const map=structuredClone(sample);map.schemaVersion=4;
+    const node=map.nodes.find(n=>n.kind==='stairs');
+    assert(node);node.stairs={direction:'both',railings:'both',stepCount:12};
+    validateMap(map);
+    node.stairs.stepCount=-1;
+    let rejected=false;try{validateMap(map);}catch{rejected=true;}assert(rejected);
+  });
   await check("3D projection uses height and yaw",()=>{
     const p=projection([[0,0,0],[0,3,0]],500,400);
     assert(p.project([0,0,0]).y!==p.project([0,3,0]).y);
@@ -36,7 +44,7 @@ export async function runGeometryChecks(sample) {
     assert((await verifyMesh(asset,bytes)).vertices.length===3);
     let failed=false;try{await verifyMesh({...asset,sha256:"0".repeat(64)},bytes);}catch{failed=true;}assert(failed);
   });
-  for(const schemaVersion of [0,4,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
+  for(const schemaVersion of [0,5,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
     let failed=false;try{validateMap({...sample,schemaVersion});}catch{failed=true;}assert(failed);
   });
   await check("Schema 3 rejects malformed room and mesh fields",()=>{

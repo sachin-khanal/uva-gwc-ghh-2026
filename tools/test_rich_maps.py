@@ -19,12 +19,12 @@ class RichMapTests(unittest.TestCase):
                           sha256=hashlib.sha256(self.raw).hexdigest(), boundsMin=[0,0,0], boundsMax=[1,1,0])
 
     def test_all_format_fixtures(self):
-        for version in (1, 2, 3):
+        for version in (1, 2, 3, 4):
             with self.subTest(version=version):
                 validate(json.loads((ROOT / f"docs/map-format/map-v{version}.json").read_text()))
 
     def test_bad_formats(self):
-        for version in (0, 4, True, "3", 3.5):
+        for version in (0, 5, True, "3", 3.5):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 validate({**self.map, "schemaVersion": version})
 

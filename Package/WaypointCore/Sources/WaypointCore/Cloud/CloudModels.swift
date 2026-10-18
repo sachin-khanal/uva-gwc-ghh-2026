@@ -107,6 +107,9 @@ public enum CloudError: Error, Equatable {
     case rejected(String)
     /// The map's scan file is over the sharing limit; it stays on this phone (`SharePolicy`). The string is a sentence for the person.
     case localOnly(String)
+    /// The phone is still building the 3D surface file for this scan. Uploading now would publish the map WITHOUT it (found 2026-10-18 on a
+    /// real floor scan), so the push is refused until it finishes. The string is a sentence for the user.
+    case meshNotReady(String)
 }
 
 /// One canonical building map (migration 0002). Owner records the first publisher;

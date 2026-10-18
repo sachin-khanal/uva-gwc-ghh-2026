@@ -54,7 +54,7 @@ function selectMap(entry) {
   }
 
   $("map-title").textContent = entry.title || map.name;
-  $("map-source").textContent = entry.source === "Shared" ? "SHARED BUILDING" : entry.source === "Sample" ? "HAND-WRITTEN SAMPLE · NOT A REAL SCAN" : "LOCAL MAP";
+  $("map-source").textContent = entry.source === "Shared" ? "SHARED BUILDING" : "LOCAL MAP";
   const heights = map.nodes.map((n) => n.position[1]);
   const multipleLevels = heights.length && Math.max(...heights) - Math.min(...heights) > 1.5;
   $("map-meta").textContent = `${map.nodes.length} places · ${map.edges.length} connections · Version ${map.version}${multipleLevels ? " · Multiple levels" : ""}`;
@@ -401,19 +401,15 @@ $("refresh").addEventListener("click", async () => {
   finally { state.busy = false; $("refresh").disabled = false; }
 });
 
-try {
-  const response = await fetch(new URLSearchParams(location.search).has("floor4")?"/preview-map.json":"./fixtures/rice-hall-sample.json");
-  if (!response.ok) throw new Error("Sample map could not be loaded.");
-  const map = validateMap(await response.json());
-  const snapshot=new URLSearchParams(location.search).has("floor4");
-  const entry = { map, source: snapshot?"Local":"Sample", preview:snapshot, title: snapshot?map.name: "Rice Hall · sample" };
-  if(snapshot)$("connection-state").textContent="Floor 4 preview";
-  state.entries.push(entry);
-  // A slow sample request must not replace a cloud/local map the user already chose.
-  if (!state.active) { selectMap(entry); status(snapshot?"Floor 4 snapshot | Estimated 3D reconstruction from saved points; sizes and walls are approximate.":"Showing a hand-written sample, not a real building scan. Connect your library to view uploaded buildings."); }
-  else renderBuildings();
-} catch (error) {
-  if (!state.active) status(`${error.message} You can still connect a library or open a local map.`, true);
+// Real maps only. The opt-in local snapshot supports U3's private preview without shipping it.
+$('map-title').textContent='No building open';$('map-source').textContent='NOTHING LOADED';
+$('connection-state').textContent='Not connected';$('start-route').disabled=true;$('walk-go').disabled=true;
+status('Connect your library to see shared scans, or open a local map file.');renderBuildings();
+if(new URLSearchParams(location.search).has('floor4')){
+  try{const response=await fetch('/preview-map.json');if(!response.ok)throw Error('Local Floor 4 snapshot unavailable.');
+    const map=validateMap(await response.json()),entry={map,source:'Local',preview:true,title:map.name};state.entries.push(entry);
+    if(!state.active){selectMap(entry);$('connection-state').textContent='Floor 4 preview';status('Floor 4 snapshot | Estimated reconstruction; room dimensions and walls are approximate.');}else renderBuildings();
+  }catch(error){status(error.message,true);}
 }
 
 $('expand-map').onclick=()=>{const expanded=document.querySelector('.workspace').classList.toggle('map-expanded');$('expand-map').textContent=expanded?'Restore layout':'Expand map';$('expand-map').setAttribute('aria-pressed',String(expanded));drawMap();};

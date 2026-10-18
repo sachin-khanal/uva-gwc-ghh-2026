@@ -47,8 +47,8 @@ Run after SETUP.md §3 (`DEVICE=<id> make run`). Owner B/D. Mark each result in 
 
 | # | Check | Pass looks like |
 |---|---|---|
-| 2.1 | App launches; Camera + Local Network prompts appear; Home shows "1 map(s)" (seeded sample) | no crash, prompts answered |
-| 2.2 | Navigate -> pick the sample map -> "Simulate walk to Room 204" | status "Simulating walk"; spoken "Navigating to Room 204…", then "Continue straight." |
+| 2.1 | App launches; Camera + Local Network prompts appear; ~~Home shows "1 map(s)" (seeded sample)~~ **Update 2026-10-18:** there is no seeded sample map any more, a fresh install has NO maps until you scan or download one | no crash, prompts answered |
+| 2.2 | Navigate -> pick a scanned map -> "Simulate walk to <a place>" (~~sample map, Room 204~~ **Update 2026-10-18:** use one of your own scans) | status "Simulating walk"; spoken "Navigating to Room 204…", then "Continue straight." |
 | 2.3 | Wear headphones; listen during 2.2 | a ping that sits ahead/centre while walking, swings to the RIGHT during the last leg |
 | 2.4 | Same run: haptics | right turn into Room 204 = two sharp taps; arrival = rising pattern |
 | 2.5 | "Inject obstacle" toggle during a simulation | immediate "Stop. Obstacle ahead." + long buzz; ping goes silent; toggling off resumes |
@@ -71,6 +71,8 @@ Run after SETUP.md §3 (`DEVICE=<id> make run`). Owner B/D. Mark each result in 
 | 3.8 | Point the camera at a door sign | (SignReader is not wired into a screen yet) check the console for "confirmed room number" once wired |
 | 3.9 | Dress rehearsal | blindfolded teammate + escort reaches the target room |
 
+**Update 2026-10-18 (Claude):** upload one REAL saved map from the command line, as the Upload button does: `DEVICE=<id> make selftest-e2e EXTRA="-e2ePushMap <map uuid>"` (the uuid is the folder name under the app's Documents/Maps). Prints `push.realMap PASS - published N mesh(es), skipped M`. It writes to the live cloud with the phone's own identity.
+
 ## Reading logs from the phone
 
 `DEVICE=<id> make launch` streams `os.Logger` output (subsystem ~~`edu.virginia.waypoint`~~ **Update 2026-10-17:** `io.github.sachin-khanal.waypoint`, categories:
@@ -84,7 +86,7 @@ The phone must be **plugged in and UNLOCKED** (set Auto-Lock to Never while test
 
 | Command | What it does | Pass looks like |
 |---|---|---|
-| `DEVICE=<id> make selftest-sim` | launches with `-autoSimulate "Room 204"` (override: `ROOM="Room 206"`): runs the simulated walk, logs every instruction, spoken cue, haptic and beacon direction | ends with `SELFTEST PASS` and exit code 0. Exit 1 = timeout, exit 2 = no map has that destination, `Locked` error = unlock the phone |
+| `DEVICE=<id> make selftest-sim` | launches with `-autoSimulate "*"` (**Update 2026-10-18:** `*` = the first labelled place of the first scanned map; ~~`"Room 204"` on the sample map~~; override: `ROOM="Room 206"`): runs the simulated walk, logs every instruction, spoken cue, haptic and beacon direction | ends with `SELFTEST PASS` and exit code 0. Exit 1 = timeout, exit 2 = no map has that destination, `Locked` error = unlock the phone |
 | `DEVICE=<id> make selftest-scan` | launches with `-autoScan YES`: starts scanning immediately and prints `scan: tracking | mapping | nodes | meshAnchors | triangles | box` once per second | walk with the phone; `triangles` and `box` should grow. Ctrl-C to stop. Stuck at `meshAnchors=0` = the AR view is not sharing the session (known risk, U1.4) ~~|~~ **Update 2026-10-17:** that cause is ruled out (see "UI tests" below: frames reach our code). `meshAnchors=0` now means the camera is not looking at textured surfaces (aim at a room, not a desk/ceiling) or the phone has no LiDAR |
 
 What these CANNOT check: how the audio sounds, how the haptics feel, what the mesh looks like. A person must judge those. Reference run (2026-10-17, iPhone 16 Pro Max): turn right at bearing 57 deg fired `haptic: turnRight` + `say: Turn right.`, beacon local x=+1.5 (to the right), arrival spoke and fired `haptic: arrived`, `SELFTEST PASS`.
@@ -120,6 +122,12 @@ Record the results in docs/WORKLOG.md (phone, iOS, pass/fail, the console lines)
 | **On-device E2E** | `make selftest-e2e` | the data path and the platform services on a REAL phone (storage, Keychain, audio engine, capabilities) | LiDAR geometry, relocalization, sound/haptic quality |
 | Simulated navigation | `make selftest-sim` | the guidance loop speaks the right cues and arrives (on the sample map) | that it sounds right |
 | UI tests on the phone | `make uitest` (~~5~~ **Update 2026-10-18:** 11) | every main screen renders, the buttons work, HUD/status text, screenshots | motion through space |
+
+
+**Update 2026-10-18 (Codex, mesh integration):** Retain incoming notes below; final integration behavior is recorded in WORKLOG.
+
+| Simulated navigation | `make selftest-sim` | the guidance loop speaks the right cues and arrives (on a scanned map; ~~the sample map~~ there is no sample any more) | that it sounds right |
+| UI tests on the phone | `make uitest` (5) | every main screen renders, the buttons work, HUD/status text, screenshots | motion through space |
 | Scan monitor | `make selftest-scan` (needs a person to walk) | live ARKit numbers: tracking, mesh, box, fps | correctness of the mesh |
 | **Not yet automated** | - | real Supabase (SQL + RLS + anonymous auth), two-phone Multipeer, real-room relocalization, audio/haptic feel | needs: a Supabase project or local Postgres (see below), a 2nd phone, a person |
 
@@ -434,3 +442,14 @@ is only "verified" once someone has done it on a device and written it down.
 | Local Postgres (Docker) `supabase/tests/*.sql` | 0004 exact path, 0005 (32 cases), 0006 (caps) | the SQL rules; they do NOT run on the live project |
 | `web/tests.html`, `web/ui-tests.html` in Chrome | 46/46 and 16/16 | U3's viewer (needs a browser; Node fails the WebGL test) |
 | NOT automated / NOT done | | relocalization on a real hallway (Gate G2), a real scan over 50 MB, the yellow overlay's look, U2's keyframe relocalization, a fresh-install first launch, multi-phone behaviour |
+
+
+**Update 2026-10-18 (Codex, mesh integration):** Retain incoming notes below; final integration behavior is recorded in WORKLOG.
+
+**Update 2026-10-18 (Claude):** the app and the web viewer no longer ship or open any sample/placeholder map (only scanned maps). Consequences for tests: (1) `make uitest` needs a phone that holds at least one real scan with a labelled place; its walk tests pick the scanned map with the most places and walk to its last place (check: `testSimulatedWalk...`). (2) `make selftest-e2e` checks `resource.noSampleMap` (the bundle must not contain `rice-hall-sample.json`). (3) An app that already had the old seeded sample removes it on launch. (4) `Samples/rice-hall-sample.json` and `web/fixtures/rice-hall-sample.json` stay as unit-test / web-test fixtures only.
+
+
+**Update 2026-10-18 (Codex, U3 conflict integration):** Combined branch format is schema 4 (optional stair metadata), retaining room extents and keyframes. Secure mesh publication remains a separate publish_mesh_assets RPC after upload; extend_building cannot approve incoming meshes. Migration order now includes audit 0006, secure mesh 0008, rich format 0009 and validator alias 0010. Browser checks 58/58 plus UI 23/23 and Python 22/22 pass. Native make test/typecheck unavailable on Windows; database migrations/tests not executed by this integration. UNVERIFIED ON DEVICE.
+
+
+**Update 2026-10-18 (Codex, U3 conflict integration):** Combined format is schema 4 with optional stairs, retaining extents and keyframes. Mesh approval requires publish_mesh_assets after upload. Migration order: audit 0006, secure mesh 0008, rich format 0009, validator alias 0010. Browser 58/58, UI 23/23 and Python 22/22 pass. Native tests/typecheck unavailable on Windows; SQL not executed. UNVERIFIED ON DEVICE.

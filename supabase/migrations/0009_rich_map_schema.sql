@@ -1,5 +1,5 @@
--- File: supabase/migrations/0006_rich_map_schema.sql
--- Owner: D / U3. Apply AFTER 0005. Do not re-run older migrations afterwards.
+-- File: supabase/migrations/0009_rich_map_schema.sql
+-- Owner: D / U3. Apply AFTER 0008. Do not re-run older migrations afterwards.
 -- Schema 3 room extents + immutable mesh manifests. Existing rows upgrade on publication.
 begin;
 create or replace function public.waypoint_vector(v jsonb, n integer)
@@ -19,8 +19,17 @@ create or replace function public.waypoint_validate_geometry(m jsonb)
 returns void language plpgsql set search_path = '' as $$
 declare n jsonb; e jsonb; a jsonb; assets jsonb; total bigint := 0; ids uuid[] := '{}'; asset_id uuid;
 begin
-  if coalesce(m->>'schemaVersion', '1') not in ('1','2','3') then raise exception 'Unsupported schemaVersion'; end if;
+  if coalesce(m->>'schemaVersion', '1') not in ('1','2','3','4') then raise exception 'Unsupported schemaVersion'; end if;
   for n in select value from jsonb_array_elements(m->'nodes') loop
+    if n->'stairs' is not null and n->'stairs' <> 'null'::jsonb then
+      if n->>'kind' not in ('stairs','elevator') or jsonb_typeof(n->'stairs') is distinct from 'object'
+         or (n->'stairs'->>'direction' is not null and n->'stairs'->>'direction' not in ('up','down','both'))
+         or (n->'stairs'->>'railings' is not null and n->'stairs'->>'railings' not in ('left','right','both','neither')) then raise exception 'Invalid stairs'; end if;
+      if n->'stairs'->>'stepCount' is not null then
+        if jsonb_typeof(n->'stairs'->'stepCount') is distinct from 'number' or n->'stairs'->>'stepCount' !~ '^[0-9]{1,5}$' then raise exception 'Invalid step count'; end if;
+        if (n->'stairs'->>'stepCount')::integer not between 1 and 10000 then raise exception 'Invalid step count'; end if;
+      end if;
+    end if;
     e := n->'extent';
     if e is not null and e <> 'null'::jsonb then
       if n->>'kind' <> 'room' or not public.waypoint_vector(e->'center',3)
@@ -126,14 +135,12 @@ begin
     select value into existing from jsonb_array_elements(nodes)
       where (value->>'id')::uuid = (item->>'id')::uuid;
     if found then
-      if (existing - 'extent') <> (item - 'extent') then raise exception 'An existing node cannot be changed'; end if;
-      if existing->>'extent' is null and item->>'extent' is not null then
-        select jsonb_agg(case when (value->>'id')::uuid = (item->>'id')::uuid then item else value end)
-          into nodes from jsonb_array_elements(nodes);
-      elsif existing->>'extent' is not null and item->>'extent' is not null
-            and existing->'extent' <> item->'extent' then
-        raise exception 'Existing room extent cannot be replaced';
-      end if;
+      if (existing - 'extent' - 'stairs') <> (item - 'extent' - 'stairs') then raise exception 'An existing node cannot be changed'; end if;
+      if existing->>'extent' is not null and item->>'extent' is not null and existing->'extent' <> item->'extent' then raise exception 'Existing room extent cannot be replaced'; end if;
+      if existing->>'stairs' is not null and item->>'stairs' is not null and existing->'stairs' <> item->'stairs' then raise exception 'Existing stair metadata cannot be replaced'; end if;
+      item := existing || jsonb_strip_nulls(item);
+      select jsonb_agg(case when (value->>'id')::uuid = (item->>'id')::uuid then item else value end)
+        into nodes from jsonb_array_elements(nodes);
       continue;
     end if;
     seg := item->>'segmentId';
@@ -170,19 +177,10 @@ begin
     end if;
   end loop;
   assets := coalesce(nullif(previous.map_json->'meshAssets','null'::jsonb),'[]'::jsonb);
-  for asset in select value from jsonb_array_elements(coalesce(nullif(incoming->'meshAssets','null'::jsonb),'[]'::jsonb)) loop
-    asset := asset || jsonb_build_object('id',lower(asset->>'id'),'storageOwner',lower(asset->>'storageOwner'));
-    select value into old_asset from jsonb_array_elements(assets)
-      where (value->>'id')::uuid = (asset->>'id')::uuid;
-    if found then
-      if old_asset <> asset then raise exception 'Existing mesh asset cannot be replaced'; end if;
-    else
-      if (asset->>'storageOwner')::uuid <> actor then raise exception 'A new mesh must belong to its uploader'; end if;
-      assets := assets || jsonb_build_array(asset);
-    end if;
-  end loop;
+  -- Mesh lists are changed ONLY by publish_mesh_assets/remove_mesh_asset (0008).
+  -- Keep stored, approved assets on extension; never accept them through extend_building.
   revision := coalesce(previous.version, 0) + 1;
-  combined := coalesce(previous.map_json, incoming) || jsonb_build_object('nodes', nodes, 'edges', edges, 'version', revision, 'schemaVersion', 3, 'meshAssets', assets);
+  combined := coalesce(previous.map_json, incoming) || jsonb_build_object('nodes', nodes, 'edges', edges, 'version', revision, 'schemaVersion', 4, 'meshAssets', assets);
   -- Preserve visual relocalization fingerprints contributed by either scan.
   if jsonb_typeof(incoming->'keyframes') = 'array' or jsonb_typeof(previous.map_json->'keyframes') = 'array' then
     combined := combined || jsonb_build_object('keyframes', (
@@ -208,16 +206,6 @@ end $$;
 revoke all on function public.merge_building_internal(jsonb) from public, anon, authenticated;
 revoke all on function public.waypoint_vector(jsonb,integer) from public, anon, authenticated;
 revoke all on function public.waypoint_validate_geometry(jsonb) from public, anon, authenticated;
--- Shared mesh reads follow their canonical manifest, not legacy contributor rows.
-drop policy if exists canonical_mesh_read on storage.objects;
-create policy canonical_mesh_read on storage.objects for select to authenticated using (
-  bucket_id = 'meshes' and exists (
-    select 1 from public.canonical_buildings c,
-      lateral jsonb_array_elements(case when jsonb_typeof(c.map_json->'meshAssets') = 'array'
-        then c.map_json->'meshAssets' else '[]'::jsonb end) a
-    where c.map_id::text = (storage.foldername(objects.name))[2]
-      and a->>'storageOwner' = (storage.foldername(objects.name))[1]
-      and lower(a->>'id') || '.obj' = storage.filename(objects.name)
-  )
-);
+-- Retain 0008's exact-path, segment-owner and size-checked canonical_meshes_read.
+-- Do not recreate the obsolete permissive canonical_mesh_read policy.
 commit;

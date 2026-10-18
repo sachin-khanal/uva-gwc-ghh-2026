@@ -17,6 +17,7 @@ import Foundation
 public final class SyncEngine {
 
     public static let worldMapBucket = "worldmaps"
+    public static let meshBucket = "meshes"
 
     private let client: SupabaseClient
     private let store: MapStore
@@ -34,8 +35,25 @@ public final class SyncEngine {
         return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
     }
 
+    /// `meshes/<owner>/<mapId>/<assetId>.obj`, the path the web viewer downloads (web/cloud.js). Lowercase, UUIDs only.
+    public static func meshPath(owner: String, mapId: UUID, assetId: UUID) throws -> String {
+        guard UUID(uuidString: owner) != nil else { throw CloudError.rejected("Unsafe owner id.") }
+        return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(assetId.uuidString.lowercased()).obj"
+    }
+
     /// Publishes an additive extension. All canonical maps are shared; share is retained for API compatibility.
-    public func push(mapId: UUID, share: Bool) async throws {
+    /// What a push actually sent, so the UI can say so instead of reporting success for a map that went up without its 3D scan.
+    public struct PushReport: Equatable, Sendable {
+        public var meshesPublished = 0
+        /// Listed in the map but not uploaded: this phone's own file is missing or changed since it was listed (other contributors' files are not this phone's to upload and are not counted).
+        public var meshesSkipped = 0
+    }
+
+    @discardableResult
+    public func push(mapId: UUID, share: Bool) async throws -> PushReport {
+        if store.isMeshPending(mapId: mapId) {
+            throw CloudError.meshNotReady("The 3D model of this scan is still being built. Wait for \"3D model saved\", then upload again.")
+        }
         // A scan file over the cloud limit never leaves the phone. Checked from file sizes BEFORE anything is loaded or sent.
         let verdict = store.shareVerdict(mapId: mapId)
         if verdict.isLocalOnly, let why = SharePolicy.message(verdict) { throw CloudError.localOnly(why) }
@@ -47,23 +65,26 @@ public final class SyncEngine {
             let path = try Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
             try await client.upload(bucket: Self.worldMapBucket, path: path, data: data)
         }
-        var published = bundle.map
-        var assets = published.meshAssets ?? []
-        for i in assets.indices {
-            let asset = assets[i]
-            if asset.storageOwner != nil { continue } // another contributor's immutable asset
-            guard let data = bundle.meshFiles?[asset.id.uuidString] else {
-                throw CloudError.rejected("Local mesh file is missing; refusing to publish a broken reference.")
-            }
-            try asset.validate(data: data)
-            let path = "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(asset.id.uuidString.lowercased()).obj"
-            try await client.upload(bucket: "meshes", path: path, data: data, contentType: "text/plain")
-            assets[i].storageOwner = UUID(uuidString: owner)
+        // 3D surface files for the web viewer: only files THIS phone made (storageOwner nil or me), whose bytes still match their
+        // SHA-256. They go up before the row is extended; the row itself carries no meshAssets (the server lists mine in a separate
+        // call, because extending an existing building keeps its stored mesh list).
+        var published: [MeshAsset] = []
+        var report = PushReport()
+        for var asset in bundle.map.meshAssets ?? [] where asset.storageOwner == nil || asset.storageOwner?.uuidString.lowercased() == owner.lowercased() {
+            guard let data = store.loadMesh(mapId: mapId, assetId: asset.id),
+                  data.count == asset.byteCount, ObjExport.sha256Hex(data) == asset.sha256 else { report.meshesSkipped += 1; continue }
+            let path = try Self.meshPath(owner: owner, mapId: mapId, assetId: asset.id)
+            try await client.upload(bucket: Self.meshBucket, path: path, data: data)
+            asset.storageOwner = UUID(uuidString: owner)
+            published.append(asset)
         }
-        if !assets.isEmpty { published.meshAssets = assets }
-        let row = BuildingRow(mapId: mapId, name: published.name, version: published.version,
-                              map: published, isShared: share)
+        var outgoing = bundle.map
+        outgoing.meshAssets = nil
+        let row = BuildingRow(mapId: mapId, name: outgoing.name, version: outgoing.version, map: outgoing, isShared: share)
         try await client.upsertBuilding(row)
+        if !published.isEmpty { try await client.publishMeshAssets(mapId: mapId, assets: published) }
+        report.meshesPublished = published.count
+        return report
     }
 
     public func listRemote() async throws -> [RemoteMap] {

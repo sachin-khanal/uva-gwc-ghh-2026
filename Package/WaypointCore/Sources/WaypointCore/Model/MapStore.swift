@@ -110,6 +110,11 @@ extension MapBundle {
                 throw MapStoreError.rejected("A visual fingerprint is too large.")
             }
         }
+        for node in map.nodes {
+            if let stairs = node.stairs {
+                guard node.kind == .stairs || node.kind == .elevator, stairs.stepCount.map({ $0 > 0 && $0 <= 10_000 }) ?? true else { throw MapStoreError.rejected("Invalid stair metadata.") }
+            }
+        }
         // Segment ids become file names and storage paths: reject anything outside the safe alphabet.
         for n in map.nodes where !SegmentID.isValid(n.segmentId) {
             throw MapStoreError.rejected("A node has an unsafe segment id.")
@@ -287,9 +292,7 @@ public final class MapStore {
     }
 
     public func loadMesh(mapId: UUID, asset: MeshAsset) throws -> Data? {
-        let url = directory(for: mapId).appendingPathComponent("mesh-\(asset.id.uuidString).obj")
-        guard fm.fileExists(atPath: url.path) else { return nil }
-        let data = try Data(contentsOf: url)
+        guard let data = loadMesh(mapId: mapId, assetId: asset.id) else { return nil }
         try asset.validate(data: data)
         return data
     }
@@ -350,7 +353,7 @@ public final class MapStore {
         for (key, bytes) in bundle.meshFiles ?? [:] {
             guard let id = UUID(uuidString: key), let asset = (result.meshAssets ?? []).first(where: { $0.id == id }) else { continue }
             try asset.validate(data: bytes)
-            let url = directory(for: result.id).appendingPathComponent("mesh-\(id.uuidString).obj")
+            let url = meshURL(mapId: result.id, assetId: id)
             if !fm.fileExists(atPath: url.path) { try bytes.write(to: url, options: .atomic) }
         }
         try save(result)

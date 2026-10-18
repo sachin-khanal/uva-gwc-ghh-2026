@@ -623,6 +623,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                         self.isSaving = false
                         guard self.isRunning else { return }
                         self.savedMap = saved
+                        if !meshAnchors.isEmpty { self.store.markMeshPending(mapId: saved.id) }
                         // Only a scan whose session frame IS the map frame may write the model: the
                         // exporter writes vertices in the SESSION frame while `MeshAsset.coordinateFrame`
                         // claims "map", and `modelURL(mapId:)` is ONE file per map - so a hand-aligned
@@ -655,24 +656,25 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         // replaced the whole building with just the new part, and writing session-frame vertices put
         // that part in the wrong place (device report 2026-10-18).
         let url = store.modelURL(mapId: mapId, segmentId: segmentId)
+        let store = self.store
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let message: String
+            defer { store.clearMeshPending(mapId: mapId) }
+            let aligned = worldToMap != matrix_identity_float4x4
+            let crop = aligned ? nil : box
+            var notes: [String] = []
             do {
-                // The crop box is measured in the SESSION frame. Once the mesh is carried into the map
-                // frame the two no longer agree, and cropping with it would delete the whole mesh. A
-                // hand-aligned extension therefore exports UNCROPPED - a bigger file, but the geometry
-                // is there and in the right place. (Transforming the box is the better fix; it needs
-                // `OrientedBox` to gain a transform and is not worth doing mid-testing.)
-                let aligned = worldToMap != matrix_identity_float4x4
-                let report = try MeshExporter.export(anchors: anchors, box: aligned ? nil : box,
-                                                     to: url, worldToMap: worldToMap)
+                let report = try MeshExporter.export(anchors: anchors, box: crop, to: url, worldToMap: worldToMap)
                 let size = ByteCountFormatter.string(fromByteCount: Int64(report.fileBytes), countStyle: .file)
-                message = "3D model saved (\(size), \(report.triangles.formatted()) triangles)"
-                Log.capture.info("model exported: \(report.fileBytes) bytes, \(report.triangles) triangles, cell=\(report.clusterCellSize.map { String($0) } ?? "none"), fits=\(report.fitsBudget)")
-            } catch {
-                message = "3D model not saved: \(error.localizedDescription)"
-                Log.capture.error("model export failed: \(error.localizedDescription)")
-            }
+                notes.append("3D model saved (\(size), \(report.triangles.formatted()) triangles)")
+            } catch { notes.append("3D model not saved: \(error.localizedDescription)"); Log.capture.error("USDZ export failed: \(error.localizedDescription)") }
+            // Portable export is independent: USDZ failure must not lose the web copy.
+            do {
+                let surface = try MeshExporter.exportSurface(anchors: anchors, box: crop, segmentId: segmentId, worldToMap: worldToMap)
+                try DispatchQueue.main.sync { _ = try store.attachMesh(surface.asset, data: surface.data, mapId: mapId) }
+                notes.append("Web copy saved (\(surface.data.count) bytes)")
+                Log.capture.info("web surface exported: \(surface.data.count) bytes, \(surface.triangles) triangles")
+            } catch { notes.append("Web copy not saved: \(error.localizedDescription)"); Log.capture.error("OBJ export failed: \(error.localizedDescription)") }
+            let message = notes.joined(separator: ". ")
             DispatchQueue.main.async { self?.modelStatus = message }
         }
     }
@@ -714,6 +716,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                         var back = 0
                         scene?.rootNode.enumerateHierarchy { node, _ in for e in node.geometry?.elements ?? [] { back += e.primitiveCount } }
                         Log.capture.info("EXPORT PROBE PASS: \(anchors.count) anchors -> \(r.triangles) triangles (read back \(back)), \(r.fileBytes) bytes, cell=\(r.clusterCellSize.map { String($0) } ?? "none"), fits=\(r.fitsBudget), \(Int((CACurrentMediaTime() - started) * 1000)) ms")
+                        // The OBJ copy for the web viewer from the same live anchors.
+                        let objStarted = CACurrentMediaTime()
+                        let surface = try MeshExporter.exportSurface(anchors: anchors, box: box, segmentId: "probe")
+                        let sane = surface.asset.sha256 == ObjExport.sha256Hex(surface.data) && surface.asset.byteCount == surface.data.count
+                        Log.capture.info("EXPORT PROBE OBJ \(sane ? "PASS" : "FAIL"): \(surface.vertices) vertices, \(surface.triangles) triangles, \(surface.data.count) bytes, sha \(surface.asset.sha256.prefix(8)), \(Int((CACurrentMediaTime() - objStarted) * 1000)) ms")
                     } catch {
                         Log.capture.error("EXPORT PROBE FAIL: \(error.localizedDescription)")
                     }

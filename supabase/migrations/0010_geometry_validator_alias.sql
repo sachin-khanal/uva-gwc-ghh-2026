@@ -1,12 +1,21 @@
--- File: supabase/migrations/0006_geometry_validator_alias.sql
--- Owner: D / U3. Avoid collision with the PL/pgSQL variable n.
+-- File: supabase/migrations/0010_geometry_validator_alias.sql
+-- Owner: D / U3. Compatibility helper refresh after 0009; supports schema 1 through 4.
 begin;
 create or replace function public.waypoint_validate_geometry(m jsonb)
 returns void language plpgsql set search_path = '' as $$
 declare n jsonb; e jsonb; a jsonb; assets jsonb; total bigint := 0; ids uuid[] := '{}'; asset_id uuid;
 begin
-  if coalesce(m->>'schemaVersion', '1') not in ('1','2','3') then raise exception 'Unsupported schemaVersion'; end if;
+  if coalesce(m->>'schemaVersion', '1') not in ('1','2','3','4') then raise exception 'Unsupported schemaVersion'; end if;
   for n in select value from jsonb_array_elements(m->'nodes') loop
+    if n->'stairs' is not null and n->'stairs' <> 'null'::jsonb then
+      if n->>'kind' not in ('stairs','elevator') or jsonb_typeof(n->'stairs') is distinct from 'object'
+         or (n->'stairs'->>'direction' is not null and n->'stairs'->>'direction' not in ('up','down','both'))
+         or (n->'stairs'->>'railings' is not null and n->'stairs'->>'railings' not in ('left','right','both','neither')) then raise exception 'Invalid stairs'; end if;
+      if n->'stairs'->>'stepCount' is not null then
+        if jsonb_typeof(n->'stairs'->'stepCount') is distinct from 'number' or n->'stairs'->>'stepCount' !~ '^[0-9]{1,5}$' then raise exception 'Invalid step count'; end if;
+        if (n->'stairs'->>'stepCount')::integer not between 1 and 10000 then raise exception 'Invalid step count'; end if;
+      end if;
+    end if;
     e := n->'extent';
     if e is not null and e <> 'null'::jsonb then
       if n->>'kind' <> 'room' or not public.waypoint_vector(e->'center',3)

@@ -1,5 +1,5 @@
--- File: supabase/migrations/0005_mesh_read_policy.sql
--- Owner: D / U3. Apply after 0004_rich_map_schema.sql.
+-- File: supabase/migrations/0007_mesh_read_policy.sql
+-- Owner: D / U3. Historical compatibility policy, superseded by 0008_mesh_publish_and_read.sql.
 -- Qualify the object path: bare name inside the subquery binds to c.name.
 begin;
 drop policy if exists canonical_mesh_read on storage.objects;

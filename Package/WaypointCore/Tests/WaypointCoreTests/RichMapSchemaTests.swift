@@ -15,9 +15,9 @@ final class RichMapSchemaTests: XCTestCase {
     }
 
     func testEveryDocumentedFormatMigratesAndRoundTrips() throws {
-        for version in 1...3 {
+        for version in 1...MapSchema.current {
             let map = try fixture(version)
-            XCTAssertEqual(map.schemaVersion, 3)
+            XCTAssertEqual(map.schemaVersion, MapSchema.current)
             try MapBundle(map: map).validate()
             XCTAssertEqual(try BuildingMap.from(jsonData: map.jsonData()), map)
             if version < 3 { XCTAssertTrue((map.meshAssets ?? []).isEmpty); XCTAssertTrue(map.nodes.allSatisfy { $0.extent == nil }) }
@@ -56,7 +56,7 @@ final class RichMapSchemaTests: XCTestCase {
     func testFutureAndInvalidFormatAreRejected() throws {
         let map = try fixture(3)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: map.jsonData()) as? [String: Any])
-        for version in [0, 4] {
+        for version in [0, MapSchema.current + 1] {
             json["schemaVersion"] = version
             XCTAssertThrowsError(try BuildingMap.from(jsonData: JSONSerialization.data(withJSONObject: json)))
         }
@@ -117,7 +117,7 @@ final class RichMapSchemaTests: XCTestCase {
         try store.save(map)
         let path = store.directory(for: map.id).appendingPathComponent("map.json")
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: map.jsonData()) as? [String: Any])
-        json["schemaVersion"] = 4
+        json["schemaVersion"] = MapSchema.current + 1
         let futureBytes = try JSONSerialization.data(withJSONObject: json)
         try futureBytes.write(to: path)
         XCTAssertThrowsError(try store.importBundle(MapBundle(map: map)))

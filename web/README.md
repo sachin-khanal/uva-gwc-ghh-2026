@@ -10,7 +10,7 @@ Current suites: 43 browser logic/geometry checks and 16 UI checks PASS. See
 `docs/MAP_FORMAT.md`. Live cloud/native capture still need verification.
 
 Read-only static HTML/JavaScript viewer for shared building maps. No packages,
-framework, external fonts, or installation. Sample mode needs no Supabase key.
+framework, external fonts, or installation. ~~Sample mode needs no Supabase key.~~ **Update 2026-10-18 (Claude):** the viewer starts EMPTY (no sample building any more); connect your library or open a local map file.
 
 ## Run
 

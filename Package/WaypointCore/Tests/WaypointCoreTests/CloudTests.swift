@@ -57,10 +57,13 @@ final class CloudTests: XCTestCase {
         let calls = transport.requests.filter { !$0.url.path.hasPrefix("/auth/") }
         XCTAssertTrue(calls[0].url.path.hasPrefix("/storage/v1/object/meshes/"))
         XCTAssertEqual(calls[0].body, bytes)
-        XCTAssertEqual(calls.last?.url.path, "/rest/v1/rpc/extend_building")
+        XCTAssertEqual(calls[1].url.path, "/rest/v1/rpc/extend_building")
+        XCTAssertEqual(calls.last?.url.path, "/rest/v1/rpc/publish_mesh_assets")
+        let rowPayload = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(calls[1].body)) as? [String: Any])
+        let incoming = try XCTUnwrap(rowPayload["incoming"] as? [String: Any])
+        XCTAssertNil(incoming["meshAssets"], "Only the validated publication RPC may list meshes")
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(calls.last?.body)) as? [String: Any])
-        let incoming = try XCTUnwrap(payload["incoming"] as? [String: Any])
-        let assets = try XCTUnwrap(incoming["meshAssets"] as? [[String: Any]])
+        let assets = try XCTUnwrap(payload["assets"] as? [[String: Any]])
         XCTAssertEqual((assets[0]["storageOwner"] as? String)?.lowercased(), userId)
     }
 

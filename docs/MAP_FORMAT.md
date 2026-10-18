@@ -281,3 +281,14 @@ repair geometry dropped in an old client's local export.
 
 Before merging this U3 work with newer main, retain its MapSchema framework and
 route-memory methods; do not copy this older branch's whole MapStore over main.
+
+
+**Update 2026-10-18 (Codex, mesh integration):** Retain incoming notes below; final integration behavior is recorded in WORKLOG.
+
+- ~~The native 3D model is `model.usdz` next to `map.json` (not listed in the map JSON); the web viewer reads OBJ. A USDZ-to-OBJ export is not built.~~
+  **Update 2026-10-18 (Claude, branch `feature/web-mesh-obj`):** the app now ALSO writes a web copy of the scan as `mesh-<asset id>.obj` next to `map.json` and lists it in `meshAssets` (`ObjExport`, `MapStore.attachMesh`); `SyncEngine.push` uploads it to `meshes/<owner>/<map>/<asset>.obj` and lists it on the server with `publish_mesh_assets` (migration ~~0007~~ **Update 2026-10-18 (Claude):** 0008 (renamed: a different 0007 exists on the live project), not yet applied). `model.usdz` stays the phone's own viewer format. UNVERIFIED ON DEVICE.
+
+**Update 2026-10-18 (Claude): versioning check on real data.** Behaviour is as designed: `schemaVersion` is the FORMAT of the file, stamped with the app's current format (3) whenever a map is saved; it does NOT say how rich one map is. Evidence: all 5 scans on Sachin's phone (made on different days, the oldest before OBJ export existed) and all 8 live cloud rows say `schemaVersion` 3; formats 1, 2 and 3 fixtures, the bundled-style sample and every real map pass `tools/validate_map.py`; `MapSchemaTests` 9/9. Richness is carried by the OPTIONAL fields instead: `meshAssets` (2 of 5 scans: the two made after the OBJ export), `extent` (0 maps), `keyframes` (0 maps; fingerprints are off by default, D-042). If we ever want "which maps have 3D / room areas" at a glance, read those fields, or bump the format only when the SHAPE changes.
+
+
+**Update 2026-10-18 (Codex, U3 conflict integration):** Combined format is schema 4 with optional stairs, retaining extents and keyframes. Mesh approval requires publish_mesh_assets after upload. Migration order: audit 0006, secure mesh 0008, rich format 0009, validator alias 0010. Browser 58/58, UI 23/23 and Python 22/22 pass. Native tests/typecheck unavailable on Windows; SQL not executed. UNVERIFIED ON DEVICE.

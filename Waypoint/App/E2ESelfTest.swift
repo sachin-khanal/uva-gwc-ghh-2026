@@ -7,7 +7,7 @@
 //             B. STORAGE     the app's real Documents folder + the Keychain on THIS phone
 //             C. DATA PATH   synthetic scan -> MapBuilder -> save (+world map bytes) -> reload with a fresh store -> export bundle -> import into a
 //                            second store -> validation -> route -> simulated walk through RouteFollower/FeedbackPlanner -> "arrived"
-//             D. RESOURCES   the bundled sample map decodes
+//             D. RESOURCES   no placeholder sample map is bundled
 //             E. CLOUD       only if Supabase is configured: anonymous sign-in + list (read-only). SKIPPED otherwise.
 //           Output: one `[e2e] PASS|FAIL|INFO|SKIP name - detail` line each, a summary, then exit(0) if nothing FAILed else exit(1).
 // Limits:   cannot check real LiDAR geometry, relocalization, audio loudness/direction or haptic feel (those need a person), and the synthetic scan
@@ -160,6 +160,27 @@ enum E2ESelfTest {
                   "\(size) bytes, \(triangles) triangles read back (from \(idx.count / 3), cell \(fitted.cellSize.map { String(format: "%.2f", $0) } ?? "none"))")
         } catch { fail("export.usdz", "\(error)") }
 
+        // Web-viewer copy on THIS phone: the same synthetic grid becomes an OBJ with a manifest (size, SHA-256, bounds), is attached to a saved
+        // map (file first, then the validated `meshAssets` entry) and read back from disk with the same bytes.
+        do {
+            var verts: [SIMD3<Float>] = [], idx: [UInt32] = []
+            for z in 0...40 { for x in 0...40 { verts.append([Float(x) * 0.1, 0, Float(z) * 0.1]) } }
+            for z in 0..<40 { for x in 0..<40 { let a = UInt32(z * 41 + x); idx += [a, a + 1, a + 41, a + 1, a + 42, a + 41] } }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("e2e-obj-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let objStore = MapStore(rootURL: root)
+            let a = MapNode(kind: .corridor, position: [0, 0, 0], segmentId: "seg1"), b = MapNode(kind: .room, label: "Obj Room", position: [3, 0, 0], segmentId: "seg1")
+            let objMap = BuildingMap(name: "E2E obj", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 3)])
+            try objStore.save(objMap)
+            let out = try ObjExport.make(IndexedMesh(vertices: verts, indices: idx), segmentId: "seg1")
+            let saved = try objStore.attachMesh(out.asset, data: out.data, mapId: objMap.id)
+            let back = objStore.loadMesh(mapId: objMap.id, assetId: out.asset.id)
+            let text = String(decoding: out.data, as: UTF8.self)
+            let faces = text.split(separator: "\n").filter { $0.hasPrefix("f ") }.count
+            check("export.obj", back == out.data && saved.meshAssets?.count == 1 && out.asset.sha256 == ObjExport.sha256Hex(out.data) && faces == out.triangles && out.triangles > 0,
+                  "\(out.data.count) bytes, \(out.vertices) vertices, \(faces) faces, sha \(out.asset.sha256.prefix(8)), reloaded map lists \(saved.meshAssets?.count ?? 0) mesh")
+        } catch { fail("export.obj", "\(error)") }
+
         // Size policy on THIS phone: a 51 MB scan file (over the 50 MB sharing limit) must save locally, be flagged local-only, and an INCOMING
         // bundle with the same file must still be refused.
         do {
@@ -177,10 +198,8 @@ enum E2ESelfTest {
         } catch { fail("share.overLimit", "\(error)") }
 
         // ---- D. RESOURCES
-        if let url = Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json"),
-           let sample = (try? Data(contentsOf: url)).flatMap({ try? BuildingMap.from(jsonData: $0) }) {
-            check("resource.sampleMap", sample.nodes.count == 9, "\(sample.nodes.count) nodes")
-        } else { fail("resource.sampleMap", "bundled sample map missing or undecodable") }
+        // No bundled sample map (removed 2026-10-18): a sample resource must NOT ship in the app any more.
+        check("resource.noSampleMap", Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json") == nil, "the app bundle carries no placeholder map")
 
         // ---- F. ACCESSIBILITY: phone posture maths, the sentences users hear, and what Apple's image classifier can name on THIS phone
         func postureAt(_ pitch: Float, _ roll: Float) -> PostureReading {
@@ -231,6 +250,15 @@ enum E2ESelfTest {
                 let rows = try await client.listBuildings()
                 pass("cloud.listBuildings", "\(rows.count) visible row(s)")
             } catch { fail("cloud", "\(error)") }
+            // Opt-in: upload one REAL saved map of this phone (`-e2ePushMap <map uuid>`), exactly what the Upload button does, with the phone's
+            // own Keychain identity (the one that owns the scan segments). Added 2026-10-18 to debug a floor that reached the cloud without its mesh.
+            if let raw = UserDefaults.standard.string(forKey: "e2ePushMap"), let id = UUID(uuidString: raw) {
+                let real = SyncEngine(client: SupabaseClient(config: config, sessionStore: KeychainSessionStore()), store: app.store)
+                do {
+                    let report = try await real.push(mapId: id, share: true)
+                    check("push.realMap", report.meshesPublished > 0, "published \(report.meshesPublished) mesh(es), skipped \(report.meshesSkipped)")
+                } catch { fail("push.realMap", "\(error)") }
+            }
             // Opt-in WRITE test (two users, publish, share, extend, stale upload, reliability). See CloudRoundTripTest.
             if CloudRoundTripTest.requested {
                 await CloudRoundTripTest.run(config: config) { name, ok, detail in check(name, ok, detail) }

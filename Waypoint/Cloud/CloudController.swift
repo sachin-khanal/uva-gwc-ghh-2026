@@ -60,8 +60,10 @@ final class CloudController: ObservableObject {
 
     func push(mapId: UUID, name: String, share: Bool) {
         run("Uploading \(name)...") { engine in
-            try await engine.push(mapId: mapId, share: share)
-            return "Updated shared map: \(name)"
+            let report = try await engine.push(mapId: mapId, share: share)
+            if report.meshesPublished > 0 { return "Updated shared map: \(name) (3D scan included)" }
+            if report.meshesSkipped > 0 { return "Updated shared map: \(name), but its 3D scan was NOT uploaded (file missing or changed). Check the Review screen for \"3D model saved\"." }
+            return "Updated shared map: \(name) (no 3D scan attached)"
         }
     }
 
@@ -145,6 +147,7 @@ final class CloudController: ObservableObject {
             if status == 401 || status == 403 { return "Cloud denied access (\(status)). Check Anonymous Sign-Ins and the SQL policies." }
             return "Cloud error \(status): \(message)"
         case CloudError.localOnly(let message): return message
+        case CloudError.meshNotReady(let message): return message
         case CloudError.rejected(let reason): return "Refused map: \(reason)"
         case MapStoreError.rejected(let reason): return "Refused map: \(reason)"
         case is URLError: return "No connection to the cloud (offline?)."

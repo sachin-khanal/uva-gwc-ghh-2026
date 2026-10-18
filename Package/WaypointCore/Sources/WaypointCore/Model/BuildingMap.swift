@@ -31,6 +31,7 @@ public enum MapSchema {
             switch v {
             case 1: v = 2 // 1 -> 2: nothing to convert; `schemaVersion` is now written explicitly
             case 2: v = 3 // 2 -> 3: `extent` is optional; nothing to convert
+            case 3: v = 4 // Optional stair metadata remains absent on older maps.
             default: v = current
             }
         }
@@ -145,6 +146,9 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
             if let i = result.nodes.firstIndex(where: { $0.id == incoming.id }), result.nodes[i].extent == nil {
                 result.nodes[i].extent = incoming.extent
             }
+        }
+        for incoming in other.nodes {
+            if let i = result.nodes.firstIndex(where: { $0.id == incoming.id }), result.nodes[i].stairs == nil { result.nodes[i].stairs = incoming.stairs }
         }
         let knownNodeIds = Set(nodes.map(\.id))
         for n in other.nodes where !knownNodeIds.contains(n.id) {
