@@ -23,3 +23,6 @@ Claude's latest handoff is voice settings (4035431), preceded by narration proxy
 Resume performed here: applied the NavigatorView/UI-test portion of e44a288 and corrected the obstacle test for the stationary-user rule. Required checks: 406 core tests pass; iOS app and UI tests typecheck. Revised UI behavior remains UNVERIFIED ON DEVICE.
 
 Integration issue: current guidance has `0009_narration_limits.sql`, while U3 has `0009_rich_map_schema.sql` plus `0010_geometry_validator_alias.sql`. Reconcile numbering against the deployed migration history before combining branches; do not renumber an already applied migration casually. No live migration or remote branch was changed here.
+
+
+**Update 2026-10-18 (Codex, later cleanup):** The tables above are the earlier snapshot. Remote main subsequently advanced to 7e03f83, incorporating stairs/map-extension work. Deleted fully-main-merged remote branches `app-ui-workflows`, `feature/share-size-policy`, `integrate/navigation-overhaul`, `map-extension`, `stairs-multifloor`; deleted local `chore/supabase-mcp-example`, `feature/share-size-policy`, `integrate/navigation-overhaul`. Exact-tip leases protected against concurrent remote changes. Active guidance/viewer branches and personal U3 were preserved. See the new WORKLOG entry for verification.
