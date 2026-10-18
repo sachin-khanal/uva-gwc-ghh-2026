@@ -580,7 +580,9 @@ final class NavigationController: ObservableObject {
             // still being said is out of date. It interrupts, like a safety cue (found on the phone 2026-10-18: "You have arrived" was dropped after
             // 2.7 s queued behind the briefing in the simulated walk).
             let isArrival = line.text.hasPrefix("You have arrived")
-            speech.say(line.text, priority: isArrival ? .critical : line.priority, staysFresh: line.text == openingBriefingText)
+            speech.say(line.text, priority: isArrival ? .critical : line.priority,
+                       staysFresh: line.text == openingBriefingText,
+                       clearsPending: isArrival)
         }
 
         for action in actions {

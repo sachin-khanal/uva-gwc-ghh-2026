@@ -74,7 +74,13 @@ final class Speaker: NSObject {
     /// Monotonic clock: unaffected by the wall clock changing mid-demo.
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false) {
+    /// - Parameter clearsPending: this line ENDS the walk, so anything still waiting is no longer true.
+    ///   Arrival is the case: "You have arrived at Room 542." followed two seconds later by
+    ///   "Left 45 degrees." was heard on the phone (2026-10-18) because a turn queued moments earlier
+    ///   survived the arrival. Safety interrupts deliberately KEEP what is waiting - that fix is what
+    ///   lets a turn follow an obstacle warning - so a terminal line has to say so explicitly.
+    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, clearsPending: Bool = false) {
+        if clearsPending { pending = nil }
         switch gate.decide(text: text, priority: priority, isSpeaking: synthesizer.isSpeaking, now: now,
                            speakingPriority: speakingPriority) {
         case .drop:

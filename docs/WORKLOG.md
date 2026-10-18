@@ -1,5 +1,53 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Rice Hall walk 2 (Room 542 and back): a turn spoken AFTER arrival, and silent stairs   [tags: BUG, DEVICE]
+Area: B (guidance/routing). Branch `stairs-multifloor`. Anmol: "that worked amazing" - a complete guided walk to
+Room 542 and back, with a full transcript. Three findings, one of them a regression I introduced.
+
+1. A TURN SPOKEN AFTER ARRIVAL - MY REGRESSION. The transcript is exact:
+     1:34  You have arrived at Room 542.
+     1:36  Left 45 degrees.
+   The planner goes silent the moment `hasArrived` is set, so that line was queued BEFORE arrival and survived
+   it. It survived because of this morning's fix making `.interrupt` KEEP what is waiting - which is right for a
+   safety cue (it is what lets a turn follow an obstacle warning) and wrong for a terminal one. Arrival ends the
+   walk; nothing queued before it is still true.
+   Fixed: `Speaker.say(..., clearsPending:)`, passed `true` for arrival only (forwarded through `SpeechGuide`).
+
+2. NO WARNING WHEN WALKING TOWARD STAIRS. Two separate gaps, and between them a staircase straight ahead was
+   announced by nothing at all:
+     * `RouteFollower` took the hazard ONLY from the edge being traversed (`:112`). `addPOI` records a staircase
+       as a LEAF hanging off one breadcrumb, so a route that walks past it never traverses that edge and the
+       "Stairs ahead." warning never fires. It fired once on the return leg (2:12) only because the route
+       happened to step onto a stairs node there.
+     * `landmark` only mentions things 50-130 degrees to the SIDE, so anything directly ahead is excluded by
+       design. That is why "Rear Stairs 4 on your left" played at 0:13 and nothing played on approach.
+   Fixed: new `RouteFollower.stairsAhead(from:forward:)` reports `.stairs` when a stairs or lift node is within
+   4 m and within 45 degrees of straight ahead, regardless of edges. The edge hazard still wins when there is one.
+
+3. "SOMETIMES IT SKIPS THE STEPS NEEDED TO BE SAID" - NOT FIXED, and the transcript shows what it really is:
+   lines arriving faster than they can be spoken. "In 5 meters, turn right. Continue straight." (0:48) and
+   "In 3 meters, turn right. In 3 meters, turn right." (1:11) are two cues merged and one duplicated; 1:32 is cut
+   off by arrival (correct). 2:31-2:43 repeats "Stop. You are about to walk into a door" for twelve seconds,
+   which is `stopRepeatSeconds = 3` firing while the user shuffles in front of a door that is their destination.
+   This needs its own pass over pacing; it is the last big guidance problem.
+
+Verified: `make test` -> **411 tests, 0 failures** (407 before; 4 new for `stairsAhead`: toward, behind, too far,
+and across the corridor). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+One of my new tests was WRONG and the code was right: it stood the user exactly ON the stairs node, where the
+distance is zero and the bearing is undefined. Corrected to stand 3 m short facing across the corridor.
+NOT verified: UNVERIFIED ON DEVICE.
+Open / handoff:
+1. Anmol's second ask - "explicitly state to leave the staircase, and the directions on doing so" - is NOT built.
+   That is the transition-space hand-off: announce entering, guide through, announce leaving. Guidance still has
+   no concept of "up", so a vertical stretch is spoken as "Continue straight".
+2. The stairs warning re-announces as the route target advances (the planner latches per target node, and at
+   1.5 m node spacing a 4 m radius spans two or three). Expect it twice; it needs a per-stairs-node latch.
+3. The door at the end of trip 2 is the DESTINATION, and it was still warned about as an obstacle to stop for.
+   `RouteFeature.isWayThrough` covers a door when the target kind is a room or door - worth re-checking why it
+   did not apply there.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — The route went STRAIGHT UP the stairwell, and extensions still missing from the 3D viewer   [tags: BUG, DEVICE]
 Area: B (routing) + A (export). Branch `stairs-multifloor`. Extending and navigating both work now; these are
 the two faults left from that walk.

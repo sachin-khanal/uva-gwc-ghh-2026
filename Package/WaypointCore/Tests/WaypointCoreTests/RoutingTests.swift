@@ -807,4 +807,48 @@ final class LoopRoutingTests: XCTestCase {
         let simplified = RouteSimplifier.simplify(nodes)
         XCTAssertLessThan(simplified.count, nodes.count / 2, "wobble must not protect every node: \(simplified.count)")
     }
+
+    // MARK: Walking toward stairs (2026-10-18, Rice Hall)
+
+    private func stairsGraph() -> (WaypointGraph, [MapNode]) {
+        // A corridor running along -z with a staircase as a LEAF off one breadcrumb, which is how
+        // `addPOI` records it - the route never traverses its edge.
+        var nodes = (0...6).map { MapNode(kind: .corridor, position: [0, 0, -Float($0) * 2]) }
+        let stairs = MapNode(kind: .stairs, label: "Rear Stairs 4", position: [0, 0, -9])
+        nodes.append(stairs)
+        var edges = (0..<6).map { MapEdge(from: nodes[$0].id, to: nodes[$0 + 1].id, distance: 2) }
+        edges.append(MapEdge(from: nodes[4].id, to: stairs.id, distance: 1, hazard: .stairs))
+        return (WaypointGraph(map: BuildingMap(name: "Rice", nodes: nodes, edges: edges)), nodes)
+    }
+
+    /// Walking straight at a staircase is a warning, even though the route never steps onto it.
+    func testWalkingTowardStairsIsAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        // Standing 3 m short of the stairs, facing down the corridor toward them.
+        XCTAssertEqual(follower.stairsAhead(from: [0, 0, -6], forward: [0, 0, -1]), .stairs)
+    }
+
+    /// Stairs behind you are not a hazard.
+    func testStairsBehindYouAreNotAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, -6], forward: [0, 0, 1]))
+    }
+
+    /// Stairs far down the corridor are not yet news.
+    func testDistantStairsAreNotYetAHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, 0], forward: [0, 0, -1]))
+    }
+
+    /// Stairs off to one side as you pass are left to the landmark announcement.
+    func testStairsToTheSideAreNotAFrontalHazard() {
+        let (graph, nodes) = stairsGraph()
+        let follower = RouteFollower(route: Array(nodes.prefix(7)), graph: graph)
+        // 3 m short of the stairs but facing across the corridor: they are 90 degrees away, well outside
+        // the frontal band. (Standing ON the node is not a meaningful test - the bearing is undefined.)
+        XCTAssertNil(follower.stairsAhead(from: [0, 0, -6], forward: [1, 0, 0]))
+    }
 }

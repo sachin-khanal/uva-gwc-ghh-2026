@@ -107,9 +107,14 @@ public final class RouteFollower {
         let bearing = Geometry.signedBearing(forward: forward, toTarget: aim - position)
         let kind = cue.update(bearing: bearing)
 
-        var hazard: Hazard? = nil
+        // Stairs you are WALKING TOWARD, not only stairs the route steps onto. A staircase is tagged as
+        // a leaf hanging off the corridor chain, so a route that passes it never traverses its edge and
+        // the hazard below never fires; and `landmark` only mentions things 50-130 degrees to the SIDE,
+        // so a staircase straight ahead was announced by nothing at all (device report 2026-10-18:
+        // "didn't warn that there were stairs ahead or that im approaching the stairs").
+        var hazard: Hazard? = stairsAhead(from: position, forward: forward)
         if targetIndex > 0 {
-            hazard = graph.edge(between: route[targetIndex - 1].id, target.id)?.hazard
+            hazard = graph.edge(between: route[targetIndex - 1].id, target.id)?.hazard ?? hazard
         }
 
         return GuidanceInstruction(
@@ -218,6 +223,24 @@ public final class RouteFollower {
     }
 
     /// The nearest labelled place (room, door, stairs...) that is beside the user: close, and roughly 50-130 degrees to the left or right.
+    /// How close a staircase or lift has to be before we warn about walking toward it.
+    public static let stairsWarnRadius: Float = 4
+    /// ...and how far off straight ahead it may be. Wide enough to catch a staircase you are heading
+    /// for at an angle, narrow enough that one across a corridor you are merely passing stays quiet -
+    /// that case is already covered by the landmark announcement.
+    public static let stairsAheadDegrees: Float = 45
+
+    /// A staircase or lift close enough and far enough ahead to be worth a warning.
+    func stairsAhead(from position: SIMD3<Float>, forward: SIMD3<Float>) -> Hazard? {
+        for node in graph.map.nodes where node.kind == .stairs || node.kind == .elevator {
+            guard Geometry.horizontalDistance(position, node.position) <= Self.stairsWarnRadius else { continue }
+            let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)
+            guard abs(bearing) * 180 / .pi <= Self.stairsAheadDegrees else { continue }
+            return .stairs
+        }
+        return nil
+    }
+
     func landmark(at position: SIMD3<Float>, forward: SIMD3<Float>, excluding targetId: UUID) -> Landmark? {
         var best: (node: MapNode, side: Side, distance: Float)?
         for node in graph.map.nodes where node.kind != .corridor && node.id != targetId && node.id != route.last?.id {
