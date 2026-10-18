@@ -17,6 +17,7 @@ import Foundation
 public final class SyncEngine {
 
     public static let worldMapBucket = "worldmaps"
+    public static let meshBucket = "meshes"
 
     private let client: SupabaseClient
     private let store: MapStore
@@ -34,6 +35,12 @@ public final class SyncEngine {
         return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(segment).arworldmap"
     }
 
+    /// `meshes/<owner>/<mapId>/<assetId>.obj`, the path the web viewer downloads (web/cloud.js). Lowercase, UUIDs only.
+    public static func meshPath(owner: String, mapId: UUID, assetId: UUID) throws -> String {
+        guard UUID(uuidString: owner) != nil else { throw CloudError.rejected("Unsafe owner id.") }
+        return "\(owner.lowercased())/\(mapId.uuidString.lowercased())/\(assetId.uuidString.lowercased()).obj"
+    }
+
     /// Publishes an additive extension. All canonical maps are shared; share is retained for API compatibility.
     public func push(mapId: UUID, share: Bool) async throws {
         // A scan file over the cloud limit never leaves the phone. Checked from file sizes BEFORE anything is loaded or sent.
@@ -47,9 +54,23 @@ public final class SyncEngine {
             let path = try Self.worldMapPath(owner: owner, mapId: mapId, segment: segment)
             try await client.upload(bucket: Self.worldMapBucket, path: path, data: data)
         }
-        let row = BuildingRow(mapId: mapId, name: bundle.map.name, version: bundle.map.version,
-                              map: bundle.map, isShared: share)
+        // 3D surface files for the web viewer: only files THIS phone made (storageOwner nil or me), whose bytes still match their
+        // SHA-256. They go up before the row is extended; the row itself carries no meshAssets (the server lists mine in a separate
+        // call, because extending an existing building keeps its stored mesh list).
+        var published: [MeshAsset] = []
+        for var asset in bundle.map.meshAssets ?? [] where asset.storageOwner == nil || asset.storageOwner?.uuidString.lowercased() == owner.lowercased() {
+            guard let data = store.loadMesh(mapId: mapId, assetId: asset.id),
+                  data.count == asset.byteCount, ObjExport.sha256Hex(data) == asset.sha256 else { continue }
+            let path = try Self.meshPath(owner: owner, mapId: mapId, assetId: asset.id)
+            try await client.upload(bucket: Self.meshBucket, path: path, data: data)
+            asset.storageOwner = UUID(uuidString: owner)
+            published.append(asset)
+        }
+        var outgoing = bundle.map
+        outgoing.meshAssets = nil
+        let row = BuildingRow(mapId: mapId, name: outgoing.name, version: outgoing.version, map: outgoing, isShared: share)
         try await client.upsertBuilding(row)
+        if !published.isEmpty { try await client.publishMeshAssets(mapId: mapId, assets: published) }
     }
 
     public func listRemote() async throws -> [RemoteMap] {

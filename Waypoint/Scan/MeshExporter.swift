@@ -9,7 +9,8 @@
 // Frames:   vertices are written in the MAP/world frame of the scan session, the same frame as the map's nodes, so pins line up.
 // Threading: call from a BACKGROUND queue. It reads immutable anchor snapshots and takes seconds for big scans.
 // Status:   SCAFFOLD. The pure parts are unit-tested; USDZ writing is checked on a phone by the E2E self-test (`export.usdz`).
-//           UNVERIFIED ON DEVICE with a real scan mesh. TODO(C): colour by ARMeshClassification, share the file with the map bundle.
+//           UNVERIFIED ON DEVICE with a real scan mesh. TODO(C): colour by ARMeshClassification.
+//           `exportSurface` makes the OBJ copy for the web viewer (published by SyncEngine.push).
 //
 import ARKit
 import ModelIO
@@ -66,6 +67,15 @@ enum MeshExporter {
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
         return Report(fileBytes: size, vertices: fitted.mesh.vertices.count, triangles: fitted.mesh.triangleCount,
                       clusterCellSize: fitted.cellSize, fitsBudget: fitted.fitsBudget && size <= budgetBytes)
+    }
+
+    /// The portable copy for the WEB viewer: the same cropped mesh as an OBJ plus its manifest entry (WaypointCore `ObjExport`).
+    /// Call from a background queue, after `export` (extracting the anchors again costs a few seconds on big scans).
+    static func exportSurface(anchors: [ARMeshAnchor], box: OrientedBox?, segmentId: String) throws -> ObjExport.Output {
+        var mesh = extract(anchors: anchors)
+        if let box { mesh = MeshCrop.crop(mesh, to: box) }
+        guard !mesh.isEmpty else { throw ExportError(message: "There was no mesh to export.") }
+        return try ObjExport.make(mesh, segmentId: segmentId)
     }
 
     /// Writes `mesh` as USDZ (atomically: a temp file is moved into place only when complete).

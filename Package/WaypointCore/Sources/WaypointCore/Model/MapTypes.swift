@@ -135,8 +135,8 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
 }
 
 /// One 3D surface file of a map that other tools (the web viewer) can draw: an OBJ whose bytes are pinned by a SHA-256, stored in the
-/// `meshes` bucket under `<storageOwner or the map owner>/<map id>/...`. Format 3, OPTIONAL. The app does not create these yet (its own
-/// 3D model is `model.usdz` next to the map), but it CARRIES them: loading and saving a map keeps them, merging unions them, and
+/// `meshes` bucket under `<storageOwner or the map owner>/<map id>/...`. Format 3, OPTIONAL. The app creates one per scan (`ObjExport`,
+/// `MapStore.attachMesh`; its own 3D model is `model.usdz` next to the map) and CARRIES them: loading and saving a map keeps them, merging unions them, and
 /// `MapBundle.validate()` rejects malformed ones. Field names and rules match web/router.js (U3). See docs/MAP_FORMAT.md.
 public struct MeshAsset: Codable, Hashable, Sendable {
     public var id: UUID

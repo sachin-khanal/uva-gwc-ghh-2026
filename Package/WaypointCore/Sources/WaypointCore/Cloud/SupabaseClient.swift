@@ -101,6 +101,17 @@ public actor SupabaseClient {
             body: body)
     }
 
+    /// Lists 3D surface files (OBJ) of a building that the caller has already uploaded (requires migration 0007). The server checks
+    /// that every file belongs to a scan segment THIS user contributed; assets are append-only.
+    public func publishMeshAssets(mapId: UUID, assets: [MeshAsset]) async throws {
+        struct Args: Encodable { let building: UUID; let assets: [MeshAsset] }
+        let body = try JSONEncoder().encode(Args(building: mapId, assets: assets))
+        _ = try await authed(
+            "POST", "rest/v1/rpc/publish_mesh_assets",
+            headers: ["Content-Type": "application/json"],
+            body: body)
+    }
+
     /// One shared map per building, newest first.
     public func listBuildings() async throws -> [BuildingRow] {
         let data = try await authed(

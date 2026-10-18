@@ -424,7 +424,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
                     let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
                     self.savedMap = saved
-                    self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
+                    self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id, segmentId: savedSegment)
                     self.stop()
                     Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
                 } catch {
@@ -435,16 +435,27 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     /// Builds the 3D model (USDZ) next to the saved map on a background queue. A failure never affects the saved map.
-    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID) {
+    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID, segmentId: String) {
         guard !anchors.isEmpty else { modelStatus = nil; return }
         modelStatus = "Building 3D model…"
         let url = store.modelURL(mapId: mapId)
+        let store = self.store
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let message: String
             do {
                 let report = try MeshExporter.export(anchors: anchors, box: box, to: url)
                 let size = ByteCountFormatter.string(fromByteCount: Int64(report.fileBytes), countStyle: .file)
-                message = "3D model saved (\(size), \(report.triangles.formatted()) triangles)"
+                var note = ""
+                // The OBJ copy for the web viewer. Its failure never affects the USDZ model or the saved map.
+                do {
+                    let surface = try MeshExporter.exportSurface(anchors: anchors, box: box, segmentId: segmentId)
+                    try store.attachMesh(surface.asset, data: surface.data, mapId: mapId)
+                    note = ", web copy \(ByteCountFormatter.string(fromByteCount: Int64(surface.data.count), countStyle: .file))"
+                    Log.capture.info("web surface exported: \(surface.data.count) bytes, \(surface.triangles) triangles")
+                } catch {
+                    Log.capture.error("web surface export failed: \(error.localizedDescription)")
+                }
+                message = "3D model saved (\(size), \(report.triangles.formatted()) triangles\(note))"
                 Log.capture.info("model exported: \(report.fileBytes) bytes, \(report.triangles) triangles, cell=\(report.clusterCellSize.map { String($0) } ?? "none"), fits=\(report.fitsBudget)")
             } catch {
                 message = "3D model not saved: \(error.localizedDescription)"
