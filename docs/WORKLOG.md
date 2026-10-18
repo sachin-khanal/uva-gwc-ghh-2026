@@ -1,5 +1,38 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Pacing: the twelve-second door, and duplicates that slipped past the repeat check   [tags: BUG, DEVICE]
+Area: B (guidance). Branch `stairs-multifloor`. Both causes read straight off the Rice Hall walk-2 transcript.
+
+1. THE DESTINATION DOOR, WARNED ABOUT FOR TWELVE SECONDS (2:31-2:43, "Stop. You are about to walk into a door.
+   No room to pass." repeating). `RouteFeature.isWayThrough` matched `(.door, .room)` and `(.door, .door)` - but
+   "Guide me back to the start" routes to the BREADCRUMB the walk began at, whose kind is `.corridor`. So the
+   door of the office the user started in matched nothing, was treated as an ordinary obstacle, and because
+   `repeatDue` only skips a way-through, the stop warning fired every 3 s while they stood in front of their own
+   destination. The transcript even shows it ending with "Back up slowly. You have arrived."
+   Fixed: `isWayThrough(..., onFinalApproach:)`. With no manoeuvre left and 3 m or less to go, a DOOR is the way
+   in whatever the destination node calls itself. Mid-route doors are unchanged and still obstacles.
+
+2. "IN 3 METERS, TURN RIGHT. IN 3 METERS, TURN RIGHT." (1:11). `SpeechGate` remembered only the LAST line
+   spoken, so its repeat check only caught duplicates that were immediately consecutive - any other line in
+   between reset it, and on this walk obstacle warnings were constantly in between. Replaced with a small
+   text -> time map, pruned to `repeatWindow`, so a line is dropped if it was said within the window no matter
+   what came after it. A genuinely persisting state can still re-warn once the window passes (covered by a test,
+   because `stopRepeatSeconds` and `repeatWindow` are both 3 s and that must keep working).
+
+Verified: `make test` -> **415 tests, 0 failures** (411 before; 4 new: a duplicate is dropped across an
+interleaved line, the same line is allowed again after the window, a door on the final approach is the way in,
+and a mid-route door is still an obstacle). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone dropped off again.
+Open / handoff:
+1. Still unexplained from the same transcript: "In 5 meters, turn right. Continue straight." (0:48) and
+   "Turn around. Toward Room 542. Continue straight." (1:06) are a countdown and a direction landing together.
+   They are two legitimate cues in one tick; the `Speaker` speaks one and queues the other, so they arrive
+   back to back. Whether that is wrong, or just sounds wrong, needs a judgement from Anmol rather than a guess.
+2. Anmol's stairs hand-off ("explicitly state to leave the staircase, and the directions on doing so") is still
+   unbuilt, and guidance still has no concept of "up".
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Rice Hall walk 2 (Room 542 and back): a turn spoken AFTER arrival, and silent stairs   [tags: BUG, DEVICE]
 Area: B (guidance/routing). Branch `stairs-multifloor`. Anmol: "that worked amazing" - a complete guided walk to
 Room 542 and back, with a full transcript. Three findings, one of them a regression I introduced.

@@ -573,6 +573,55 @@ final class AvoidanceCueTests: XCTestCase {
         XCTAssertNotEqual(actions.last, .beacon(nil))
     }
 
+    // MARK: Pacing - Rice Hall walk 2 (2026-10-18)
+
+    /// A cue said, then interrupted by something else, then offered again must NOT be repeated.
+    /// Remembering only the LAST line meant anything in between reset the check: the transcript has
+    /// "In 3 meters, turn right. In 3 meters, turn right."
+    func testADuplicateIsStillDroppedWhenAnotherLineCameInBetween() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "In 3 meters, turn right.", priority: .high, isSpeaking: false, now: 0), .speak)
+        XCTAssertEqual(gate.decide(text: "Careful. A wall ahead.", priority: .high, isSpeaking: false, now: 1), .speak)
+        XCTAssertEqual(gate.decide(text: "In 3 meters, turn right.", priority: .high, isSpeaking: false, now: 1.5), .drop,
+                       "same cue, well inside the repeat window")
+    }
+
+    /// ...but once the window has passed it is news again, so a genuinely persisting state can re-warn.
+    func testTheSameLineIsAllowedAgainAfterTheWindow() {
+        var gate = SpeechGate()
+        _ = gate.decide(text: "Stop. A wall ahead.", priority: .critical, isSpeaking: false, now: 0)
+        XCTAssertEqual(gate.decide(text: "Stop. A wall ahead.", priority: .critical, isSpeaking: false, now: 3.1), .speak)
+    }
+
+    /// The door of the place you are walking to is the way IN, even when the destination is a plain
+    /// breadcrumb - which is what "Guide me back to the start" routes to. Before this the user stood in
+    /// front of their own destination being told to stop, for twelve seconds.
+    func testADoorOnTheFinalApproachIsTheWayIn() {
+        XCTAssertTrue(RouteFeature.isWayThrough(obstacle: .door, target: .corridor, onFinalApproach: true))
+        var planner = FeedbackPlanner()
+        let arriving = GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 1.5,
+                                           targetNodeId: UUID(), targetLabel: nil, targetPosition: SIMD3(0, 0, -1.5),
+                                           hazard: nil, targetKind: .corridor, destinationLabel: nil)
+        let door = ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.6, confidence: 0.9)
+        let said = spoken(planner.plan(instruction: arriving, obstacle: .stop, trackingOK: true,
+                                       report: door, time: 1, isMoving: true))
+        XCTAssertFalse(said.contains { $0.hasPrefix("Stop.") }, "it is the way in, not an ambush: \(said)")
+        XCTAssertTrue(said.contains { $0.contains("open it") }, "\(said)")
+    }
+
+    /// A door that is NOT on the final approach is still an obstacle.
+    func testADoorMidRouteIsStillAnObstacle() {
+        XCTAssertFalse(RouteFeature.isWayThrough(obstacle: .door, target: .corridor, onFinalApproach: false))
+        var planner = FeedbackPlanner()
+        let midRoute = GuidanceInstruction(kind: .continueStraight, bearingRadians: 0, distanceMeters: 12,
+                                           targetNodeId: UUID(), targetLabel: nil, targetPosition: SIMD3(0, 0, -12),
+                                           hazard: nil, targetKind: .corridor, destinationLabel: nil)
+        let door = ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.6, confidence: 0.9)
+        let said = spoken(planner.plan(instruction: midRoute, obstacle: .stop, trackingOK: true,
+                                       report: door, time: 1, isMoving: true))
+        XCTAssertTrue(said.contains { $0.hasPrefix("Stop.") }, "\(said)")
+    }
+
     // MARK: Priority contract - F-1 / F-7 (2026-10-18 recorded walk)
 
     /// A caution QUEUES. It used to be `.critical`, which cuts off whatever is being said - including

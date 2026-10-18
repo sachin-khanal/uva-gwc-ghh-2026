@@ -108,8 +108,21 @@ public enum ObstacleBand {
 /// Anything else - a wall, a chair, a person - is still an obstacle and still gets the full warning.
 public enum RouteFeature {
 
-    public static func isWayThrough(obstacle: ObstacleKind?, target: NodeKind?) -> Bool {
-        guard let obstacle, let target else { return false }
+    /// How close to the end of the route counts as the final approach. One stride past the arrival
+    /// radius of a plain waypoint, so the rule only bites where it is meant to.
+    public static let finalApproachMeters: Float = 3
+
+    /// - Parameter onFinalApproach: the last few metres of the route, with no manoeuvre left. A door
+    ///   there is the way in WHATEVER the destination node calls itself. This matters because
+    ///   "Guide me back" routes to the breadcrumb you started from, whose kind is `.corridor` - so the
+    ///   door of the office you started in matched nothing below and was warned about as an obstacle,
+    ///   over and over, while the user stood in front of their own destination (device report
+    ///   2026-10-18: "Stop. You are about to walk into a door" repeating for twelve seconds).
+    public static func isWayThrough(obstacle: ObstacleKind?, target: NodeKind?,
+                                    onFinalApproach: Bool = false) -> Bool {
+        guard let obstacle else { return false }
+        if onFinalApproach, obstacle == .door { return true }
+        guard let target else { return false }
         switch (obstacle, target) {
         // The door of the room you are going to, or a door you were routed to directly.
         case (.door, .room), (.door, .door): return true
