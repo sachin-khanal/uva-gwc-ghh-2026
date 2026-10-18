@@ -22,7 +22,8 @@
 //           `FeedbackPlanner.lineLost`), because the planner records a cue as announced the moment it makes it.
 //
 // Threading: main thread only (all callers are already on it).
-// Status:   SCAFFOLD, UNVERIFIED ON DEVICE (needs a phone with VoiceOver on AND off, and headphones).
+// Status:   Synthesizer lifecycle/queue/previews tested on phone; user confirmed clear output.
+//           VoiceOver announcement route remains SCAFFOLD / UNVERIFIED ON DEVICE.
 //
 import AVFoundation
 import UIKit
@@ -34,6 +35,13 @@ final class Speaker: NSObject {
 
     /// A line was thrown away before the person heard all of it. Called with the exact text that was passed to `say`.
     var onLineLost: ((String) -> Void)?
+
+    /// Optional diagnostic observer: start/finish come from the actual OS delegates, not from `say`.
+    enum SpeechEvent {
+        case started(String), finished(String), cancelled(String)
+        case announcementPosted(String), announcementFinished(String, Bool)
+    }
+    var onSpeechEvent: ((SpeechEvent) -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
     private var gate = SpeechGate()
@@ -186,6 +194,7 @@ final class Speaker: NSObject {
         line.accessibilitySpeechAnnouncementPriority = (priority == .critical) ? .high : .low
         announcing = (text, priority)
         AccessibilityNotification.Announcement(line).post()
+        onSpeechEvent?(.announcementPosted(text))
 
         // If the "finished" notification never comes (VoiceOver switched off mid-line), do not stay busy forever.
         announcementWatchdog?.cancel()
@@ -199,6 +208,7 @@ final class Speaker: NSObject {
         let ok = note.userInfo?[UIAccessibility.announcementWasSuccessfulUserInfoKey] as? Bool ?? true
         DispatchQueue.main.async { [weak self] in
             guard let text else { return }
+            self?.onSpeechEvent?(.announcementFinished(text, ok))
             self?.announcementEnded(text: text, success: ok)
         }
     }
@@ -239,7 +249,12 @@ final class Speaker: NSObject {
 
 extension Speaker: AVSpeechSynthesizerDelegate {
 
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        onSpeechEvent?(.started(utterance.speechString))
+    }
+
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        onSpeechEvent?(.finished(utterance.speechString))
         inFlight[ObjectIdentifier(utterance)] = nil
         guard utterance === currentUtterance else { return }
         currentUtterance = nil
@@ -248,6 +263,7 @@ extension Speaker: AVSpeechSynthesizerDelegate {
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        onSpeechEvent?(.cancelled(utterance.speechString))
         // Cancelled by a safety interrupt (stop() clears `inFlight` first, so a deliberate stop never lands here). Whatever was waiting is KEPT
         // (see `say`); the line that was cut off is reported so the planner can say it again if it still applies.
         let cut = inFlight.removeValue(forKey: ObjectIdentifier(utterance))

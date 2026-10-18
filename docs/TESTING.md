@@ -231,3 +231,18 @@ Recorded on Sachin's iPhone 16 Pro Max: opt-in E2E **35 PASS / 0 FAIL / 1 SKIP**
 Device-injected offline, HTTP 503, null JSON text, malformed reply, added-direction and slow-response checks all pass through `ProxyNarrator`; slow request cancelled in 101 ms. These do **not** claim the phone was actually in airplane mode or that production secrets were removed. The live invalid-kind request returned HTTP 400. Mac-side live probes also observed missing-auth and public-anon-key HTTP 401 plus real Gemini rewrites.
 
 The full phone simulation on the no-key build logged `narration: via the narrate Edge Function`, rewritten opening and landmark sentences, `You have arrived at 409.`, and `SELFTEST PASS`. The normal speech/haptic calls ran, but no human listening judgement or physical navigation was performed: audible quality, VoiceOver overlap and physical guidance remain **UNVERIFIED ON DEVICE**. Tests did not change server secrets, deployment or caps.
+
+
+## Audible voice integration — Update 2026-10-18 (Codex)
+
+Opt-in `VoiceSelfTest.swift` runs through the actual singleton `Speaker` and collects OS speech delegate events. `say` or queue insertion alone is insufficient to pass. The optional diagnostic observer has no subscriber during normal navigation.
+
+```sh
+DEVICE=<phone-id> EXTRA='-e2eVoice YES -guidance.voice phone -guidance.speechRate 1' make selftest-e2e
+```
+
+Run on a built/installed guidance branch, keep the phone unlocked, and listen. Voice/source overrides apply to this launch and do not alter saved preferences. If testing the proxy without a direct bundled key, use the empty `GEMINI_API_KEY=` build override documented above. For the VoiceOver route, turn VoiceOver ON before running the same opt-in test; it waits for a real successful announcement completion, never treating the watchdog as proof. That route was explicitly skipped by Sachin on 2026-10-18.
+
+Recorded with VoiceOver OFF on Sachin's iPhone 16 Pro Max: **37 PASS, 0 FAIL, 1 SKIP** (cloud map-write test not requested). Output volume 0.3, Speaker route. Live Gemini phrase "You are passing Room 206 on your left." produced actual `didStart` and `didFinish`. Turn right finished before Continue straight started. A long line received `didCancel` and loss notification when interrupted by STOP; STOP and recovery then finished. Two safety lines finished in order without canceling one another. Arrival finished and the queued stale countdown never started. Preview 0.8x took 4.388 s; 1.4x took 1.917 s. Installed Aaron preview also produced start/finish callbacks. Sachin confirmed the audible output was clear and as described; the tests intentionally interrupt only their long safety/arrival setup lines.
+
+This closes the earlier gap between requesting speech and checking actual playback callbacks with human listening. It does not establish VoiceOver ON overlap behavior, acoustic quality on other devices/output routes, physical navigation or every available voice. VoiceOver overlap remains **UNVERIFIED ON DEVICE**. No microphone recording or persistent system-setting change was made.

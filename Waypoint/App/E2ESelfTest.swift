@@ -249,6 +249,9 @@ enum E2ESelfTest {
             }
         }
 
+        if VoiceSelfTest.requested {
+            await VoiceSelfTest.run { name, ok, detail in check(name, ok, detail) }
+        }
         return finish(tally)
     }
 

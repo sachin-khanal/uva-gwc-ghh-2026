@@ -1,5 +1,7 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-18 (Codex, audible voice test):** added app `App/VoiceSelfTest.swift` and optional OS speech-event observer in `Guidance/Speaker.swift`. On Sachin's iPhone, VoiceOver OFF: 37 E2E checks PASS, including Gemini text actually starting/finishing speech, queued directions, safety cancellation/recovery, two STOPs without stutter, stale-arrival clearing, slow/fast previews and installed Aaron voice. Sachin confirmed speech was clear/as described. VoiceOver ON explicitly skipped at user's request; no claim about its overlap behavior.
+
 **Update 2026-10-17 (Claude):** the Codex/U3 notes below that say tests or SQL are "pending" or "UNVERIFIED" are partly closed: Swift 85/85, typecheck OK, SQL migrations 0001-0003 + both SQL tests PASS locally (stubbed storage schema), Python 9/9. Still open: live-server concurrency and everything on a phone (UNVERIFIED ON DEVICE). New unmerged work: branch `app-ui-workflows` (new Scanner/Navigator UI, `Flows/`, `Services/`).
 
 **Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.
