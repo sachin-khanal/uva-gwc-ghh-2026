@@ -7,7 +7,7 @@
 //             B. STORAGE     the app's real Documents folder + the Keychain on THIS phone
 //             C. DATA PATH   synthetic scan -> MapBuilder -> save (+world map bytes) -> reload with a fresh store -> export bundle -> import into a
 //                            second store -> validation -> route -> simulated walk through RouteFollower/FeedbackPlanner -> "arrived"
-//             D. RESOURCES   the bundled sample map decodes
+//             D. RESOURCES   no placeholder sample map is bundled
 //             E. CLOUD       only if Supabase is configured: anonymous sign-in + list (read-only). SKIPPED otherwise.
 //           Output: one `[e2e] PASS|FAIL|INFO|SKIP name - detail` line each, a summary, then exit(0) if nothing FAILed else exit(1).
 // Limits:   cannot check real LiDAR geometry, relocalization, audio loudness/direction or haptic feel (those need a person), and the synthetic scan
@@ -177,10 +177,8 @@ enum E2ESelfTest {
         } catch { fail("share.overLimit", "\(error)") }
 
         // ---- D. RESOURCES
-        if let url = Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json"),
-           let sample = (try? Data(contentsOf: url)).flatMap({ try? BuildingMap.from(jsonData: $0) }) {
-            check("resource.sampleMap", sample.nodes.count == 9, "\(sample.nodes.count) nodes")
-        } else { fail("resource.sampleMap", "bundled sample map missing or undecodable") }
+        // No bundled sample map (removed 2026-10-18): a sample resource must NOT ship in the app any more.
+        check("resource.noSampleMap", Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json") == nil, "the app bundle carries no placeholder map")
 
         // ---- F. ACCESSIBILITY: phone posture maths, the sentences users hear, and what Apple's image classifier can name on THIS phone
         func postureAt(_ pitch: Float, _ roll: Float) -> PostureReading {

@@ -12,14 +12,27 @@ async function check(name, operation) {
   catch (error) { results.push({ name, pass: false, error: error.message }); }
 }
 try {
-  await waitFor(() => iframe.contentDocument?.querySelector("#route-result strong"));
+  await waitFor(() => iframe.contentDocument?.getElementById("map-file") && iframe.contentWindow.document.getElementById("status")?.textContent);
   const doc = iframe.contentDocument, win = iframe.contentWindow, $ = (id) => doc.getElementById(id);
-  const sample = await (await fetch("./fixtures/rice-hall-sample.json")).json();
+  const sample = await (await fetch("./fixtures/rice-hall-sample.json")).json(); // a TEST FIXTURE only: the viewer ships no sample building
   const change = (element) => element.dispatchEvent(new win.Event("change", { bubbles: true }));
-  await check("Sample renders default Room 204 route", () => {
+  await check("Viewer starts empty: no placeholder building is loaded", () => {
+    assert($("map-title").textContent === "No building open");
+    assert($("map-source").textContent === "NOTHING LOADED");
+    assert(!$("buildings").textContent.includes("sample"));
+  });
+  const openFile = async (map) => {
+    const transfer = new win.DataTransfer();
+    transfer.items.add(new win.File([JSON.stringify(map)], "test-map.json", { type: "application/json" }));
+    $("map-file").files = transfer.files; change($("map-file"));
+    await waitFor(() => $("map-file").value === "");
+  };
+  await openFile(sample);
+  await waitFor(() => doc.querySelector("#route-result strong"));
+  await check("A local map renders the default Room 204 route", () => {
     assert($("route-result").textContent.includes("10.5 m"));
     assert($("destinations").querySelectorAll("button").length === 4);
-    assert($("map-source").textContent.includes("NOT A REAL SCAN"));
+    assert($("map-source").textContent === "LOCAL MAP");
     assert($("map-canvas").width > 0);
   });
   await check("Unlabeled breadcrumbs hidden without changing routing",()=>{
@@ -80,12 +93,6 @@ try {
     $("building-search").value = ""; $("building-search").dispatchEvent(new win.Event("input"));
     assert($("buildings").children.length === 1);
   });
-  const openFile = async (map) => {
-    const transfer = new win.DataTransfer();
-    transfer.items.add(new win.File([JSON.stringify(map)], "test-map.json", { type: "application/json" }));
-    $("map-file").files = transfer.files; change($("map-file"));
-    await waitFor(() => $("map-file").value === "");
-  };
   await check("Start route walks to completion and reports the selected room",async()=>{
     const start={...sample.nodes[0],position:[0,0,0]},goal={...sample.nodes[5],label:'Arrival test',position:[1,0,0]};delete goal.extent;
     await openFile({...sample,name:'Short arrival fixture',nodes:[start,goal],edges:[{from:start.id,to:goal.id,distance:1}],meshAssets:[]});
@@ -152,9 +159,8 @@ try {
     $("refresh").click(); await waitFor(() => !$("refresh").disabled);
     assert(requests.filter(([url]) => url.includes("/auth/")).length === 1);
   });
-  await check("Selecting a room reveals route and Start route uses that destination",()=>{
-    // Return to a known connected map after the cloud/import cases.
-    [...$('buildings').querySelectorAll('button')].find(b=>b.textContent.includes('sample')).click();
+  await check("Selecting a room reveals route and Start route uses that destination",async()=>{
+    await openFile(sample);
     const destination=[...$('destinations').querySelectorAll('button')].find(b=>b.textContent.includes('Room 206'));
     destination.click();assert($('show-overlay').checked);assert(!$('start-route').disabled);
     $('start-route').click();assert($('map-canvas').dataset.view==='walk');
@@ -169,7 +175,7 @@ try {
     assert($('map-canvas').clientWidth>=before,'canvas before='+before+' after='+$('map-canvas').clientWidth);$('expand-map').click();
     assert($('expand-map').getAttribute('aria-pressed')==='false');
   });
-  await check("Empty shared library keeps the sample available", async () => {
+  await check("Empty shared library keeps the map you opened and explains it is empty", async () => {
     win.fetch = async (url) => new win.Response(JSON.stringify(String(url).includes("/auth/")
       ? { access_token: "test-token", refresh_token: "test-refresh", expires_in: 3600 } : []), { status: 200 });
     $("connect-open").click(); $("anon-key").value = "TEST-ANON";

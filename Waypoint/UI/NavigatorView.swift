@@ -61,9 +61,10 @@ struct NavigatorView: View {
             Log.app.error("SELFTEST FAIL: timed out after 120 s")
             exit(1)
         }
-        // First map (alphabetical) that actually contains a destination matching the label.
+        // First map (alphabetical) that actually contains a destination matching the label. The label "*" means "any": the first labelled
+        // place of the first scanned map that has one (there is no bundled sample map any more, so there is no fixed room name to ask for).
         guard let (map, destination) = app.maps.lazy.compactMap({ m in
-                  WaypointGraph(map: m).nodes(matchingLabel: label).first.map { (m, $0) }
+                  (label == "*" ? m.destinations.first : WaypointGraph(map: m).nodes(matchingLabel: label).first).map { (m, $0) }
               }).first else {
             Log.app.error("SELFTEST FAIL: no map has a destination matching \"\(label)\" (maps: \(app.maps.map(\.name)))")
             exit(2)
@@ -102,6 +103,7 @@ struct NavigatorView: View {
                             if map.id == selectedMap?.id { Image(systemName: "checkmark") }
                         }
                     }
+                    .accessibilityIdentifier("nav.map") // UI tests pick a real scanned map; there is no bundled sample any more
                     // The classic screens had no way to remove a recording at all.
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { pendingDelete = map } label: {

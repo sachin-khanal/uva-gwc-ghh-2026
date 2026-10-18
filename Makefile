@@ -108,10 +108,10 @@ launch: ## Launch the installed app and stream its console to this terminal (DEV
 
 run: build install launch ## Build, install and launch on your phone (DEVICE=...)
 
-ROOM ?= Room 204
+ROOM ?= *
 EXTRA ?=
 
-selftest-sim: ## HEADLESS on-phone test: run the simulated walk to ROOM (default "Room 204"), print every cue, exit PASS/FAIL (DEVICE=...). Phone must be unlocked; you will hear it.
+selftest-sim: ## HEADLESS on-phone test: run the simulated walk to ROOM (default: the first labelled place of the first scanned map), print every cue, exit PASS/FAIL (DEVICE=...). Phone must be unlocked; you will hear it.
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
 	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoSimulate "$(ROOM)"
 

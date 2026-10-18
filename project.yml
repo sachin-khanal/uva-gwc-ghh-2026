@@ -40,8 +40,6 @@ targets:
       - path: Waypoint
         excludes:
           - "Info.plist"      # referenced via INFOPLIST_FILE below, not as a source
-      - path: Samples          # rice-hall-sample.json is bundled so AppState can seed it on first launch
-        buildPhase: resources
     dependencies:
       - package: WaypointCore
     info:
