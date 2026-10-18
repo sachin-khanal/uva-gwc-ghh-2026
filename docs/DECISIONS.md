@@ -617,3 +617,18 @@ warnings keep priority over the voice; Gemini must fall back to the hand-written
    build - the follow-up is a Supabase edge function holding the key (TODO(B)/U3). Model defaults to `gemini-2.5-flash` (`GEMINI_MODEL`); the model id was NOT checked
    against the live API.
 **Status:** accepted; `make test` 394 pass (40 new), `make typecheck`, `make check` OK. Everything audible and the live Gemini call are UNVERIFIED ON DEVICE.
+
+## D-047 — Gemini goes through a Supabase Edge Function; no build carries the key (2026-10-18)
+Closes the open item in D-046 §5 (and the security review's "hardcoded secret in client bundle"). Function `narrate` (`supabase/functions/narrate/index.ts`), live on project
+`mssakhavfsyjiymcqskr`, `verify_jwt` on; migration `0009_narration_limits.sql` applied live.
+1. **Who:** a signed-in user (anonymous sign-in counts: role `authenticated`); the public anon key alone is refused (401).
+2. **What:** `{kind, sentence}` only, strictly validated (4 kinds, <= 500 chars, letters/digits/space/`. , ' -`). The SERVER owns the prompt, model and length, so it is not
+   a free general Gemini endpoint. The app still runs `NarrationGuard` on every reply, whatever the server says.
+3. **Limits:** per-user and global daily caps (`narration_take`, secrets `NARRATION_USER_DAILY_CAP` default 200, `NARRATION_GLOBAL_DAILY_CAP` default 1500) -> 429. Anonymous users are
+   cheap to create, so the GLOBAL cap is the real protection. `NARRATION_ENABLED=false` switches it off for everyone at once. Missing config or a failing limit check -> 503 (fail closed).
+4. **App:** `ProxyNarrator` through the shared `SupabaseClient` (`SharedCloud`). Direct `GeminiNarrator` (key in `Config/Local.xcconfig`) remains only as a DEVELOPER fallback when cloud is
+   not configured; with cloud configured the direct key is never used, so remove `GEMINI_API_KEY` from `Local.xcconfig` once the proxy works.
+5. **Residual risks:** anyone with the app can sign in anonymously and spend the global cap (denial of the nice wording, never of guidance - the plain sentence is the fallback);
+   the prompt exists twice (server + `NarrationPrompt.system`) and can drift in style only; sentences (place names included) go to Google, and on the FREE tier Google may use them to improve its products.
+**Status:** accepted. Guards and limits verified against the live function (401/405/400/503) and the SQL test. The Gemini call through the function is UNVERIFIED until the `GEMINI_API_KEY` secret is set.
+

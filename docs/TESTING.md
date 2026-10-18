@@ -203,3 +203,5 @@ is only "verified" once someone has done it on a device and written it down.
 | G8 | Add `GEMINI_API_KEY` to `Config/Local.xcconfig`, `make gen`, run Simulate; watch the log for `narrated: <plain> -> <rich>` | opening/landmark/far countdown sound more natural; turns, warnings and arrival are word-for-word the plain text |
 | G9 | Same, but airplane mode | at most one short wait on the first calm line, then the plain sentences; log shows no `narrated:` lines; still works |
 
+| G10 | After setting the `GEMINI_API_KEY` secret: Simulate walk on a CLOUD-configured build with NO `GEMINI_API_KEY` in `Local.xcconfig`; log shows `narration: via the narrate Edge Function` and `narrated: <plain> -> <rich>` | calm lines are reworded with no key in the build; with the secret removed or `NARRATION_ENABLED=false`, plain sentences and no crash |
+

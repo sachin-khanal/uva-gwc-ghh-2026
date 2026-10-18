@@ -22,6 +22,7 @@
 // Breaker:  two failures in a row switch Gemini off for a minute, so a dead network costs one short wait, not a wait
 //           before every line.
 //
+// Routes:   real builds use `ProxyNarrator` (the `narrate` Edge Function holds the key); `GeminiNarrator` (key in the app) is a developer-only fallback.
 // Status:   DONE (logic, unit tested with a fake transport). The real network call and the sound of the result are
 //           UNVERIFIED ON DEVICE. TODO(B): move the key behind a Supabase edge function before any public release -
 //           a key in an app bundle can be extracted.
@@ -265,6 +266,55 @@ public struct GeminiNarrator: Narrator {
         guard let parts = (candidate["content"] as? [String: Any])?["parts"] as? [[String: Any]] else { return nil }
         let text = parts.compactMap { $0["text"] as? String }.joined()
         return text.isEmpty ? nil : text
+    }
+}
+
+// MARK: - Server-side proxy (the way real builds reach Gemini)
+
+/// Anything that can call a Supabase Edge Function. `SupabaseClient` is the real one; tests use a fake.
+public protocol FunctionCaller: Sendable {
+    func callFunction(_ name: String, json body: Data) async throws -> Data
+}
+
+extension SupabaseClient: FunctionCaller {}
+
+/// Asks the `narrate` Edge Function (supabase/functions/narrate, D-047) instead of Google. The Gemini key, the model, the prompt and the daily
+/// caps live on the server, so NO build carries a key. Same promise as `GeminiNarrator`: any failure -> nil -> the plain sentence, and the reply
+/// is checked by `NarrationGuard` here as well, whatever the server returns.
+public struct ProxyNarrator: Narrator {
+
+    private let caller: FunctionCaller
+    private let timeout: TimeInterval
+
+    public init(caller: FunctionCaller, timeout: TimeInterval = GeminiNarrator.defaultTimeout) {
+        self.caller = caller
+        self.timeout = timeout
+    }
+
+    public func narrate(_ fact: NarrationFact) async -> String? {
+        guard let body = Self.body(for: fact) else { return nil }
+        let work = Task { try await caller.callFunction("narrate", json: body) }
+        let timer = Task {
+            try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            work.cancel()
+        }
+        defer { timer.cancel() }
+        guard let data = try? await work.value, let text = Self.extractText(from: data) else { return nil }
+        return NarrationGuard.accept(text, for: fact)
+    }
+
+    /// Only the scrubbed sentence and its kind leave the phone.
+    static func body(for fact: NarrationFact) -> Data? {
+        let sentence = NarrationText.scrub(fact.plain)
+        guard !sentence.isEmpty else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["kind": fact.kind.rawValue, "sentence": sentence], options: [.sortedKeys])
+    }
+
+    /// `{"text": "..."}` -> the text; `{"text": null}`, errors and anything else -> nil.
+    static func extractText(from data: Data) -> String? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let text = root["text"] as? String, !text.isEmpty else { return nil }
+        return text
     }
 }
 

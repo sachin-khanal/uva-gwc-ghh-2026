@@ -647,10 +647,18 @@ final class NavigationController: ObservableObject {
         }
     }
 
-    /// Gemini wording, if a key is configured (Config/Local.xcconfig -> Info.plist) and the setting is on.
+    /// Richer wording for the calm lines, or nil (= plain sentences). Two routes, in this order:
+    ///  1. the `narrate` Edge Function through the signed-in Supabase client: the Gemini key lives on the server and in NO build (D-047);
+    ///  2. DEVELOPER FALLBACK only when cloud is not configured at all: a Gemini key in Config/Local.xcconfig, called directly.
     private static func makeNarration() -> NarrationCoordinator? {
-        guard UIPrefs.richNarrationEnabled,
-              let config = GeminiConfig.validated(apiKey: Bundle.main.object(forInfoDictionaryKey: "GeminiApiKey") as? String,
+        guard UIPrefs.richNarrationEnabled else { return nil }
+        if let client = SharedCloud.client {
+            // Sign in now, so the first rewrite does not spend its 1.5 s deadline on the anonymous sign-up.
+            Task { _ = try? await client.ensureSession() }
+            Log.guidance.info("narration: via the narrate Edge Function")
+            return NarrationCoordinator(narrator: ProxyNarrator(caller: client))
+        }
+        guard let config = GeminiConfig.validated(apiKey: Bundle.main.object(forInfoDictionaryKey: "GeminiApiKey") as? String,
                                                   model: Bundle.main.object(forInfoDictionaryKey: "GeminiModel") as? String)
         else { return nil }
         Log.guidance.info("narration: Gemini \(config.model)")

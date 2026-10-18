@@ -123,6 +123,13 @@ public actor SupabaseClient {
         try await authed("GET", "storage/v1/object/authenticated/\(bucket)/\(path)")
     }
 
+    // MARK: Edge Functions
+
+    /// POSTs JSON to `functions/v1/<name>` as the signed-in (anonymous) user. Same auth, refresh and one-retry-on-401 as every other call.
+    public func callFunction(_ name: String, json body: Data) async throws -> Data {
+        try await authed("POST", "functions/v1/\(name)", headers: ["Content-Type": "application/json"], body: body)
+    }
+
     // MARK: Plumbing
 
     private func authed(
