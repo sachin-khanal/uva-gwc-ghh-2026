@@ -1,5 +1,38 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — The ARKit extension path was unobservable, so it also could not be debugged   [tags: BUG, DEVICE]
+Area: A (capture). Branch `stairs-multifloor`.
+Anmol: "the arkit start relocalization just doesn't work, or if it does i just cant tell cuz nothing is said so
+idk." The second half is the real problem, and it invalidates the previous entry's conclusion as something he
+could act on: a diagnosis nobody can observe is not usable.
+
+FOUND: `extensionStatus` was set ONCE, in `start`, to "Find the selected scanned area. Move slowly until
+tracking recovers." Nothing updated it afterwards - it changed only when the volunteer TAPPED the button, or
+when a hand alignment produced an event. So while ARKit was relocalizing there was no difference on screen
+between "still looking", "tracking is fine but the area is not recognised", "camera not ready" and "found it,
+waiting for you to tap". The one state that mattered - recognised - was indistinguishable from failure.
+
+Fixed: `updateExtensionProgress(_:)` runs every frame while an extension is unattached and not being aligned by
+hand, and says which of those states it is in. In particular it separates TRACKING being good from the saved
+AREA being recognised, which are different problems with different remedies - "tracking is good, still
+recognising the saved area. Stand where you first started this scan" versus "hold still and pan slowly".
+It also ATTACHES AUTOMATICALLY, once, the moment ARKit recognises the area: there is no reason to make the
+volunteer tap a button for something the app can already tell has happened. If that attempt fails because they
+are standing too far from a mapped corridor, its existing message says so and the button remains for a retry.
+Deliberately silent while a hand alignment is in progress, so the two flows never fight over the banner.
+
+Verified: `make test` -> **404 tests, 0 failures** (unchanged; this is app-target code `make test` cannot reach).
+`make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Whether ARKit ever reaches `.normal` + mapped in the extension flow is
+exactly the thing that was unmeasurable before and should now be readable off the screen.
+Open / handoff: if the banner now sits on "Looking for the saved area" indefinitely, that is a REAL ARKit
+relocalization failure and the previous entry's limitation applies - one `initialWorldMap` per session, so a
+multi-segment map can only be recognised from one of its areas. If it reaches "tracking is good, still
+recognising the saved area", tracking is healthy and the problem is purely viewpoint: stand where the scan
+STARTED. Those two messages distinguish the two causes, which was the point.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Why ARKit relocalizes in Navigate but never in Extend   [tags: BUG, DEVICE]
 Area: U3 (scanner UI) + A (maps). Branch `stairs-multifloor`.
 Anmol: "the arkit localization just doesn't work, unlike navigate where it works." Same building, same world

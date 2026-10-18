@@ -106,6 +106,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var activeConfig: ARWorldTrackingConfiguration?
     /// The world map taken out of the configuration by `stopRelocalizing`, so starting over restores it.
     private var droppedWorldMap: ARWorldMap?
+    /// ARKit has recognised the saved area, so the automatic attach has already been tried once.
+    private var sawRecognised = false
     /// A save is in flight. Published and readable so `LiveScanService` can tell "still working" from
     /// "stalled" instead of failing the save on a fixed timer.
     @Published private(set) var isSaving = false
@@ -234,6 +236,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         alignedByHand = false
         droppedWorldMap = nil
         activeConfig = nil
+        sawRecognised = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
         nodeCount = map?.nodes.count ?? 0
@@ -713,6 +716,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay) | gaps=\(gaps.map { String(format: "%.0f%% (%d open tiles, %d outline dashes)", $0.percent * 100, $0.tiles.count, $0.outline.count) } ?? "off") | paused=\(isPaused)")
         }
 
+        // Say, every frame, whether the saved area has been recognised yet. The banner used to be set
+        // ONCE when the extension started and never updated, so there was no way to tell "still looking"
+        // from "found it" - Anmol: "or if it does i just cant tell cuz nothing is said so idk"
+        // (2026-10-18). Without this the whole ARKit path is unobservable.
+        updateExtensionProgress(frame)
+
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
         guard isRunning, savedMap == nil, !isSaving else { return }
         guard !isPaused else { if canRecord { canRecord = false }; return }
@@ -726,6 +735,45 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         if builder.observe(position: mapPoint(Geometry.translation(of: frame.camera.transform))) != nil {
             nodeCount = builder.map.nodes.count
         }
+    }
+
+    /// Live progress while an extension is still looking for its place, and ONE automatic attempt to
+    /// attach the moment ARKit recognises the area - there is no reason to make the volunteer tap a
+    /// button for something the app can already tell has happened. If that attempt fails (they are
+    /// standing too far from a mapped corridor) its message says so and the button is there to retry.
+    private func updateExtensionProgress(_ frame: ARFrame) {
+        guard isExtension, !extensionAttached, isRunning, !isSaving, !alignedByHand,
+              confirmedPlaceCount == 0 else { return } // aligning by hand: that flow owns the message
+        let tracking = frame.camera.trackingState
+        let mapped = frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending
+        let recognised: Bool = { if case .normal = tracking { return mapped } else { return false } }()
+
+        if recognised {
+            if !sawRecognised {
+                sawRecognised = true
+                Log.capture.info("extension: saved area recognised, attaching automatically")
+                beginExtension() // sets its own status, success or failure
+            }
+            return
+        }
+        sawRecognised = false
+        let text: String
+        switch tracking {
+        case .normal:
+            // Tracking is fine, so the hold-up is recognising the SAVED area, not the camera.
+            text = "Tracking is good, still recognising the saved area. Stand where you first started this scan and look around slowly."
+        case .limited(.relocalizing):
+            text = "Looking for the saved area. Hold still and pan slowly across what you scanned before."
+        case .limited(.initializing):
+            text = "Starting the camera..."
+        case .limited:
+            text = "Move slowly - the camera needs more detail to track."
+        case .notAvailable:
+            text = "Camera not ready yet."
+        @unknown default:
+            text = "Looking for the saved area."
+        }
+        if extensionStatus != text { extensionStatus = text }
     }
 
     /// Measures the mesh and refits the bounding box OFF the main thread. If the previous fit is still running this tick is skipped
