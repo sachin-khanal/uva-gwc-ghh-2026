@@ -20,10 +20,8 @@ struct ScanShareView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                Button(action: onBack) {
-                    Label("Review", systemImage: "chevron.left").font(.body.weight(.semibold))
-                }
-                .accessibilityLabel("Back to review")
+                TopNavBar(back: TopNavAction(title: "Review", hint: "Back to the map review.", action: onBack),
+                          trailing: TopNavAction(title: "Done", hint: "Back to the list of scans.", action: onDone))
 
                 VStack(spacing: Theme.Space.m) {
                     Image(systemName: "checkmark.circle.fill")
@@ -46,7 +44,6 @@ struct ScanShareView: View {
                            systemImage: "square.and.arrow.up") { showSync = true }
                 HeroButton(title: "Try it in Navigate", subtitle: "Open this map in the navigator",
                            systemImage: "figure.walk", style: .secondary) { tryInNavigate() }
-                HeroButton(title: "Done", style: .secondary, action: onDone)
             }
             .padding(Theme.Space.l)
         }

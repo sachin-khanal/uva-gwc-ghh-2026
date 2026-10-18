@@ -16,9 +16,15 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var didAutoOpen = false
     @AppStorage(UIPrefs.newInterface) private var newInterfacePref = UIPrefs.newInterfaceDefault
+    /// Observed so the screen follows Settings > "Show debugging tools" immediately.
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
     /// Scripted launches (-autoSimulate, -autoE2E, -autoScan, UI tests) always use the classic screens: the headless commands live there, and
     /// a leftover "New interface" preference on the phone must not turn `make selftest-sim` into a screen that waits for a human.
-    private var newInterface: Bool { newInterfacePref && !app.launchCommand.isActive }
+    /// With debugging tools off the Classic/New choice is hidden and the New interface is used (UIPrefs.newInterfaceEnabled).
+    private var newInterface: Bool {
+        _ = (newInterfacePref, debugTools) // read both so SwiftUI redraws when either changes
+        return UIPrefs.newInterfaceEnabled && !app.launchCommand.isActive
+    }
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
 
     var body: some View {

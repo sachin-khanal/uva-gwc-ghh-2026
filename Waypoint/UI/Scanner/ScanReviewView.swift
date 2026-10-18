@@ -13,6 +13,8 @@ import WaypointCore
 
 struct ScanReviewView: View {
     @EnvironmentObject var app: AppState
+    /// Settings > Show debugging tools: the stat tiles and room measurements are technical numbers.
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
     let onShare: (BuildingMap) -> Void
     let onDone: () -> Void
 
@@ -40,10 +42,7 @@ struct ScanReviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                Button(action: onDone) {
-                    Label("Scans", systemImage: "chevron.left").font(.body.weight(.semibold))
-                }
-                .accessibilityLabel("Back to scans")
+                TopNavBar(back: TopNavAction(title: "Scans", hint: "Back to the list of scans.", action: onDone))
 
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text("Review")
@@ -60,8 +59,10 @@ struct ScanReviewView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
 
-                stats
-                roomSizes
+                if debugTools {
+                    stats
+                    roomSizes
+                }
 
                 if warnings.isEmpty {
                     Banner(text: "Looks good: every place is labelled and reachable.", kind: .info)
@@ -99,7 +100,6 @@ struct ScanReviewView: View {
                 VStack(spacing: Theme.Space.m) {
                     HeroButton(title: "Save & share", subtitle: "Send to nearby phones or the cloud",
                                systemImage: "square.and.arrow.up") { onShare(map) }
-                    HeroButton(title: "Done", style: .secondary, action: onDone)
                 }
             }
             .padding(Theme.Space.l)

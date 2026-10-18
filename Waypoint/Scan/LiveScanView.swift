@@ -10,6 +10,8 @@
 // Session:  The view renders the `ARSession` owned by CaptureController (it does NOT start its own:
 //           `automaticallyConfigureSession = false`). The controller remains the session delegate.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
+// Update 2026-10-18 (U3): optional `target` draws a yellow pin where the next tag will go
+//           (tap to place in the new Scanner). Default nil, so existing call sites are unchanged.
 //
 import ARKit
 import RealityKit
@@ -25,6 +27,8 @@ struct LiveScanView: UIViewRepresentable {
     var showMesh: Bool = true
     /// "Unscanned areas" overlay (yellow tiles + dashed white outline where the scan has no mesh yet, like Apple's Measure guides). nil = off.
     var coverage: CoverageSnapshot?
+    /// Tap-to-place: where the next tag will be placed (map/world frame, camera height). nil = no pin.
+    var target: SIMD3<Float>? = nil
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
@@ -36,6 +40,7 @@ struct LiveScanView: UIViewRepresentable {
                                    .disablePersonOcclusion, .disableAREnvironmentLighting, .disableGroundingShadows])
         view.scene.addAnchor(context.coordinator.root)
         view.scene.addAnchor(context.coordinator.coverageRoot)
+        view.scene.addAnchor(context.coordinator.targetRoot)
         return view
     }
 
@@ -44,6 +49,7 @@ struct LiveScanView: UIViewRepresentable {
         if view.debugOptions != wanted { view.debugOptions = wanted }
         context.coordinator.show(box)
         context.coordinator.showCoverage(coverage)
+        context.coordinator.showTarget(target)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -52,7 +58,26 @@ struct LiveScanView: UIViewRepresentable {
     final class Coordinator {
         let root = AnchorEntity(world: .zero)
         let coverageRoot = AnchorEntity(world: .zero)
+        let targetRoot = AnchorEntity(world: .zero)
         private var lastBox: OrientedBox?
+        private var lastTarget: SIMD3<Float>?
+
+        /// A pin standing on the floor at the chosen spot: a pole from the floor to camera height with a ball
+        /// on top, so it reads as "here" from across a hallway. Rebuilt only when the spot changes.
+        func showTarget(_ target: SIMD3<Float>?) {
+            guard target != lastTarget else { return }
+            lastTarget = target
+            targetRoot.children.removeAll()
+            guard let target else { return }
+            let material = UnlitMaterial(color: .systemYellow)
+            let poleHeight: Float = 1.4 // camera height above the floor, as in CaptureController
+            let pole = ModelEntity(mesh: .generateBox(size: SIMD3<Float>(0.02, poleHeight, 0.02)), materials: [material])
+            pole.position = target - SIMD3<Float>(0, poleHeight / 2, 0)
+            let ball = ModelEntity(mesh: .generateSphere(radius: 0.08), materials: [material])
+            ball.position = target
+            targetRoot.addChild(pole)
+            targetRoot.addChild(ball)
+        }
         private var lastCoverage: CoverageSnapshot?
 
         /// Two meshes only (fill + outline), rebuilt about once a second: thousands of separate entities would stall RealityKit.

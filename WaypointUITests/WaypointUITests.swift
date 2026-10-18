@@ -206,7 +206,8 @@ final class WaypointUITests: XCTestCase {
     /// New Scanner (live mode): Pause turns into Resume, and the coverage toggle is in the expanded controls.
     func testNewScannerPauseAndCoverageToggle() throws {
         app.terminate()
-        app.launchArguments = ["-ui.newInterface", "YES", "-ui.serviceMode", "live"]
+        // The unscanned-areas toggle is a debugging tool since 2026-10-18 (Settings > Show debugging tools).
+        app.launchArguments = ["-ui.newInterface", "YES", "-ui.serviceMode", "live", "-ui.debugTools", "YES"]
         app.launch()
         if app.state != .runningForeground { app.activate() }
         need(app.buttons["mode.scan"], "Scan button missing").tap()

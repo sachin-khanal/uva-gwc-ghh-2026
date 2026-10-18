@@ -100,6 +100,35 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
+    // MARK: Tap to place
+
+    var cameraPosition: SIMD3<Float>? {
+        controller.session.currentFrame.map { Geometry.translation(of: $0.camera.transform) }
+    }
+
+    /// Raycast from a point on the camera view into the scanned scene. The view shows the camera image
+    /// aspect-filled in portrait, so the view point is converted to normalized IMAGE coordinates with the
+    /// inverse of ARKit's display transform before building the query. `.estimatedPlane` uses LiDAR depth,
+    /// so walls, doors and floor are hit even before ARKit has detected a plane there.
+    func surfacePoint(at viewPoint: CGPoint, viewSize: CGSize) -> SIMD3<Float>? {
+        guard viewSize.width > 0, viewSize.height > 0, let frame = controller.session.currentFrame else { return nil }
+        let normalized = CGPoint(x: viewPoint.x / viewSize.width, y: viewPoint.y / viewSize.height)
+        let toImage = frame.displayTransform(for: .portrait, viewportSize: viewSize).inverted()
+        let query = frame.raycastQuery(from: normalized.applying(toImage), allowing: .estimatedPlane, alignment: .any)
+        guard let hit = controller.session.raycast(query).first else { return nil }
+        return Geometry.translation(of: hit.worldTransform)
+    }
+
+    func tag(kind: NodeKind, label: String?, stairs: StairsInfo?, at world: SIMD3<Float>) {
+        guard controller.isRunning, !isPaused else { return }
+        let before = controller.nodeCount
+        controller.tagPOI(kind: kind, label: label, stairs: stairs, atWorld: world)
+        if controller.nodeCount > before {
+            tags.append(ScanTag(id: UUID(), kind: kind, label: label))
+        }
+        refresh()
+    }
+
     func tag(kind: NodeKind, label: String?) {
         guard controller.isRunning, !isPaused else { return }
         let before = controller.nodeCount

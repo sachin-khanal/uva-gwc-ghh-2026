@@ -17,6 +17,8 @@ struct DestinationPickerView: View {
     let onExit: () -> Void
 
     @State private var query = ""
+    /// The demo "Say a destination" button is a test tool: shown only with Settings > Show debugging tools.
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
     @FocusState private var searchFocused: Bool
 
     private var allPlaces: [MapNode] {
@@ -38,13 +40,18 @@ struct DestinationPickerView: View {
         NavScreen(
             title: "Where to?",
             subtitle: map.name,
-            prompt: "Where to? \(allPlaces.count) places in \(map.name). Explore the screen to hear them, or use the search field."
+            prompt: "Where to? \(allPlaces.count) places in \(map.name). Explore the screen to hear them, or use the search field.",
+            back: model.flow.mapCount > 1
+                ? TopNavAction(title: "Buildings", hint: "Back to the list of buildings.", action: onBack) : nil,
+            exit: TopNavAction(title: "Exit", systemImage: "xmark", hint: "Returns to the home screen.", action: onExit)
         ) {
             searchField
 
-            HeroButton(title: "Say a destination", subtitle: "Demo: always hears “Room 204”",
-                       systemImage: "mic.fill", style: .navSecondary,
-                       hint: "Voice input is coming soon. This demo picks Room 204.") { voicePick() }
+            if debugTools {
+                HeroButton(title: "Say a destination", subtitle: "Demo: always hears “Room 204”",
+                           systemImage: "mic.fill", style: .navSecondary,
+                           hint: "Voice input is coming soon. This demo picks Room 204.") { voicePick() }
+            }
 
             if query.isEmpty && !recents.isEmpty {
                 section("Recent", places: recents)
@@ -53,15 +60,6 @@ struct DestinationPickerView: View {
                 NavInfoRow(systemImage: "magnifyingglass", text: query.isEmpty ? "This map has no labelled places." : "No place matches “\(query)”.")
             } else {
                 section(query.isEmpty ? "All places" : "Matches", places: filtered)
-            }
-
-            HStack(spacing: Theme.Space.m) {
-                if model.flow.mapCount > 1 {
-                    HeroButton(title: "Buildings", systemImage: "chevron.left", style: .navSecondary,
-                               hint: "Back to the list of buildings.", action: onBack)
-                }
-                HeroButton(title: "Exit", systemImage: "xmark", style: .navSecondary,
-                           hint: "Returns to the home screen.", action: onExit)
             }
         }
     }

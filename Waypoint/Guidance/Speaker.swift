@@ -127,6 +127,10 @@ final class Speaker: NSObject {
         speakNow(next.text, priority: next.priority)
     }
 
+    /// True while a line is being spoken. Read-only; the navigator waits on it so the pre-navigation
+    /// instructions finish before the search for the user's position begins (branch final-ui-changes).
+    var isSpeaking: Bool { synthesizer.isSpeaking }
+
     func stop() {
         pending.clear()
         speakingPriority = nil

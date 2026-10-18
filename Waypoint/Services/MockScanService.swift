@@ -79,9 +79,34 @@ final class MockScanService: ScanService {
     func tagStairs(kind: NodeKind, label: String?, info: StairsInfo) { tag(kind: kind, label: label) }
 
     func tag(kind: NodeKind, label: String?) {
-        guard snapshot.isRunning else { return }
         let right = SIMD3<Float>(-walkerForward.z, 0, walkerForward.x)
-        let node = MapNode(kind: kind, label: label, position: walkerPosition + right,
+        addTag(kind: kind, label: label, position: walkerPosition + right)
+    }
+
+    // MARK: Tap to place (demo)
+
+    var cameraPosition: SIMD3<Float>? { snapshot.isRunning ? walkerPosition : nil }
+
+    /// Fakes a raycast into MockCameraView's corridor: the lower on the screen, the closer the spot (1 m at
+    /// the bottom edge, 7 m near the horizon, beyond range above it), and left/right follows the tap.
+    func surfacePoint(at viewPoint: CGPoint, viewSize: CGSize) -> SIMD3<Float>? {
+        guard snapshot.isRunning, viewSize.width > 0, viewSize.height > 0 else { return nil }
+        let horizon = viewSize.height * 0.38 // same horizon as MockCameraView
+        let below = (viewPoint.y - horizon) / (viewSize.height - horizon)
+        let distance: Float = below <= 0.02 ? 9 : Float(1 + (1 - min(1, below)) * 6)
+        let sideways = Float(viewPoint.x / viewSize.width - 0.5) * distance
+        let right = SIMD3<Float>(-walkerForward.z, 0, walkerForward.x)
+        return walkerPosition + walkerForward * distance + right * sideways
+    }
+
+    /// The mock keeps no stairs metadata (as in `tagStairs`), so `stairs` is ignored.
+    func tag(kind: NodeKind, label: String?, stairs: StairsInfo?, at world: SIMD3<Float>) {
+        addTag(kind: kind, label: label, position: world)
+    }
+
+    private func addTag(kind: NodeKind, label: String?, position: SIMD3<Float>) {
+        guard snapshot.isRunning else { return }
+        let node = MapNode(kind: kind, label: label, position: position,
                            segmentId: segmentId, createdBy: deviceName)
         map.nodes.append(node)
         if let crumb = lastBreadcrumb {

@@ -9,6 +9,14 @@
 //               tag palette, box size, Pause and Finish (enabled by FinishGate, with the reason when disabled).
 //           Tagging gives a success haptic + toast (+ VoiceOver announcement). Screen stays awake while scanning.
 //           Named LiveScanScreen to avoid confusion with the private `ScanningView` in VolunteerView.swift.
+// Update 2026-10-18 (branch final-ui-changes):
+//             * Tap to place: tap the camera view to drop a yellow pin up to 6 m away; the panel then shows a
+//               "New tag here" card with a name field (focused right away, optional) and the type buttons.
+//               Tagging without a pin still places the tag 1 m ahead.
+//             * Markers: Room, Door, Stairs, Point (NodeKind.taggable).
+//             * Technical numbers (points pill, triangles, area, both-ways %, unscanned-areas toggle, box margin)
+//               only with Settings > Show debugging tools. The quality ring and the tips always show.
+//             * The panel rises above the keyboard; while a spot is pending it shows only the card.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
 import SwiftUI
@@ -29,7 +37,9 @@ struct LiveScanScreen: View {
     @State private var panelExpanded = true
     @State private var confirmDiscard = false
     @FocusState private var labelFocused: Bool
+    @FocusState private var spotNameFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
 
     private var s: ScanSnapshot { model.snapshot }
 
@@ -55,6 +65,8 @@ struct LiveScanScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .sensoryFeedback(.success, trigger: model.tagEvents)
+        .sensoryFeedback(.selection, trigger: model.spotEvents)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.spot)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.toast)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: panelExpanded)
         // Stairs and lifts open a sheet instead of tagging straight away: which way they go and where
@@ -86,15 +98,36 @@ struct LiveScanScreen: View {
 
     // MARK: Camera
 
-    @ViewBuilder
+    /// The camera, with a transparent layer on top that turns a tap into a tag spot. The layer and the AR view
+    /// share one frame, so the tap location maps straight onto the camera image (LiveScanService.surfacePoint).
     private var camera: some View {
-        if let session = model.service.arSession {
-            LiveScanView(session: session, box: model.service.scanBox, showMesh: !model.isPaused,
-                         coverage: model.isPaused ? nil : model.service.coverageOverlay)
-                .accessibilityHidden(true)
-        } else {
-            MockCameraView()
+        GeometryReader { geo in
+            ZStack {
+                if let session = model.service.arSession {
+                    LiveScanView(session: session, box: model.service.scanBox, showMesh: !model.isPaused,
+                                 coverage: model.isPaused ? nil : model.service.coverageOverlay,
+                                 target: model.spot?.position)
+                } else {
+                    MockCameraView()
+                    if let spot = model.spot {
+                        // The demo camera does not move, so a pin at the tap point stays put.
+                        Image(systemName: "mappin")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(.yellow)
+                            .shadow(radius: 3)
+                            .position(x: spot.screenPoint.x, y: spot.screenPoint.y - 20)
+                    }
+                }
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(coordinateSpace: .local) { location in
+                        labelFocused = false
+                        model.selectSpot(at: location, viewSize: geo.size)
+                        if model.spot != nil { spotNameFocused = true }
+                    }
+            }
         }
+        .accessibilityHidden(true) // a sighted-only gesture; VoiceOver users tag with the buttons (1 m ahead)
     }
 
     // MARK: Top bar
@@ -102,7 +135,9 @@ struct LiveScanScreen: View {
     private var topBar: some View {
         HStack(spacing: Theme.Space.s) {
             StatusPill(text: s.tracking.word, systemImage: trackingSymbol, tint: s.tracking.isNormal ? .green : .orange)
-            StatusPill(text: "\(s.nodeCount) points", systemImage: "point.3.connected.trianglepath.dotted")
+            if debugTools {
+                StatusPill(text: "\(s.nodeCount) points", systemImage: "point.3.connected.trianglepath.dotted")
+            }
             if model.isMock { MockBadge() }
             Spacer(minLength: 0)
             Button { confirmDiscard = true } label: {
@@ -138,14 +173,44 @@ struct LiveScanScreen: View {
             .buttonStyle(.plain)
             .accessibilityLabel(panelExpanded ? "Collapse controls" : "Expand controls")
 
-            if s.shouldWalkBack {
-                Banner(text: "Walk back the way you came so the map works in both directions.",
-                       kind: .warning)
-                    .accessibilityIdentifier("scan.walkBack")
+            // While a tapped spot waits for its name and type, the panel shows only that card (and errors),
+            // so it still fits above the keyboard.
+            if model.spot == nil {
+                statusSection
             }
-            HStack {
-                QualityRing(quality: s.quality)
-                Spacer()
+            if let error = s.errorMessage ?? model.saveError {
+                Banner(text: error, kind: .error)
+            }
+
+            if model.spot != nil {
+                spotCard
+            } else {
+                if panelExpanded {
+                    expandedControls
+                }
+                actionRow
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.bottom, Theme.Space.l)
+        .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.hero,
+                                                                  topTrailingRadius: Theme.Radius.hero,
+                                                                  style: .continuous))
+        // Only the container safe area: the panel must still rise above the keyboard when a name field is focused.
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    @ViewBuilder
+    private var statusSection: some View {
+        if s.shouldWalkBack {
+            Banner(text: "Walk back the way you came so the map works in both directions.",
+                   kind: .warning)
+                .accessibilityIdentifier("scan.walkBack")
+        }
+        HStack {
+            QualityRing(quality: s.quality)
+            Spacer()
+            if debugTools {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("\(s.triangleCount.formatted()) triangles").font(.footnote.monospacedDigit())
                     if let size = s.boxSize {
@@ -158,94 +223,138 @@ struct LiveScanScreen: View {
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
             }
+        }
 
-            if let status = s.extensionStatus {
-                // Extending a saved map: tell the volunteer what the scanner is waiting for. Recording and tagging are paused until it has found its place.
-                Banner(text: status, kind: s.canRecord ? .info : .warning)
-            }
-            // Locating yourself BY HAND. ARKit often will not recognise a space from a new direction, and
-            // waiting for it is what blocked extending a map at all. A sighted volunteer can just look at a
-            // door they labelled. TWO places are needed: the first says where you are, the second which way
-            // you are turned (see ManualAlignment).
-            if !s.placesToStandAt.isEmpty, !s.canRecord {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text(s.confirmedPlaceCount == 0
-                         ? "Give it a few seconds first - finding the area itself is more accurate. Not working? Stand at a labelled place and tap it."
-                         : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
-                        .font(.subheadline.weight(.medium))
-                        .accessibilityIdentifier("scan.extension.manualHint")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Theme.Space.s) {
-                            ForEach(s.placesToStandAt) { place in
-                                Button(place.id == s.confirmedPlaceId ? "\(place.label) ✓" : place.label) {
-                                    model.confirmPlace(place.id)
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(place.id == s.confirmedPlaceId)
+        if let status = s.extensionStatus {
+            // Extending a saved map: tell the volunteer what the scanner is waiting for. Recording and tagging are paused until it has found its place.
+            Banner(text: status, kind: s.canRecord ? .info : .warning)
+        }
+        // Locating yourself BY HAND. ARKit often will not recognise a space from a new direction, and
+        // waiting for it is what blocked extending a map at all. A sighted volunteer can just look at a
+        // door they labelled. TWO places are needed: the first says where you are, the second which way
+        // you are turned (see ManualAlignment).
+        if !s.placesToStandAt.isEmpty, !s.canRecord {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text(s.confirmedPlaceCount == 0
+                     ? "Give it a few seconds first - finding the area itself is more accurate. Not working? Stand at a labelled place and tap it."
+                     : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("scan.extension.manualHint")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Space.s) {
+                        ForEach(s.placesToStandAt) { place in
+                            Button(place.id == s.confirmedPlaceId ? "\(place.label) ✓" : place.label) {
+                                model.confirmPlace(place.id)
                             }
+                            .buttonStyle(.bordered)
+                            .disabled(place.id == s.confirmedPlaceId)
                         }
                     }
-                    if s.confirmedPlaceCount > 0 {
-                        Button("Start over") { model.restartPlaceConfirmation() }
-                            .font(.footnote)
-                            .accessibilityIdentifier("scan.extension.startOver")
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("scan.extension.places")
-            }
-            if case .limited(let reason) = s.tracking {
-                Banner(text: "\(reason). Slow down and point at walls with detail.")
-            }
-            if let error = s.errorMessage ?? model.saveError {
-                Banner(text: error, kind: .error)
-            }
-
-            if panelExpanded {
-                expandedControls
-            }
-
-            HStack(spacing: Theme.Space.m) {
-                Button { model.togglePause() } label: {
-                    Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 52)
+                if s.confirmedPlaceCount > 0 {
+                    Button("Start over") { model.restartPlaceConfirmation() }
+                        .font(.footnote)
+                        .accessibilityIdentifier("scan.extension.startOver")
                 }
-                .buttonStyle(.bordered)
-                .tint(Color.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("scan.extension.places")
+        }
+        if case .limited(let reason) = s.tracking {
+            Banner(text: "\(reason). Slow down and point at walls with detail.")
+        }
+    }
 
-                Button { model.finish(onSaved: onSaved) } label: {
-                    Group {
-                        if model.isSaving {
-                            ProgressView().tint(.white)
-                        } else {
-                            Label("Finish", systemImage: "checkmark")
-                        }
-                    }
+    @ViewBuilder
+    private var actionRow: some View {
+        HStack(spacing: Theme.Space.m) {
+            Button { model.togglePause() } label: {
+                Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .disabled(!model.gate.isReady || model.isSaving)
-                .accessibilityLabel(model.isSaving ? "Saving map" : "Finish and save map")
-                .accessibilityHint(model.gate.reason ?? "Saves the map and opens the review.")
             }
+            .buttonStyle(.bordered)
+            .tint(Color.secondary)
 
-            if let reason = model.gate.reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityHidden(true) // read as the Finish button's hint
+            Button { model.finish(onSaved: onSaved) } label: {
+                Group {
+                    if model.isSaving {
+                        ProgressView().tint(.white)
+                    } else {
+                        Label("Finish", systemImage: "checkmark")
+                    }
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 52)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .disabled(!model.gate.isReady || model.isSaving)
+            .accessibilityLabel(model.isSaving ? "Saving map" : "Finish and save map")
+            .accessibilityHint(model.gate.reason ?? "Saves the map and opens the review.")
         }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.bottom, Theme.Space.l)
-        .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.hero,
-                                                                  topTrailingRadius: Theme.Radius.hero,
-                                                                  style: .continuous))
-        .ignoresSafeArea(edges: .bottom)
+
+        if let reason = model.gate.reason {
+            Text(reason)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true) // read as the Finish button's hint
+        }
+    }
+
+    /// Shown right after a tap on the camera view: name the spot (optional), then pick its type.
+    @ViewBuilder
+    private var spotCard: some View {
+        if let spot = model.spot {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("New tag here").font(.headline)
+                        Text("About \(SpokenText.shortDistance(spot.distance)) away · tap the camera again to move it")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Cancel") {
+                        spotNameFocused = false
+                        model.clearSpot()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityLabel("Cancel this spot")
+                }
+                .accessibilityElement(children: .combine)
+
+                TextField("Name (optional), e.g. Room 204", text: $model.spotLabel)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .focused($spotNameFocused)
+                    .padding(Theme.Space.m)
+                    .frame(minHeight: 48)
+                    .background(Color(uiColor: .tertiarySystemFill),
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+                    .accessibilityLabel("Name for this spot, optional")
+
+                Text("What is it?").font(.subheadline.weight(.semibold))
+                TagPalette(isEnabled: s.isRunning && !model.isPaused) { kind in
+                    spotNameFocused = false
+                    model.tagAtSpot(kind)
+                }
+                Text(model.spotLabel.trimmingCharacters(in: .whitespaces).isEmpty
+                     ? "No name? You can add it later on the Review screen. Stairs ask for their details next."
+                     : "Stairs ask for their details next.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            .padding(Theme.Space.m)
+            .background(Color.yellow.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .strokeBorder(Color.yellow.opacity(0.6), lineWidth: 1)
+            }
+            .accessibilityIdentifier("scan.spotCard")
+        }
     }
 
     @ViewBuilder
@@ -265,6 +374,13 @@ struct LiveScanScreen: View {
             .padding(Theme.Space.m)
             .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
         }
+
+        Label("Tip: tap the camera view to tag a spot up to \(Int(TapPlacement.maxDistance)) m away.",
+              systemImage: "hand.tap")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityHidden(true)
 
         TextField("Label for the next tag, e.g. Room 204", text: $model.labelDraft)
             .textInputAutocapitalization(.words)
@@ -292,22 +408,24 @@ struct LiveScanScreen: View {
             .accessibilityLabel("Recent tags: " + s.tags.suffix(4).reversed().map { $0.label ?? $0.kind.displayName }.joined(separator: ", "))
         }
 
-        Toggle(isOn: Binding(get: { s.showCoverage }, set: { model.service.setShowCoverage($0) })) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Show unscanned areas").font(.subheadline.weight(.semibold))
-                Text(coverageCaption).font(.footnote).foregroundStyle(.secondary)
+        if debugTools {
+            Toggle(isOn: Binding(get: { s.showCoverage }, set: { model.service.setShowCoverage($0) })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show unscanned areas").font(.subheadline.weight(.semibold))
+                    Text(coverageCaption).font(.footnote).foregroundStyle(.secondary)
+                }
             }
-        }
-        .accessibilityIdentifier("scan.coverage")
+            .accessibilityIdentifier("scan.coverage")
 
-        HStack {
-            Text(String(format: "Box margin %.1f m", s.boxMargin)).font(.footnote).foregroundStyle(.secondary)
-            Spacer()
-            Button { model.adjustBox(by: -0.1) } label: { Image(systemName: "minus.circle.fill").font(.title2) }
-                .accessibilityLabel("Shrink scan box")
-            Button { model.adjustBox(by: 0.1) } label: { Image(systemName: "plus.circle.fill").font(.title2) }
-                .accessibilityLabel("Grow scan box")
+            HStack {
+                Text(String(format: "Box margin %.1f m", s.boxMargin)).font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                Button { model.adjustBox(by: -0.1) } label: { Image(systemName: "minus.circle.fill").font(.title2) }
+                    .accessibilityLabel("Shrink scan box")
+                Button { model.adjustBox(by: 0.1) } label: { Image(systemName: "plus.circle.fill").font(.title2) }
+                    .accessibilityLabel("Grow scan box")
+            }
+            .tint(Theme.accent)
         }
-        .tint(Theme.accent)
     }
 }

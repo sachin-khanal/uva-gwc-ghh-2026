@@ -29,10 +29,7 @@ struct ScanSetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                Button(action: onBack) {
-                    Label("Scans", systemImage: "chevron.left").font(.body.weight(.semibold))
-                }
-                .accessibilityLabel("Back to scans")
+                TopNavBar(back: TopNavAction(title: "Scans", hint: "Back to the list of scans.", action: onBack))
 
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text("New scan")

@@ -6,8 +6,12 @@
 //           and replaced by large in-screen controls. Screens, driven by NavigateFlow (WaypointCore):
 //             building -> destination -> confirm -> active (finding position / guiding) -> arrived.
 //           VoiceOver escape (two-finger Z) goes back one screen, but never ends an active route.
-// Also:     `NavScreen`, the shared layout for the pre-route screens: a heading that receives VoiceOver focus
-//           on appear, and a spoken introduction when VoiceOver is off (Announcer.prompt).
+// Also:     `NavScreen`, the shared layout for the pre-route screens: an optional top bar (Back left, Exit right),
+//           a heading that receives VoiceOver focus on appear, and a spoken introduction when VoiceOver is off
+//           (Announcer.prompt).
+// Update 2026-10-18 (branch final-ui-changes): back/exit controls moved to a top bar on every pre-route screen;
+//           while finding the position and while guiding, the whole screen is hold-to-stop and there is no other
+//           control; finding the position never shows a help screen, it keeps searching (NavigatorModel).
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
 import SwiftUI
@@ -45,17 +49,14 @@ struct NavigatorFlowView: View {
             if let map, let destination = model.destination {
                 RouteConfirmView(model: model, destination: destination,
                                  onStart: { model.start(map: map, store: app.store) },
-                                 onChange: goBack)
+                                 onChange: goBack,
+                                 onExit: leaveNavigate)
             }
         case .active:
-            if let map {
-                if showsLocalizing {
-                    LocalizingView(model: model,
-                                   onRetry: { model.retry(map: map, store: app.store) },
-                                   onStop: { model.stop() })
-                } else {
-                    GuidingView(model: model, onStop: { model.stop() })
-                }
+            if showsLocalizing {
+                LocalizingView(model: model, onStop: { model.stop() })
+            } else {
+                GuidingView(model: model, onStop: { model.stop() })
             }
         case .arrived:
             if let map {
@@ -91,11 +92,29 @@ struct NavScreen<Content: View>: View {
     /// Spoken when the screen appears and VoiceOver is off.
     var prompt: String
     var interruptPrompt = true
+    /// Top bar: Back on the left (e.g. "Buildings"), Exit/Done on the right. Either may be nil.
+    var back: TopNavAction? = nil
+    var exit: TopNavAction? = nil
     @ViewBuilder let content: Content
 
     @AccessibilityFocusState private var headingFocused: Bool
 
     var body: some View {
+        VStack(spacing: 0) {
+            if back != nil || exit != nil {
+                TopNavBar(back: back, trailing: exit, dark: true)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.top, Theme.Space.s)
+            }
+            scrollingContent
+        }
+        .onAppear {
+            Announcer.prompt(prompt, interrupt: interruptPrompt)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { headingFocused = true }
+        }
+    }
+
+    private var scrollingContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -117,10 +136,6 @@ struct NavScreen<Content: View>: View {
             .padding(.vertical, Theme.Space.xl)
         }
         .scrollIndicators(.hidden)
-        .onAppear {
-            Announcer.prompt(prompt, interrupt: interruptPrompt)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { headingFocused = true }
-        }
     }
 }
 

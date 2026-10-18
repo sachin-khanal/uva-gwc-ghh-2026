@@ -19,7 +19,8 @@ struct BuildingPickerView: View {
             subtitle: maps.isEmpty ? "No maps on this phone yet" : "\(maps.count) maps on this phone",
             prompt: maps.isEmpty
                 ? "There are no maps on this phone yet. Ask a volunteer to scan the building or share a map."
-                : "Choose a building. \(maps.count) maps. Swipe or explore the screen to hear them."
+                : "Choose a building. \(maps.count) maps. Swipe or explore the screen to hear them.",
+            exit: TopNavAction(title: "Exit", systemImage: "xmark", hint: "Returns to the home screen.", action: onExit)
         ) {
             if maps.isEmpty {
                 NavInfoRow(systemImage: "map", text: "Ask a volunteer to scan the building, or receive a map with Share maps on the home screen.")
@@ -32,8 +33,6 @@ struct BuildingPickerView: View {
                             hint: "Opens the list of places in this building.") { onPick(map) }
                 }
             }
-            HeroButton(title: "Exit Navigate", systemImage: "xmark", style: .navSecondary,
-                       hint: "Returns to the home screen.", action: onExit)
         }
     }
 }

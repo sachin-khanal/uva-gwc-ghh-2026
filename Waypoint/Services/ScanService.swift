@@ -107,6 +107,15 @@ protocol ScanService: AnyObject {
     func confirmPlace(id: UUID)
     /// Forget the places confirmed so far. There is always a way out of a refused alignment.
     func restartPlaceConfirmation()
+    /// Tap-to-place: where a tap on the camera view meets the scanned surface, in the LIVE SESSION frame
+    /// (the frame LiveScanView draws in), nil when nothing scanned is there yet. `viewSize` is the size of the
+    /// camera view the point was measured in.
+    func surfacePoint(at viewPoint: CGPoint, viewSize: CGSize) -> SIMD3<Float>?
+    /// The volunteer's camera position, live session frame; nil before the first camera frame.
+    var cameraPosition: SIMD3<Float>? { get }
+    /// Tap-to-place: tag at a session-frame point already checked by `TapPlacement` (WaypointCore).
+    /// `stairs` carries the stairs sheet's answers for a staircase, nil otherwise.
+    func tag(kind: NodeKind, label: String?, stairs: StairsInfo?, at world: SIMD3<Float>)
     func dismissSuggestion()
     func adjustBox(by delta: Float)
     /// Saves the map; completion on the main thread.

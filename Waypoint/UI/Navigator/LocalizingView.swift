@@ -1,12 +1,13 @@
 //
 // File:     Waypoint/UI/Navigator/LocalizingView.swift
 // Owner:    U3 (UI flows)
-// Purpose:  N4 "Finding your position" (and the failure state). Nothing pulls the user forward here.
-//             * pulsing location symbol (static with Reduce Motion);
-//             * demo mode: a spoken hint every 8 s, at most 3 times (live mode: NavigationController speaks);
-//             * after 20 s, or on failure: Try again / Use the start marker (placeholder, ROADMAP U1.7) /
-//               Ask your escort - each as a large button;
-//             * Stop is hold-to-confirm.
+// Purpose:  N4, shown from Start guidance until the user's position is found (branch final-ui-changes, 2026-10-18):
+//             * "Getting ready" while the pre-navigation instructions are spoken (NavigatorModel.isBriefing);
+//             * then "Finding your position". Nothing pulls the user forward, and there is NO help screen: the
+//               search simply continues. Every 15 s without a position, `NavigatorModel.strugglingMessage` is
+//               spoken (move slightly, stand still, turn slowly; how to stop), until found or stopped.
+//             * The whole screen is hold-to-stop (HoldToStopSurface); it is the only control.
+//           With Settings > Show debugging tools, a small Escort button (test tools) appears above it.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
 import SwiftUI
@@ -14,81 +15,78 @@ import WaypointCore
 
 struct LocalizingView: View {
     @ObservedObject var model: NavigatorModel
-    let onRetry: () -> Void
     let onStop: () -> Void
 
-    @State private var showHelp = false
-    @AccessibilityFocusState private var headingFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Seconds without a position before the "struggling" message, and between repeats.
+    static let strugglingInterval: UInt64 = 15
 
-    private var failureMessage: String? {
-        if case .failed(let message) = model.guidance.phase { return message }
-        return nil
+    @State private var showEscort = false
+    @AccessibilityFocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
+
+    private var title: String { model.isBriefing ? "Getting ready" : "Finding your position" }
+    private var detail: String {
+        model.isBriefing
+            ? "Hold the phone upright at chest level, back camera facing forward."
+            : "Stand still, then slowly turn left and right."
     }
 
     var body: some View {
-        VStack(spacing: Theme.Space.xl) {
-            Spacer(minLength: 0)
-
-            Image(systemName: failureMessage == nil ? "location.circle.fill" : "location.slash.fill")
-                .font(.system(size: 96, weight: .semibold))
-                .foregroundStyle(failureMessage == nil ? Theme.Nav.primary : Theme.Nav.danger)
-                .symbolEffect(.pulse, isActive: failureMessage == nil && !reduceMotion)
-                .accessibilityHidden(true)
-
-            VStack(spacing: Theme.Space.s) {
-                Text(failureMessage == nil ? "Finding your position" : "Can't find your position")
-                    .font(.largeTitle.weight(.bold))
-                    .fontDesign(.rounded)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Theme.Nav.text)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityFocused($headingFocused)
-                Text(failureMessage ?? "Stand still, then slowly turn left and right.")
-                    .font(.title3)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Theme.Nav.secondaryText)
-            }
-
-            if failureMessage != nil || showHelp {
-                VStack(spacing: Theme.Space.m) {
-                    HeroButton(title: "Try again", systemImage: "arrow.clockwise",
-                               style: failureMessage != nil ? .navPrimary : .navSecondary, action: onRetry)
-                    HeroButton(title: "Use the start marker", systemImage: "qrcode.viewfinder", style: .navSecondary) {
-                        Announcer.say("The start marker is not set up yet. Please ask your escort for help.", interrupt: true)
-                    }
-                    HeroButton(title: "Ask my escort for help", systemImage: "person.wave.2.fill", style: .navSecondary) {
-                        Announcer.say("Please ask your escort for help. They can see where you are on the screen.", interrupt: true)
-                    }
+        VStack(spacing: Theme.Space.m) {
+            if debugTools {
+                HStack {
+                    Spacer()
+                    Button("Escort") { showEscort = true }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.Nav.secondaryText)
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.s)
+                        .background(Theme.Nav.surface, in: Capsule())
+                        .accessibilityHidden(true) // test tools for a sighted helper
                 }
             }
 
-            Spacer(minLength: 0)
-
-            HoldToConfirmButton(title: "Hold to stop", confirmTitle: "Stop navigation", action: onStop)
+            HoldToStopSurface(accessibilityText: "\(title). \(detail)", onStop: onStop) {
+                VStack(spacing: Theme.Space.xl) {
+                    Spacer(minLength: 0)
+                    Image(systemName: model.isBriefing ? "iphone" : "location.circle.fill")
+                        .font(.system(size: 96, weight: .semibold))
+                        .foregroundStyle(Theme.Nav.primary)
+                        .symbolEffect(.pulse, isActive: !model.isBriefing && !reduceMotion)
+                    VStack(spacing: Theme.Space.s) {
+                        Text(title)
+                            .font(.largeTitle.weight(.bold))
+                            .fontDesign(.rounded)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Theme.Nav.text)
+                        Text(detail)
+                            .font(.title3)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Theme.Nav.secondaryText)
+                    }
+                    .padding(.horizontal, Theme.Space.l)
+                    Spacer(minLength: 0)
+                    HoldToStopHint()
+                }
+                .background(Theme.Nav.surface)
+            }
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($focused)
         }
         .padding(Theme.Space.l)
+        .sheet(isPresented: $showEscort) { EscortPanel(model: model) }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { headingFocused = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { focused = true }
         }
-        .task {
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-            if !Task.isCancelled && model.guidance.phase == .localizing {
-                showHelp = true
-                Announcer.say("Still looking. If this takes too long, ask your escort for help.")
-            }
-        }
-        .task {
-            guard !model.speaksForItself else { return }
-            for _ in 0..<3 {
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if Task.isCancelled || model.guidance.phase != .localizing { return }
-                Announcer.say("Slowly turn left and right.")
-            }
-        }
-        .onChange(of: model.guidance.phase) { _, phase in
-            if case .failed(let message) = phase {
-                Announcer.say("I can't find your position. \(message) You can try again.", interrupt: true)
+        // Restarts when the briefing ends, so the first reminder comes 15 s after the search actually began.
+        .task(id: model.isBriefing) {
+            guard !model.isBriefing else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.strugglingInterval * 1_000_000_000)
+                guard !Task.isCancelled, model.isActive, !model.isBriefing,
+                      model.guidance.phase == .localizing else { return }
+                Announcer.say(NavigatorModel.strugglingMessage)
             }
         }
     }

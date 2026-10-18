@@ -25,7 +25,8 @@ struct ArrivedView: View {
             prompt: model.canRouteBack
                 ? "Choose: guide me back, new destination, or done."
                 : "Choose: new destination, or done.",
-            interruptPrompt: false
+            interruptPrompt: false,
+            exit: TopNavAction(title: "Done", systemImage: "house.fill", hint: "Returns to the home screen.", action: onDone)
         ) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 96, weight: .semibold))
@@ -41,8 +42,6 @@ struct ArrivedView: View {
                 }
                 HeroButton(title: "New destination", systemImage: "mappin.and.ellipse",
                            style: model.canRouteBack ? .navSecondary : .navPrimary, action: onNewDestination)
-                HeroButton(title: "Done", systemImage: "house.fill", style: .navSecondary,
-                           hint: "Returns to the home screen.", action: onDone)
             }
         }
     }

@@ -538,6 +538,20 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")\(area)")
     }
 
+    /// Tap-to-place (new Scanner): drops a tagged node at `world`, a point in the LIVE SESSION frame where a tap on
+    /// the camera view met the scanned surface, instead of 1 m ahead. The caller has already applied
+    /// `TapPlacement.evaluate` (WaypointCore): camera height, pulled back in front of the surface, within range.
+    /// Converted to map coordinates exactly like `tagPOI(kind:label:stairs:)`, and linked to the walk the same way.
+    /// A room's floor area is measured around the tapped spot rather than around the volunteer.
+    func tagPOI(kind: NodeKind, label: String?, stairs: StairsInfo? = nil, atWorld world: SIMD3<Float>) {
+        guard canRecord, let builder else { return }
+        let extent = kind == .room ? roomExtent(standingAt: world)?.transformed(by: worldToMap) : nil
+        let node = builder.addPOI(kind: kind, label: label, position: mapPoint(world),
+                                  extent: extent, stairs: stairs?.isEmpty == true ? nil : stairs)
+        nodeCount = builder.map.nodes.count
+        Log.capture.info("tagged (tap) \(node.kind.rawValue) \(node.label ?? "-")")
+    }
+
     /// Works out the floor area of the room the volunteer is standing in, from the WALL faces of the
     /// live mesh (RoomExtractor). nil when the space is not enclosed, when classification is off, or
     /// on a phone that cannot classify - guidance then falls back to a plain arrival radius.

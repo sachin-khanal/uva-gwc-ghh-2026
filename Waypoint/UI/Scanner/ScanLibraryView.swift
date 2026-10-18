@@ -17,6 +17,8 @@ struct ScanLibraryView: View {
     let onOpen: (BuildingMap) -> Void
 
     @State private var showSync = false
+    /// Settings > Show debugging tools: point counts and versions on the cards are technical numbers.
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
     @State private var showExtend = false
     @State private var pendingDelete: BuildingMap?
 
@@ -162,6 +164,7 @@ struct ScanLibraryView: View {
 
     private func detail(for map: BuildingMap) -> String {
         let places = map.destinations.count
+        guard debugTools else { return "\(places) \(places == 1 ? "place" : "places")" }
         return "\(map.nodes.count) points · \(places) \(places == 1 ? "place" : "places") · v\(map.version)"
     }
 

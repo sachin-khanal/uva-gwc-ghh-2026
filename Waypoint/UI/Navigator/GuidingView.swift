@@ -2,13 +2,15 @@
 // File:     Waypoint/UI/Navigator/GuidingView.swift
 // Owner:    U3 (UI flows)
 // Purpose:  N5, the screen the user never has to look at (docs/UI_PLAN.md §7 N5):
-//             * almost the whole screen is ONE target: tap it (VoiceOver: double tap) to repeat the instruction;
-//             * VoiceOver custom actions: Distance remaining, Pause/Resume (demo only), Stop navigation;
-//             * magic tap = pause/resume (or repeat when the source cannot pause);
+//             * the instruction, its arrow and the distance, large and high contrast;
 //             * "Position lost" and "STOP" take over the whole area, with no arrow pulling the user forward;
-//             * Stop is hold-to-confirm; the small Escort button is for the sighted escort and hidden from VoiceOver.
+//             * the WHOLE screen is hold-to-stop and it is the only control (branch final-ui-changes, 2026-10-18;
+//               it used to be a tap-to-repeat area plus a Stop bar). VoiceOver: double tap, then confirm.
+//             * VoiceOver custom actions (not on-screen buttons): Repeat instruction, Distance remaining;
+//               magic tap repeats the instruction.
+//           With Settings > Show debugging tools: the Escort button (test tools) and, if also switched on, the
+//           debug overlay (camera + computed route). Neither is shown otherwise.
 //           No decorative haptics here: one tap / two taps already mean left / right (D-011).
-//           Guidance speech comes from the service (live) or the model (demo); this view only shows it.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
 import SwiftUI
@@ -19,101 +21,90 @@ struct GuidingView: View {
     let onStop: () -> Void
 
     @State private var showEscort = false
-    @State private var confirmStop = false
     @AccessibilityFocusState private var mainFocused: Bool
+    @AppStorage(UIPrefs.debugTools) private var debugTools = false
     @AppStorage(UIPrefs.debugOverlay) private var debugOverlay = false
 
     private var g: GuidanceSnapshot { model.guidance }
 
     var body: some View {
-        VStack(spacing: Theme.Space.l) {
-            header
-
-            // Sighted debugging only (Settings > Show debug overlay): the camera the app is tracking
-            // with and the route it actually computed. Absent in mock mode, which has no controller.
-            if debugOverlay, let controller = model.debugController {
-                NavDebugView(controller: controller)
-            }
-
-            Button(action: model.repeatInstruction) {
-                VStack(spacing: Theme.Space.l) {
-                    Spacer(minLength: 0)
-                    Image(systemName: symbol)
-                        .font(.system(size: 120, weight: .bold))
-                        .foregroundStyle(symbolColor)
-                    Text(g.headline)
-                        .font(.system(.largeTitle, design: .rounded).weight(.heavy))
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(Theme.Nav.text)
-                        .minimumScaleFactor(0.6)
-                    if !g.detail.isEmpty {
-                        Text(g.detail)
-                            .font(.title2.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(Theme.Nav.secondaryText)
-                    }
-                    if g.obstacle == .caution && g.phase == .guiding {
-                        Label("Obstacle ahead", systemImage: "exclamationmark.triangle.fill")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(Theme.Nav.onPrimary)
-                            .padding(.horizontal, Theme.Space.l)
-                            .padding(.vertical, Theme.Space.s)
-                            .background(Theme.Nav.caution, in: Capsule())
-                    }
-                    if model.isPaused {
-                        Label("Paused", systemImage: "pause.fill")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(Theme.Nav.text)
-                    }
-                    Spacer(minLength: 0)
+        VStack(spacing: Theme.Space.m) {
+            if debugTools {
+                debugRow
+                // Sighted debugging only: the camera the app is tracking with and the route it actually computed.
+                // Absent in mock mode, which has no controller.
+                if debugOverlay, let controller = model.debugController {
+                    NavDebugView(controller: controller)
                 }
-                .padding(Theme.Space.l)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(areaColor, in: RoundedRectangle(cornerRadius: Theme.Radius.hero, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.hero, style: .continuous))
             }
-            .buttonStyle(PressableStyle())
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(g.spokenText + (model.isPaused ? " Paused." : ""))
-            .accessibilityHint("Double tap to repeat.")
+
+            HoldToStopSurface(accessibilityText: g.spokenText, onStop: onStop) {
+                instruction
+                    .background(areaColor)
+            }
             .accessibilityAddTraits(.updatesFrequently)
+            .accessibilityAction(named: "Repeat instruction") { model.repeatInstruction() }
             .accessibilityAction(named: "Distance remaining") { model.announceDistanceRemaining() }
-            .accessibilityAction(named: pauseActionName) { model.togglePause() }
-            .accessibilityAction(named: "Stop navigation") { confirmStop = true }
             .accessibilityFocused($mainFocused)
-
-            Text("Tap the screen to repeat")
-                .font(.footnote)
-                .foregroundStyle(Theme.Nav.secondaryText)
-                .accessibilityHidden(true)
-
-            HoldToConfirmButton(title: "Hold to stop", confirmTitle: "Stop navigation", action: onStop)
         }
         .padding(Theme.Space.l)
-        .accessibilityAction(.magicTap) { model.togglePause() }
-        .confirmationDialog("Stop navigation?", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("Stop navigation", role: .destructive, action: onStop)
-            Button("Keep going", role: .cancel) {}
-        }
+        .accessibilityAction(.magicTap) { model.repeatInstruction() }
         .sheet(isPresented: $showEscort) { EscortPanel(model: model) }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { mainFocused = true }
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("To \(g.destinationLabel)")
-                    .font(.headline)
-                    .foregroundStyle(Theme.Nav.text)
-                if let remaining = g.distanceRemaining {
-                    Text("\(SpokenText.capitalizingFirst(SpokenText.distance(remaining))) left")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.Nav.secondaryText)
-                }
+    private var instruction: some View {
+        VStack(spacing: Theme.Space.l) {
+            header
+            Spacer(minLength: 0)
+            Image(systemName: symbol)
+                .font(.system(size: 120, weight: .bold))
+                .foregroundStyle(symbolColor)
+            Text(g.headline)
+                .font(.system(.largeTitle, design: .rounded).weight(.heavy))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Theme.Nav.text)
+                .minimumScaleFactor(0.6)
+            if !g.detail.isEmpty {
+                Text(g.detail)
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Theme.Nav.secondaryText)
             }
-            .accessibilityElement(children: .combine)
+            if g.obstacle == .caution && g.phase == .guiding {
+                Label("Obstacle ahead", systemImage: "exclamationmark.triangle.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.Nav.onPrimary)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, Theme.Space.s)
+                    .background(Theme.Nav.caution, in: Capsule())
+            }
+            Spacer(minLength: 0)
+            HoldToStopHint()
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.l)
+    }
+
+    private var header: some View {
+        VStack(spacing: 2) {
+            Text("To \(g.destinationLabel)")
+                .font(.headline)
+                .foregroundStyle(Theme.Nav.text)
+            if let remaining = g.distanceRemaining {
+                Text("\(SpokenText.capitalizingFirst(SpokenText.distance(remaining))) left")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.Nav.secondaryText)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Test tools for a sighted helper, only with debugging tools on.
+    private var debugRow: some View {
+        HStack {
             Spacer()
             Button("Escort") { showEscort = true }
                 .font(.subheadline.weight(.semibold))
@@ -121,13 +112,8 @@ struct GuidingView: View {
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
                 .background(Theme.Nav.surface, in: Capsule())
-                .accessibilityHidden(true) // for the sighted escort; keeps VoiceOver focus on guidance
+                .accessibilityHidden(true) // keeps VoiceOver focus on guidance
         }
-    }
-
-    private var pauseActionName: String {
-        guard model.supportsPause else { return "Repeat instruction" }
-        return model.isPaused ? "Resume guidance" : "Pause guidance"
     }
 
     private var symbol: String {

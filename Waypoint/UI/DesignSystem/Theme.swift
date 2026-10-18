@@ -67,7 +67,10 @@ extension NodeKind {
         case .stairs: return "Stairs"
         case .elevator: return "Elevator"
         case .room: return "Room"
-        case .junction: return "Junction"
+        // "Point" = a custom marker the volunteer names themselves. Stored as the existing `.junction` kind so the
+        // map file format does not change (older builds and the web viewer still read it); junctions tagged
+        // before 2026-10-18 show as "Point" too.
+        case .junction: return "Point"
         }
     }
 
@@ -78,12 +81,13 @@ extension NodeKind {
         case .stairs: return "figure.stairs"
         case .elevator: return "arrow.up.arrow.down.square"
         case .room: return "mappin.and.ellipse"
-        case .junction: return "arrow.triangle.branch"
+        case .junction: return "mappin"
         }
     }
 
     /// Kinds the volunteer can tag, in palette order.
-    static let taggable: [NodeKind] = [.room, .door, .stairs, .elevator, .junction]
+    /// Elevator and junction left the palette on 2026-10-18; maps that already contain them still work.
+    static let taggable: [NodeKind] = [.room, .door, .stairs, .junction]
 }
 
 /// Dims slightly while pressed; no scaling, so it is safe with Reduce Motion.

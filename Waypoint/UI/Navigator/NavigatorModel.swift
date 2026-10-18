@@ -9,6 +9,12 @@
 //                                             (one voice at a time, UI_PLAN §7 principle 6).
 //           Safety: stopping is explicit; after arrival the engine is stopped a few seconds later so the
 //           arrival sentence is not cut off.
+// Update 2026-10-18 (branch final-ui-changes):
+//             * Before the search starts, `preNavigationBriefing` is spoken (hold the phone upright at chest level;
+//               press and hold the screen to stop) and the search begins only once it has finished (`isBriefing`).
+//             * Finding the position never gives up on its own: a positioning failure is announced with
+//               `strugglingMessage` and the search restarts (LocalizingView repeats the message every 15 s).
+//               Only "there is no route" ends the attempt: it is said, and the user is back at the places list.
 // Threading: main thread only.
 // Status:   SCAFFOLD, UNVERIFIED ON DEVICE.
 //
@@ -31,6 +37,32 @@ final class NavigatorModel: ObservableObject {
     /// False until `configure` ran; the flow view renders nothing before that, so no screen (and no spoken
     /// prompt) appears with the wrong number of maps.
     @Published private(set) var isConfigured = false
+    /// True while the pre-navigation instructions are being spoken, before the search starts.
+    @Published private(set) var isBriefing = false
+
+    /// The map and store of the route being run, kept so the search can restart without the user.
+    private var activeMap: BuildingMap?
+    private var activeStore: MapStore?
+    /// Bumped whenever a run is stopped or restarted, so a delayed step from an older run does nothing.
+    private var runToken = 0
+
+    /// How to stop, worded for how the user operates the screen.
+    static var stopInstruction: String {
+        Announcer.isVoiceOverRunning
+            ? "To stop navigation, double tap the screen, then confirm."
+            : "To stop navigation, press and hold the screen."
+    }
+
+    /// Spoken after Start guidance, before the search for the user's position begins.
+    static var preNavigationBriefing: String {
+        "Before we start: hold the phone upright at chest level, with the back camera facing forward. \(stopInstruction)"
+    }
+
+    /// Spoken when the position has not been found for a while (every 15 s, see LocalizingView), and after a
+    /// positioning failure before the search restarts.
+    static var strugglingMessage: String {
+        "I'm having trouble finding your starting position. Move slightly, stand still, then slowly turn left and right. \(stopInstruction)"
+    }
 
     // MARK: Setup
 
@@ -87,29 +119,63 @@ final class NavigatorModel: ObservableObject {
 
     // MARK: Running
 
+    /// Start guidance: speak the pre-navigation instructions, then (once they have been said) start looking for
+    /// the user's position. Holding the screen during the instructions stops everything, as at any other time.
     func start(map: BuildingMap, store: MapStore) {
         guard let destination else { return }
         stopService()
         mode = ServiceMode.current
-        let service = ServiceFactory.makeGuidanceService(mode: mode, store: store)
-        self.service = service
-        service.onUpdate = { [weak self] snapshot in self?.receive(snapshot) }
+        activeMap = map
+        activeStore = store
         isPaused = false
         guidance = GuidanceSnapshot(phase: .localizing, destinationLabel: displayName(destination))
         flow.start()
         UIApplication.shared.isIdleTimerDisabled = true
+        isBriefing = true
         Announcer.stop()
+        Announcer.say(Self.preNavigationBriefing, interrupt: true)
+        let token = runToken
+        afterSpeechFinishes(token: token) { [weak self] in self?.beginSearch(token: token) }
+    }
+
+    /// Creates the guidance service and starts it: the search for the user's position, then guidance.
+    private func beginSearch(token: Int) {
+        guard token == runToken, flow.step == .active,
+              let map = activeMap, let store = activeStore, let destination else { return }
+        isBriefing = false
+        let service = ServiceFactory.makeGuidanceService(mode: mode, store: store)
+        self.service = service
+        service.onUpdate = { [weak self] snapshot in self?.receive(snapshot) }
         if !service.speaksForItself {
-            Announcer.say("Starting guidance to \(displayName(destination)). Finding your position. Slowly turn left and right.", interrupt: true)
+            Announcer.say("Finding your position. Stand still, then slowly turn left and right.")
         }
         service.start(map: map, destination: destination, from: startNode)
     }
 
-    /// Retry after a localization failure.
-    func retry(map: BuildingMap, store: MapStore) {
-        flow.stop()
-        flow.chooseDestination()
-        start(map: map, store: store)
+    /// Positioning failed: drop this attempt and search again shortly, until found or the user stops.
+    private func searchAgain() {
+        service?.onUpdate = nil
+        service?.stop()
+        service = nil
+        runToken += 1
+        let token = runToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.beginSearch(token: token) }
+    }
+
+    /// Runs `then` once the app's voice has finished the current line (polled; `Speaker` has no callback), or
+    /// after 12 s at most. Does nothing if the run was stopped meanwhile.
+    private func afterSpeechFinishes(token: Int, waited: TimeInterval = 0, _ then: @escaping () -> Void) {
+        let step: TimeInterval = 0.25
+        DispatchQueue.main.asyncAfter(deadline: .now() + step) { [weak self] in
+            guard let self, token == self.runToken else { return }
+            let elapsed = waited + step
+            // Wait at least 0.75 s so a line that is just starting counts as speaking.
+            if elapsed < 0.75 || (Speaker.shared.isSpeaking && elapsed < 12) {
+                self.afterSpeechFinishes(token: token, waited: elapsed, then)
+            } else {
+                then()
+            }
+        }
     }
 
     func stop() {
@@ -183,6 +249,18 @@ final class NavigatorModel: ObservableObject {
     private func receive(_ new: GuidanceSnapshot) {
         let old = guidance
         guidance = new
+        if case .failed(let message) = new.phase, flow.step == .active {
+            if message.hasPrefix("There is no route") {
+                // Retrying cannot help: say so and go back to the places list.
+                stopService()
+                flow.stop()
+                Announcer.say("\(message) Choose another place.", interrupt: true)
+            } else {
+                Announcer.say(Self.strugglingMessage, interrupt: true)
+                searchAgain()
+            }
+            return
+        }
         if !(service?.speaksForItself ?? true) { announceChange(from: old, to: new) }
 
         if new.phase == .arrived && flow.step == .active {
@@ -220,6 +298,8 @@ final class NavigatorModel: ObservableObject {
     }
 
     private func stopService() {
+        runToken += 1 // cancels a pending briefing wait or search restart
+        isBriefing = false
         service?.onUpdate = nil
         service?.stop()
         service = nil

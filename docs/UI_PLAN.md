@@ -535,3 +535,22 @@ Differences from the plan above (the plan text is kept as written):
 - The navigator renders nothing until its model has loaded the maps, so a wrong first screen is never announced.
 - CI (task 0.2 / INF-2) is **not** added in this change; it still needs a decision on runner minutes (ROADMAP §9 Q2).
 
+---
+
+## 14. UI clean-up (Update 2026-10-18, U3 with Claude, branch `final-ui-changes`)
+
+Decided with U3 (no Gemini / voice chat: dropped). Not compiled yet; UNVERIFIED ON DEVICE.
+- **Tap to place** (from `ui-updates`, re-applied onto main): tap the camera to pin a spot up to 6 m away, name it
+  (optional), pick the type; stairs open the stairs sheet and are saved at the spot. Session-frame point converted with
+  CaptureController's own `mapPoint`, so manual extension alignment applies to it.
+- **Markers:** Room, Door, Stairs, Point. Point is stored as the existing `junction` kind (no file-format change);
+  side effects: an extension may attach to a nearby Point like to a junction, and an unnamed Point is not flagged in Review.
+- **Debugging tools** (Settings, one switch, default off; `UIPrefs.debugTools`): off = New interface, Live on LiDAR /
+  Demo data otherwise, fingerprints, floor-drop detection and overlay off; developer options, navigator test tools and
+  scanner technical numbers hidden. Launch arguments (UI tests, make targets) still override.
+- **Top bar** (`TopNavBar`): Back left, Exit/Done right on every pre-route navigator screen and Scanner Setup/Review/Saved;
+  main actions stay at the bottom.
+- **Navigating:** pre-navigation instructions first, then the search; whole screen is hold-to-stop (`HoldToStopSurface`,
+  VoiceOver double tap + confirm); no help screen while finding the position, a reminder every 15 s; "no route" returns
+  to the places list. `HoldToConfirmButton` removed (unused).
+

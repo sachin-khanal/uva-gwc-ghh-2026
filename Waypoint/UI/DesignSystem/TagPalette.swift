@@ -1,7 +1,7 @@
 //
 // File:     Waypoint/UI/DesignSystem/TagPalette.swift
 // Owner:    U3 (UI flows)
-// Purpose:  Grid of large tag buttons (Room, Door, Stairs, Elevator, Junction) for the live scan screen.
+// Purpose:  Grid of large tag buttons (Room, Door, Stairs, Point - NodeKind.taggable) for the live scan screen.
 //           Adaptive columns so it reflows at large Dynamic Type sizes instead of truncating.
 // Status:   DONE.
 //

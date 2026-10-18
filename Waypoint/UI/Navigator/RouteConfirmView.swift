@@ -14,6 +14,7 @@ struct RouteConfirmView: View {
     let destination: MapNode
     let onStart: () -> Void
     let onChange: () -> Void
+    let onExit: () -> Void
 
     @State private var headphones = AudioRoute.headphonesConnected
 
@@ -24,7 +25,9 @@ struct RouteConfirmView: View {
         NavScreen(
             title: name,
             subtitle: summary?.shortSummary,
-            prompt: "\(summary?.spokenSummary ?? name) Tap the large yellow button at the bottom of the screen to start."
+            prompt: "\(summary?.spokenSummary ?? name) Tap the large yellow button at the bottom of the screen to start.",
+            back: TopNavAction(title: "Places", hint: "Choose a different destination.", action: onChange),
+            exit: TopNavAction(title: "Exit", systemImage: "xmark", hint: "Returns to the home screen.", action: onExit)
         ) {
             VStack(spacing: Theme.Space.m) {
                 if let summary, summary.hasStairs {
@@ -51,8 +54,6 @@ struct RouteConfirmView: View {
 
             HeroButton(title: "Start guidance", subtitle: "to \(name)", systemImage: "figure.walk",
                        style: .navPrimary, hint: "Starts finding your position, then guides you with sound.", action: onStart)
-
-            HeroButton(title: "Change destination", systemImage: "chevron.left", style: .navSecondary, action: onChange)
         }
         .accessibilityAction(.magicTap) { onStart() }
         .onAppear { headphones = AudioRoute.headphonesConnected }

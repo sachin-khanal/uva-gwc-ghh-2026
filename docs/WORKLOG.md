@@ -1,5 +1,34 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for U3) — UI clean-up on final-ui-changes: tap to place, Point marker, debugging switch, top bars, hold-to-stop navigation   [tags: BUILD]
+Area: shared UI (U3) + small additive changes in A/B files. Branch `final-ui-changes` from main 6ebe93e. Spec agreed with U3 in chat
+  (UI_PLAN §14). Nothing from Gemini / navigation-overhaul brought over.
+Files created:  `Flows/TapPlacement.swift` + `TapPlacementTests.swift` (copied from ui-updates 69eb9ce), `UI/DesignSystem/TopNavBar.swift`,
+  `UI/DesignSystem/HoldToStopSurface.swift`.
+Files deleted:  `UI/DesignSystem/HoldToConfirmButton.swift` (no longer used).
+Files edited:
+- A (additive only): `Capture/CaptureController.swift` +`tagPOI(kind:label:stairs:atWorld:)`; `Scan/LiveScanView.swift` +optional `target` pin.
+- B (additive only): `Guidance/Speaker.swift` +read-only `isSpeaking` (the navigator waits for the pre-navigation line to finish).
+- `Services/ScanService.swift`, `LiveScanService.swift`, `MockScanService.swift`: surfacePoint / cameraPosition / tag(at:) (no defaults).
+- `Services/ServiceMode.swift`: `UIPrefs.debugTools`, `debugToolsOn`, `isLaunchArgument`, `developerValue`, `newInterfaceEnabled`,
+  `debugOverlayEnabled`; fingerprints + floor-drop now honoured only with debugging on (or by launch argument); `ServiceMode.current`
+  falls back to `defaultMode` with debugging off.
+- `UI/SettingsView.swift` (rewritten: Navigation, Debugging, developer sections), `UI/RootView.swift` (effective interface).
+- Scanner: `Theme.swift` (palette Room/Door/Stairs/Point; junction displays as "Point"), `TagPalette.swift` (comment),
+  `ScanSessionModel.swift` (pending spot), `LiveScanScreen.swift` (tap layer, pin, spot card, debug-only numbers, keyboard-safe panel),
+  `ScanLibraryView.swift`, `ScanReviewView.swift`, `ScanSetupView.swift`, `ScanShareView.swift` (top bars, debug-only numbers).
+- Navigator: `NavigatorModel.swift` (briefing then search, keep searching, no-route returns to places; `retry` removed),
+  `NavigatorFlowView.swift` (NavScreen top bar), `BuildingPickerView`, `DestinationPickerView` ("Say a destination" debug-only),
+  `RouteConfirmView` (+onExit), `ArrivedView`, `LocalizingView` and `GuidingView` (rewritten: whole screen hold-to-stop).
+- `WaypointUITests.swift`: `testNewScannerPauseAndCoverageToggle` passes `-ui.debugTools YES` (the toggle is a debugging tool now).
+- Docs: `docs/UI_PLAN.md` §14, `docs/TESTING.md` rows 4.10-4.17, this entry.
+Commands run:   none that compile (Windows, no Swift toolchain). Static review only: bracket balance on every edited Swift file, no
+  duplicate types, no `#Preview`, no leftover callers of removed APIs.
+NOT verified:   `make test`, `make typecheck`, `make uitest` (run on a Mac first). Everything is UNVERIFIED ON DEVICE: raycast accuracy
+  of tap to place, the speech wait before the search, hold-to-stop with and without VoiceOver, the 15 s reminders.
+Open problems / handoff: the Classic scanner (VolunteerView) still offers Elevator/Junction (Classic is debug-only and untouched).
+  `NavigatorModel.togglePause` is now unused (kept for the Escort panel's future use).
+
 ## 2026-10-18 - Codex for U3 - Preserve concurrent main updates before push
 GitHub main advanced to 7e03f83 during publication, so the initial push was rejected without changing remote main. Merged origin/main, retaining newer floor-aware arrival, obstacle/guidance and tooling fixes. Resolved conflicts in docs/WORKLOG.md (both histories), tools/test_validate_map.py and web/router.js (schema-4 comment additions; U3 stair validation retained). Files: incoming main changes plus those three resolutions. Floor 1 remains absent from final main tree and available on U3.
 Verified: after this merge Python 22/22, browser logic 58/58 and UI 23/23 PASS; git diff --check clean. NOT verified: native make test/typecheck unavailable as already attempted on Windows; SQL not applied; UNVERIFIED ON DEVICE.

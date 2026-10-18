@@ -44,19 +44,44 @@ enum UIPrefs {
 
     /// Show the sighted debug overlay (camera + computed route) during guidance. Default false.
     static let debugOverlay = "ui.debugOverlay"
+    /// Settings > "Show debugging tools". Default OFF. While off, every developer option below falls back to
+    /// its safe default and every test tool is hidden (branch final-ui-changes, 2026-10-18):
+    ///   * interface = New, data source = Live on a LiDAR iPhone / Demo data otherwise (`ServiceMode.defaultMode`);
+    ///   * visual fingerprints, floor-drop detection and the guiding debug overlay = off;
+    ///   * hidden: the Escort panel, the demo "Say a destination" button, scanner technical numbers.
+    /// Turning it back on restores whatever was chosen before; nothing stored is thrown away.
+    static let debugTools = "ui.debugTools"
     static func recentsKey(mapId: UUID) -> String { "ui.recents.\(mapId.uuidString)" }
 }
 
 extension UIPrefs {
-    /// Defaults to false: see `floorDropDetection`.
-    static var floorDropDetectionEnabled: Bool {
-        UserDefaults.standard.bool(forKey: UIPrefs.floorDropDetection)
+    static var debugToolsOn: Bool { UserDefaults.standard.bool(forKey: debugTools) }
+
+    /// True when `key` was passed as a launch argument (`-ui.newInterface NO`, as the UI tests and `make` targets
+    /// do). An explicit argument always wins over the debugging switch, so scripted runs keep working with it off.
+    static func isLaunchArgument(_ key: String) -> Bool {
+        UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[key] != nil
     }
 
-    /// Defaults to false: see `visualFingerprints`.
-    static var visualFingerprintsEnabled: Bool {
-        UserDefaults.standard.bool(forKey: UIPrefs.visualFingerprints)
+    /// A developer option's stored value, honoured only while debugging tools are on (or when set by launch argument).
+    static func developerValue(_ key: String) -> Bool {
+        (debugToolsOn || isLaunchArgument(key)) && UserDefaults.standard.bool(forKey: key)
     }
+
+    /// The interface to show: New unless debugging tools (or a launch argument) say otherwise.
+    static var newInterfaceEnabled: Bool {
+        guard debugToolsOn || isLaunchArgument(newInterface) else { return true }
+        return UserDefaults.standard.object(forKey: newInterface) == nil
+            ? newInterfaceDefault : UserDefaults.standard.bool(forKey: newInterface)
+    }
+
+    /// Defaults to false: see `floorDropDetection`.
+    static var floorDropDetectionEnabled: Bool { developerValue(floorDropDetection) }
+
+    /// Defaults to false: see `visualFingerprints`.
+    static var visualFingerprintsEnabled: Bool { developerValue(visualFingerprints) }
+
+    static var debugOverlayEnabled: Bool { developerValue(debugOverlay) }
 }
 
 enum ServiceMode: String, CaseIterable, Identifiable {
@@ -84,8 +109,10 @@ enum ServiceMode: String, CaseIterable, Identifiable {
     /// on a phone that cannot scan (the new screens still run). Anyone can change it in Settings.
     static var defaultMode: ServiceMode { DeviceCapabilities.hasLiDAR ? .live : .mock }
 
+    /// The chosen data source while debugging tools are on (or set by launch argument); otherwise `defaultMode`.
     static var current: ServiceMode {
-        ServiceMode(rawValue: UserDefaults.standard.string(forKey: UIPrefs.serviceMode) ?? "") ?? defaultMode
+        guard UIPrefs.debugToolsOn || UIPrefs.isLaunchArgument(UIPrefs.serviceMode) else { return defaultMode }
+        return ServiceMode(rawValue: UserDefaults.standard.string(forKey: UIPrefs.serviceMode) ?? "") ?? defaultMode
     }
 }
 
