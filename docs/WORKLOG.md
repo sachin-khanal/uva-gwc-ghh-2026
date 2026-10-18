@@ -1,5 +1,306 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — The way-round advisor was reading a sensor window too narrow to see sideways   [tags: BUG]
+Area: B (navigation/feedback) / C (vision wiring). Branch `navigation-overhaul`.
+Anmol, after the F-5 fix shipped: "when facing a wall / very close to a chair, it just says stop rather than how
+to get around it". The F-5 fix was therefore INCOMPLETE - the advice was reaching the speaker fine, but the
+advisor almost never had a side to suggest.
+
+FOUND: there are TWO independent measurements of how much room is on each side, and the advisor was wired to the
+wrong one.
+  * `DepthHit.clearance`, built in `ObstacleDetector.centerHit`, only samples the middle 28 % of the frame
+    (`corridorRowFractions = 0.36...0.64`) and splits left/right at +/-0.35 m lateral. That band is barely wider
+    than the "ahead" corridor itself, so `left`/`right` came back nil or near-identical.
+  * `SceneContext`, built in `ObstacleDetector.sideClearances`, scans the FULL width (rows 0.05...0.95) and
+    records how far the nearest thing on each side is from the centre line.
+`AvoidanceAdvisor` was fed the first. With both sides equal, `betterDistance - otherDistance` was ~0, never
+reaching `decisiveMargin` (0.6), so `advise` returned nil nearly every time and the user got "Stop." (and, since
+the earlier fix, "Back up slowly.") but never "Slightly left".
+Fixed: `Waypoint/Navigation/NavigationController.swift` now builds the advisor's `Clearance` from `sceneContext`
+(wide scan) with `ahead` still from the centre hit. `AvoidanceAdvisor` itself is unchanged - its thresholds
+(`minimumUsable` 1.2 m, `decisiveMargin` 0.6 m) only ever made sense against a real sideways measurement, which
+is what they now get.
+
+Also checked this block, at Anmol's request (F-4, relocalization coaching): the good spoken coaching line
+("Starting guidance to X. Finding your position. Slowly turn left and right.") exists at
+`NavigatorModel.swift:103` - but that is the NEW Navigator UI flow. The recorded walk's "Navigating." at 0:05
+comes from `NavigationController.swift:264`, a DIFFERENT flow, so `NavigatorModel`'s line never played. On the
+flow actually in use the spoken coaching is the planner's new "Finding your position. Stand still, then turn
+slowly.", which had not been installed at the time of Anmol's report. It is said ONCE; if relocalization drags
+there is then silence. Not changed.
+
+Verified: `make test` -> **354 tests, 0 failures**. `make typecheck` OK (64 app files). `make check` ->
+BUILD SUCCEEDED. Built, signed and installed on Anmol's iPhone 15 Pro (the first install to carry the
+"Stop. Stop. Stop." fixes, which had failed to install earlier when the phone dropped off).
+NOT verified: UNVERIFIED ON DEVICE. Whether the wide scan actually produces a decisive side in a real hallway is
+exactly the open question - `minimumUsable = 1.2 m` of sideways room is a lot in a narrow corridor, so the
+likely remaining failure is still falling through to "Back up slowly." where a human would step aside.
+Open / handoff: F-3 (the on-route tolerance) is UNDECIDED and needs Anmol's observation: are the label offsets
+mostly at doors/rooms (widen `ArrivalRadius` only - no regression risk) or systematic along the route (must
+loosen `rerouteMeters`, which re-opens the "did not recalculate until I was very far off" complaint that caused
+it to be tightened 5 -> 3). `maxOffRouteMeters` (8) is NOT that knob: it only guards the progress projection and
+is near-dead because the 3 m re-route fires first.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — "Stop. Stop. Stop. Stop." then the sentence: classifier flicker + safety cues cutting each other off   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`. Device report by Anmol after the F-1/F-7 fixes
+landed ("amazing fix, but sometimes it'll say Stop Stop Stop Stop then finish the sentence").
+
+CAUSE 1 - the warning was re-issued every tick. `FeedbackPlanner` re-announces an obstacle when the LEVEL or the
+KIND changes. Standing in front of one wall, the classifier flickers (wall -> unknown -> table -> wall) and each
+flip read as a brand new obstacle. `lastObstacleKind` is updated every tick, so an A/B/A/B flicker produces a
+"change" every single tick.
+CAUSE 2 - each re-issue cut off the one before it. A STOP is `.critical`, which means interrupt, so warning n+1
+silenced warning n after the word "Stop" - hence four stubs and only the last one reaching the part that says
+what the hazard actually is.
+
+Fixed (Anmol's own diagnosis: if the person has not moved, a new obstacle cannot have appeared):
+* `Package/.../Guidance/FeedbackPlanner.swift`: a change of KIND now only counts as news while `isMoving`.
+  Standing still, a different answer from the classifier is noise. A change of LEVEL is deliberately NOT gated -
+  an escalation to STOP must still be announced to a stationary user, which is the "somebody walks into your
+  path" case (covered by a test).
+* `Waypoint/Navigation/NavigationController.swift`: `isMoving` was TRANSLATION ONLY, so a user pivoting on the
+  spot counted as still - and they are not, because the camera then sees a genuinely different scene and a new
+  obstacle really can appear. `updateMovement` now samples camera YAW as well and treats >= 25 deg/s as moving
+  (shortest way round the circle, so crossing +/-pi is not read as a spin). Anmol asked for "gyroscope for
+  left/right turn"; the ARKit camera yaw gives exactly that with no CoreMotion and no `NSMotionUsageDescription`,
+  which the existing comment on this function explicitly set out to avoid.
+* `Package/.../Guidance/SpeechGate.swift` + `Waypoint/Guidance/Speaker.swift`: safety interrupts GUIDANCE, never
+  another safety line. `decide` takes a new `speakingPriority:` (defaulted, so existing callers are unaffected)
+  and a `.critical` arriving while another `.critical` is mid-sentence now ENQUEUES instead of interrupting.
+  `Speaker` tracks the priority of the line it is currently speaking. This is the backstop: even if some other
+  path re-issues a warning, the user can no longer be given a half-spoken one.
+
+Verified: `make test` -> **354 tests, 0 failures** (349 before; 5 new: safety does not interrupt safety, safety
+still interrupts guidance, flicker is ignored while stationary, a real change IS news while moving, escalation to
+STOP is never suppressed). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: ANYTHING on the phone. UNVERIFIED ON DEVICE. In particular the 25 deg/s turn threshold is a guess -
+too low and a stationary user's hand-shake reads as turning (so flicker is announced again), too high and a slow
+deliberate pivot reads as standing still (so a real new obstacle is suppressed). It needs a walk, and it is the
+one number here most likely to be wrong.
+Open / handoff: Anmol to re-walk and listen for (1) whether "Stop ..." now completes its sentence, (2) whether
+standing in front of a door still produces repeats, (3) whether turning on the spot toward something new is
+still announced promptly - that is the case the yaw threshold protects and the one that would break first.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The recorded walk: no turn was EVER spoken. Two causes, both fixed   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`. Evidence: Anmol's 45 s screen recording
+(`ScreenRecording_10-18-2026_01-48-29_1.mov`) with an auto-transcript checked against the on-screen captions.
+
+THE FINDING: across the whole route the screen showed "Turn around" (0:13), "Turn right 140 degrees" (0:14) and
+"Turn right" (0:19), and the voice track contains **no turn instruction at any point**. A blind user walking
+that route would have received zero route guidance; everything they heard was obstacle chatter. This is F-1 and
+F-7 together, and it is worse than either report suggested.
+
+Two independent causes, both required:
+1. `FeedbackPlanner` spoke a CAUTION at `.critical`, contradicting the contract stated a few lines above it
+   ("Only an obstacle at STOP range, or losing position, earns this"). `.critical` means interrupt. In a
+   cluttered apartment cautions fire every second or two.
+2. `Speaker.say`'s `.interrupt` branch did `pending = nil`: every interrupt destroyed the queued line. Since the
+   planner latches `lastKey` when it GENERATES a cue, a destroyed turn is never re-emitted.
+Together these guarantee that while obstacles are present no turn can ever be spoken. The same interrupt chain
+also chopped the cautions themselves into fragments - the transcript's "Careful. An obstacle. Careful. Careful.
+An obstacle ahead. Careful." at 0:14 is one sentence being cut by the next, repeatedly (that is F-6's
+"talks over itself").
+
+Fixed:
+* `Package/.../Guidance/FeedbackPlanner.swift`: caution is now `.high` (queues) - a STOP is still `.critical`.
+  The file header's priority paragraph was itself out of date ("`.high` interrupts") and now states the real
+  contract.
+* `Waypoint/Guidance/Speaker.swift`: `.interrupt` KEEPS what is waiting, so the obstacle is spoken first and the
+  turn follows. `didCancel` no longer clears `pending` either - it would have undone this; `stop()` already
+  clears it explicitly. Staleness is still enforced by `maxQueuedAge` (4.5 s, raised earlier today).
+* `Package/.../Guidance/FeedbackPlanner.swift`: NEW `hasBeenTracking`. "Lost my position." was announced on the
+  FIRST untracked tick of every walk (heard at 0:06) because `lastTrackingOK` starts true - there was nothing to
+  lose yet, and the screen correctly read "Finding your position" at the same moment. A first fix now says
+  "Finding your position. Stand still, then turn slowly." at `.high`; a genuine loss keeps "Lost my position.
+  Hold still." at `.critical`.
+
+A test was WRONG, not just missing: `testCautionIsHighPriorityAndNamesTheObject` asserted `.critical` while its
+own name said high. The name recorded the original intent and the value had drifted, so the regression was
+pinned in place by its own test. Assertion corrected to match the name and the contract.
+
+Verified: `make test` -> **349 tests, 0 failures** (345 before; 4 new: caution queues, stop still interrupts,
+first fix is not reported as a loss, losing a real fix is critical; plus 2 corrected assertions).
+`make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: ANYTHING on the phone. UNVERIFIED ON DEVICE - the whole point is how it sounds while walking, and
+no walk has been done with these changes.
+Open / handoff:
+1. Anmol to re-walk the SAME route and compare against the recording. Success = the turns are actually spoken.
+   Another recording + transcript would be the best possible evidence; this one found more than the last three
+   device reports combined.
+2. Still unreconciled (F-1's other half): at 0:20 the voice said "Slightly left" (round the table) while the
+   screen said "Turn right" (the route). Both are correct and nothing relates them. Wording that joins the two
+   ("Slightly left round a table, then right toward Other Bathroom") is NOT implemented.
+3. `Speaker` keeps ONE pending line and, at EQUAL priority, the newer one wins - so a caution can still displace
+   a queued turn, just without destroying it outright. The existing comment says it wants "the most important
+   one offered - not simply the last", which equal-priority last-wins contradicts. Left alone deliberately:
+   deciding whether a turn should outrank a caution needs a walk, not a guess.
+4. Also seen in the transcript and NOT investigated: the opening briefing never played, and "You have arrived"
+   does not appear in the voice track although the screen shows it at 0:44. Both are consistent with being
+   interrupted away, so both may already be fixed by this change - check on the re-walk.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — F-5 and F-7 were ONE bug: a queued line died because the line ahead of it took too long to say   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`.
+
+FOUND: F-5 ("an obstacle said only Stop, with no way through") and F-7 ("sometimes it never says which
+direction to go, mostly while other announcements are happening") have the same single cause.
+The planner already emits the way round as its own `.high` line right after the `.critical` stop
+(`FeedbackPlanner.swift:233`), and `NavigationController.perform` sorts critical first - so "Stop. You are
+heading toward a wall." starts speaking and the advice goes into `Speaker.pending`. That sentence takes about
+2.4 s at the default rate plus `postUtteranceDelay`. `Speaker.maxQueuedAge` was **2.0 s**, so by the time
+`didFinish` offered the pending line its turn it was ALWAYS already stale, and it was discarded with
+"dropped stale line after 2.4s". A line only ever waits because the speaker is busy, so the budget was
+shorter than the wait it is meant to tolerate: every `.high` cue queued behind any sentence longer than two
+seconds was guaranteed to be thrown away. That is the way round never being heard (F-5) and a direction
+going unsaid under other traffic (F-7).
+
+Fixed:
+* `Waypoint/Guidance/Speaker.swift`: `maxQueuedAge` 2.0 -> **4.5 s**, with the reasoning in the comment. Long
+  enough to clear any single cue we speak, short enough to still drop a line that genuinely sat too long. The
+  opening briefing's separate 15 s budget (`openingMaxQueuedAge`) is unchanged.
+* `Package/.../Vision/AvoidanceAdvisor.swift`: NEW `isBoxedIn(_:)` - the way ahead is blocked and neither side
+  is a usable way round. The side-choosing logic moved into a private pure `bestSide(...)` used by both
+  `advise` and `isBoxedIn`, so the two can never disagree. `advise`'s behaviour and signature are unchanged.
+* `Package/.../Guidance/SpokenPhrases.swift`: NEW `TurnSpeech.backUp` = "Back up slowly."
+* `Package/.../Guidance/FeedbackPlanner.swift`: NEW `backUp: Bool = false` parameter. When the user is boxed
+  in, the stop warning is followed by "Back up slowly." instead of nothing at all. Uses the SAME
+  `announcedAvoidance` latch as the way round, so it is offered once per obstacle, and a way round always
+  wins over backing up - the two are never both spoken. A door on the route is still the way IN and never
+  earns a back-up cue.
+* `Waypoint/Navigation/NavigationController.swift`: computes `isBoxedIn` AFTER `advise` (which is what knows
+  whether a side was found) and passes it through `tick` to the planner.
+
+Deliberately NOT changed: `testTheWayRoundIsSaidOncePerObstacle` pins "said once, not nagged" as a design
+decision, so the latch stays and the new cue follows the same rule. The `.interrupt` path still discards a
+pending line (`Speaker.say`); whether a turn should survive a safety interrupt needs a walk to decide, not a
+guess. The planner still latches "announced" when it GENERATES a line, not when the speaker actually says it -
+with a 4.5 s budget that is far less likely to lose anything, but it is the remaining structural weakness
+behind F-7 and is the thing to fix properly if it recurs.
+
+Verified: `make test` -> **345 tests, 0 failures** (337 before; 8 new covering boxed-in detection, the
+advisor/planner agreeing, back-up wording, way-round-beats-back-up, once-per-obstacle, and the door-on-route
+exception). `make typecheck` OK (64 app files). `make check` -> **BUILD SUCCEEDED**.
+NOT verified: ANYTHING on the phone. No walk has been done with these changes - the 4.5 s figure is reasoned
+from the default speech rate, not measured on device, and whether 4.5 s is the right trade-off between "heard
+it at all" and "heard it too late" can only be judged by walking. UNVERIFIED ON DEVICE.
+Open / handoff: Anmol to walk a corridor and (1) reach a wall with a clear way round - expect "Stop ..." then
+"Slightly left, there is a wall ahead."; (2) reach a dead end / corner with no usable side - expect "Stop ..."
+then "Back up slowly."; (3) watch whether directions still go missing under heavy traffic. If a cue still
+disappears, grep the console for "dropped stale line after" - that log line names the exact text that was lost.
+F-1 (contradicting directions) is untouched and still needs its own walk.
+
+---
+
+## 2026-10-18 — Anmol (device walk, logged by Claude) — Field test of the merged branch: overall good, 8 findings for tomorrow   [tags: DEVICE, BUG]
+Area: B (navigation/feedback) mostly, A (relocalization), plus one routing question.
+Build: `navigation-overhaul` @ `fecc146` (= `origin/main` content + one WORKLOG commit), installed on Anmol's iPhone 15 Pro.
+Anmol's verdict: "works really good, I like it overall." Everything below is what to fix, not a reason to revert.
+NOT diagnosed on the machine: these are device observations. Where a cause is named it is a LEAD, not a verified fact,
+and is marked so. Several need another walk tomorrow before anyone changes code.
+
+**1. (CRITICAL) Contradicting directions.** Says "left" when the correct way is right; says "left" while the on-screen
+arrow points right. Not common, and sometimes the cues arrive in a different ORDER than the queue should produce.
+Lead (UNVERIFIED): speech and the arrow are produced from different places - `NavigationController.perform` sorts the
+spoken lines by priority separately from the visual heading, so a reordered or delayed line can be spoken against a
+heading that has since changed. Anmol will test this specifically tomorrow to pin down when it happens.
+
+**2. Routing prefers the volunteer's breadcrumb path over a shorter mapped way.** If the volunteer never physically
+walked a shortcut, the router will not use it, even when the map shows the space is open.
+Cause (known, by design today): routing is A* over the BREADCRUMB GRAPH; `MapBuilder.closeLoop` only ever joins nodes the
+volunteer actually stood at, so an unwalked shortcut has no edge and cannot be routed. This is the same issue as the
+earlier "why is it using the path I've gone rather than the built mesh" report. The intended fix is floor-grid routing
+over the LiDAR mesh (designed, approved in principle, NOT started) - see the movable/immovable obstacle discussion.
+Anmol considers this preference, not a blocker.
+
+**3. The active-path / arrival radius is too tight.** A labelled point can sit a little away from where it is drawn - a
+door point ended up further INTO the shut door than where it was labelled - so the user is judged off-route or
+not-arrived when they are in the right place.
+Relevant knobs: `ArrivalRadius` (room 2.5 m, door 1.2 m, stairs/elevator 1.5 m, else 1.0 m) and
+`RouteFollower.maxOffRouteMeters` (8 m). The door case is the tightest radius and the one that bit.
+
+**4. Relocalization needs very specific viewpoints, and the user is never told what to do.** It sometimes insists on
+seeing a particular spot before it recognises the space, with no instruction to pan slowly or walk around.
+This is the viewpoint-dependence of ARKit's world-map relocalization (the reason `CoverageTracker` exists). The coaching
+is already a known gap: `Relocalizer.swift` header, "TODO(A): surface 'move slowly / look around' coaching while
+.searching". Probably not fully fixable, but saying so out loud to the user costs little.
+
+**5. (MAJOR, REGRESSION) An obstacle says only "Stop", with no way through.** Reaching a wall produced a bare stop and no
+suggestion. This behaviour existed before and has been lost: `AvoidanceAdvisor`, `ObstacleSpeech.wayThrough` and
+`TurnSpeech.avoidance(side:obstacle:)` are all still present. Wanted back: "back up slightly", "turn slightly left",
+and the reasoned form "Slightly left, there is a wall ahead."
+Lead (UNVERIFIED, worth checking FIRST): the merge of 2026-10-18 06:20 added "my hint stays quiet whenever U2's advisor
+has a suggestion" as fix (4) of that entry. If that suppression is wider than intended, or if both paths suppress each
+other in some states, the result is exactly a bare "Stop". Start there.
+
+**6. One-shot lines get missed; priority and freshness fight each other.** Something said once can simply be misheard.
+Wanted: a little repetition WITHOUT spamming. Worst while the user is moving among several obstacles / turn options,
+where the priority rules and the `staysFresh` / `maxQueuedAge` rules interact badly and the app talks over itself.
+Knobs involved: `Speaker` (ONE pending slot, `maxQueuedAge = 2.0`, `staysFresh:`), `SpeechGate` (`.normal` is DROPPED
+while speaking), `FeedbackPlanner.directionCooldownSeconds = 1.5`. Needs more testing tomorrow before changing.
+
+**7. (BIG) Sometimes it never says which way to go at all.** Most often when other, higher-priority announcements are
+happening - an important instruction is simply never delivered. Connected to item 6.
+Anmol's proposed fix: when a higher-priority line pre-empts the queue, do not just drop what it displaced - append the
+next CORRECT instruction to be spoken after it, re-deriving it if a re-route or another priority event has changed the
+situation in the meantime. (Re-derive rather than replay: by the time the speaker is free the user has moved.)
+Mechanism that makes this happen today: `Speaker` keeps only one pending line and keeps the most IMPORTANT one, so a
+displaced normal-priority direction is gone for good, and `SpeechGate` drops `.normal` outright while speaking.
+To discuss properly tomorrow.
+
+**8. (QoL) Starting instructions for the blind user.** There is no orientation at the start of a walk explaining what is
+about to happen or how to hold the phone.
+
+Verified in this block: nothing was changed, so nothing to verify. The build itself is `fecc146`, whose `make test`
+(337 pass), `make typecheck` and `make check` results are recorded in the merge entry below.
+NOT verified: every lead marked UNVERIFIED above; none of items 1-8 has been reproduced on the machine or fixed.
+Open / handoff (tomorrow, Anmol): items 1, 5 and 7 are the ones that change whether a blind user can finish a route -
+do those first. Items 1, 6 and 7 all need another walk before code changes. Item 5 has the most concrete lead.
+Still unfixed from earlier tonight (diagnosed, file:line in the entry below): the 15 s save timeout reported as a
+failure, the 60 s "no 3D model" stopwatch, the slow USDZ export, the export reading paused-session Metal buffers,
+`CoverageTracker`'s absolute 2 m grid (the 59% after a full retrace), and the 1.0 m/3D vs 1.5 m/2D loop-closure
+threshold mismatch that makes the "check before sharing" warning impossible to clear.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Map backup read the wrong app container, so it backed up nothing   [tags: BUG, BUILD]
+Area: D (build system). Found while installing the merged branch on Anmol's phone.
+FOUND: `make install` and `make uitest` both depend on `backup-maps` (Makefile `:101`, `:130`) specifically so a reinstall
+cannot lose scans that can only be recreated by walking the building again. But `Makefile` called
+`sh scripts/phone-maps.sh backup` WITHOUT passing `BUNDLE_ID`, and the script defaults to
+`BUNDLE="${BUNDLE_ID:-io.github.sachin-khanal.waypoint.sachin}"` (`phone-maps.sh:11`) — U1's dev suffix. The Makefile
+already computes the right value (`BUNDLE_ID := $(BUNDLE_PREFIX).$(SUFFIX)`, `:34`, from `WAYPOINT_DEV_SUFFIX` in
+`Config/Local.xcconfig`) and uses it for every `devicectl process launch`, but not here. On any machine whose suffix is
+not `sachin` the backup queried a container that does not exist, got zero files, and printed
+"backup: no maps on the phone (or the app is not installed)" — which reads like "you have no scans", not "I looked in
+the wrong place". Silent no-op: the protection every install claimed to apply was never applied.
+Fixed: `Makefile` `backup-maps` and `restore-maps` now pass `BUNDLE_ID=$(BUNDLE_ID)` through to the script. The script
+needed no change — it already honours the env var. `restore-maps` had the same defect and would have restored into the
+wrong container.
+Verified: `DEVICE=<anmol's phone> make backup-maps` -> "backup: 5 file(s) -> ~/Library/Caches/Waypoint/map-backups/20261017-235526",
+42 MB: 2 real recordings (`map.json` + `worldmap-seg_*.arworldmap` each) plus the Rice Hall sample's `map.json`. The
+same command before the fix reported no maps on the same phone with the same 3 maps present. Restore precondition
+re-checked by hand (`ls Maps/*/worldmap-*.arworldmap` matches), so `restore-maps` would now accept this backup.
+Also verified in this block: the merged branch (`fecc146`) builds, signs, installs and launches on Anmol's iPhone 15 Pro
+(`make run` -> BUILD SUCCEEDED, "Launched application with io.github.sachin-khanal.waypoint.anmol bundle identifier",
+console "[app] INFO loaded 3 map(s)"). The reinstall preserved the existing maps.
+NOT verified: `restore-maps` end to end (not run — it would overwrite the phone's live maps); the backup against U1's
+own phone (where the old default happened to be correct, so nothing changes for U1); anything about scanning,
+navigation, the 3D viewer, Pause or the unscanned-areas overlay — none of the merged features were exercised, only
+install and launch.
+Open / handoff:
+1. Neither existing recording has a `model-*.usdz`, because mesh export arrived in `3c666b0` (main) after both scans
+   were made. `ScanReviewView:206` gates "View 3D model" on `store.hasModel(mapId:)`, so for those two maps the button
+   is simply absent — no error, nothing to see. Testing the 3D viewer needs a NEW scan on this build.
+2. Same for the return-walk coverage: it is a property of how the volunteer walked, not of the file, so the two old
+   one-direction maps will still struggle on the walk back whatever code runs against them.
+3. Worth a look by U1/U3: other scripts under `scripts/` may carry the same hardcoded `.sachin` default. Only
+   `phone-maps.sh` was checked.
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul` (27 commits)   [tags: BUILD]
 Area: shared.
 Brings in `main`'s mesh pipeline and cloud/web work: `MeshExporter` (LiDAR mesh -> cropped -> decimated -> USDZ beside

@@ -31,7 +31,16 @@ final class Speaker: NSObject {
     /// A queued line older than this is thrown away instead of spoken. Queuing stopped guidance being
     /// chopped into fragments, but a direction spoken two seconds late to somebody who has kept
     /// walking is worse than silence - it contradicts what they can feel (device report 2026-10-17).
-    private static let maxQueuedAge: TimeInterval = 2.0
+    ///
+    /// The budget must be LONGER THAN ONE SPOKEN LINE, and at 2.0 s it was not. A line only ever waits
+    /// because the speaker is busy, so it starts its life already ageing: queued behind "Stop. You are
+    /// heading toward a wall." (~2.4 s at the default rate, plus `postUtteranceDelay`) it was always
+    /// past 2.0 s by the time `didFinish` offered it a turn, and was dropped every single time
+    /// ("dropped stale line after 2.4s"). That is why an obstacle announced the stop but never the way
+    /// round it, and why a direction sometimes went unsaid while other announcements were happening
+    /// (device report 2026-10-18, findings F-5 and F-7). The wait is structural, not lateness.
+    /// 4.5 s clears any single cue we speak while still dropping a line that genuinely sat too long.
+    private static let maxQueuedAge: TimeInterval = 4.5
     /// The OPENING briefing (where you are, what is around, how to go) is the one line that must not be thrown away as stale, and a newer
     /// cue must not displace it: it is spoken once, before the user has started walking, so its age does not make it wrong (2026-10-18).
     private static let openingMaxQueuedAge: TimeInterval = 15
@@ -41,6 +50,9 @@ final class Speaker: NSObject {
     /// At most ONE line waits its turn, and it is always the NEWEST one. A backlog is what produced
     /// contradictory directions; the latest cue is the only one that still describes the world.
     private var pending: (text: String, priority: SpeechPriority, queuedAt: TimeInterval, maxAge: TimeInterval)?
+    /// Priority of the line being spoken right now, so `SpeechGate` can keep one safety cue from
+    /// cutting off another. nil when nothing is being said.
+    private var speakingPriority: SpeechPriority?
 
     private override init() {
         super.init()
@@ -63,12 +75,19 @@ final class Speaker: NSObject {
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false) {
-        switch gate.decide(text: text, priority: priority, isSpeaking: synthesizer.isSpeaking, now: now) {
+        switch gate.decide(text: text, priority: priority, isSpeaking: synthesizer.isSpeaking, now: now,
+                           speakingPriority: speakingPriority) {
         case .drop:
             return
         case .interrupt:
-            // Safety only. Anything waiting is now stale, so it goes too.
-            pending = nil
+            // Safety only - and what is waiting is KEPT. It used to be discarded here, on the reasoning
+            // that a safety cue makes everything else stale. In a cluttered room that silenced route
+            // guidance completely: obstacle cues fired every second or two, each one wiped the queued
+            // turn, and the planner had already recorded that turn as announced, so it was never
+            // emitted again. A 45 s recorded walk (2026-10-18) shows the screen giving "Turn around",
+            // then "Turn right 140 degrees", while the voice said nothing about any turn for the whole
+            // route - findings F-1 and F-7. The obstacle is spoken first, then the turn follows, and
+            // `maxQueuedAge` still throws the turn away if the warning ran long.
             synthesizer.stopSpeaking(at: .immediate)
         case .enqueue:
             // Hold it ourselves rather than handing it to AVSpeechSynthesizer, whose own queue cannot
@@ -83,10 +102,11 @@ final class Speaker: NSObject {
             break
         }
 
-        speakNow(text)
+        speakNow(text, priority: priority)
     }
 
-    private func speakNow(_ text: String) {
+    private func speakNow(_ text: String, priority: SpeechPriority) {
+        speakingPriority = priority
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.voice // nil = the system's default voice for the phone's language
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -105,11 +125,12 @@ final class Speaker: NSObject {
             Log.guidance.info("dropped stale line after \(String(format: "%.1f", age))s: \(next.text)")
             return
         }
-        speakNow(next.text)
+        speakNow(next.text, priority: next.priority)
     }
 
     func stop() {
         pending = nil
+        speakingPriority = nil
         synthesizer.stopSpeaking(at: .immediate)
         gate.reset()
     }
@@ -118,11 +139,15 @@ final class Speaker: NSObject {
 extension Speaker: AVSpeechSynthesizerDelegate {
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        speakingPriority = nil
         speakPendingIfFresh()
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        // Cancelled means something more important is being said; whatever was waiting is stale.
-        pending = nil
+        // Deliberately does NOT clear `pending`. The only two things that cancel an utterance are a
+        // safety interrupt, which now keeps what is waiting (see `say`), and `stop()`, which clears
+        // `pending` itself before cancelling. Clearing it here would undo the interrupt fix.
+        // Staleness is still enforced, by `maxQueuedAge` in `speakPendingIfFresh`.
+        speakingPriority = nil
     }
 }

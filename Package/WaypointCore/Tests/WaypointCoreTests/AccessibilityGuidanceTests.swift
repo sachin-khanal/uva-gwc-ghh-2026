@@ -293,10 +293,13 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertTrue(again.contains(.haptic(.obstacleStop)))
     }
 
+    /// The assertion said `.critical` while the test's own name said high - and `.critical` cuts off
+    /// whatever is being said, which in a cluttered room meant the route instruction never got out
+    /// (recorded walk 2026-10-18, F-1/F-7). Corrected to match the name and the documented contract.
     func testCautionIsHighPriorityAndNamesTheObject() {
         var p = FeedbackPlanner()
         let a = p.plan(instruction: nil, obstacle: .caution, trackingOK: true, report: ObstacleReport(kind: .person, side: .left, distanceMeters: 1.9))
-        XCTAssertEqual(a.first, .speak("Careful. A person on your left, about 3 steps.", priority: .critical))
+        XCTAssertEqual(a.first, .speak("Careful. A person on your left, about 3 steps.", priority: .high))
         XCTAssertTrue(a.contains(.haptic(.obstacleCaution)))
     }
 

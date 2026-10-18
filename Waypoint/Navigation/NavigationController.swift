@@ -114,7 +114,7 @@ final class NavigationController: ObservableObject {
     private var lastRouteComputation: TimeInterval = -.greatestFiniteMagnitude
     private var lastRerouteAnnouncement: TimeInterval = -.greatestFiniteMagnitude
     /// Recent positions, for working out whether the user is actually walking.
-    private var lastMovementSample: (position: SIMD3<Float>, time: TimeInterval)?
+    private var lastMovementSample: (position: SIMD3<Float>, yaw: Float, time: TimeInterval)?
     private var isMoving = true
     /// Below this speed we treat the user as standing still. A slow shuffle is ~0.3 m/s; this is well
     /// under that, so only a genuine stop counts.
@@ -122,6 +122,11 @@ final class NavigationController: ObservableObject {
     /// How far apart movement samples are taken. Shorter than this and ARKit's pose noise looks like
     /// walking; longer and we react too slowly.
     private static let movementSampleSeconds: TimeInterval = 0.6
+    /// Turning on the spot counts as moving, because the camera then sees a genuinely different scene
+    /// and a new obstacle really can appear. Translation alone is not enough: a user who pivots to
+    /// face a doorway has not travelled a centimetre (team note 2026-10-18 - "gyroscope for left/right
+    /// turn"). Taken from the ARKit camera yaw, so it needs no CoreMotion and no `NSMotionUsageDescription`.
+    private static let turningDegreesPerSecond: Float = 25
     /// How far off the route counts as "off route". Still wider than a corridor so normal drift is
     /// ignored, but 5 m meant walking the wrong way for several seconds before anything happened
     /// (device report 2026-10-17).
@@ -287,9 +292,24 @@ final class NavigationController: ObservableObject {
         sceneContext = ObstacleDetector.sideClearances(in: frame, ahead: hit?.depth)
         if trackingOK { signReader.process(frame) }
         // Is there a clearly better way round? Suggestion only - see AvoidanceAdvisor's safety note.
-        let avoidTowards = avoidance.advise(hit?.clearance ?? .init())
+        // Side room comes from the WIDE scan (`sceneContext`), not from `hit.clearance`. The latter is
+        // built inside `centerHit`, which only samples the middle 28% of the frame
+        // (`corridorRowFractions`) and splits left/right at +/-0.35 m - a band so narrow it can barely
+        // see sideways, so both sides came back nil or near-identical, no side ever won by
+        // `decisiveMargin`, and `advise` returned nil almost every time. The user got "Stop." with no
+        // way round even when there was obviously room to one side (device report 2026-10-18).
+        // `sideClearances` scans the full width and measures how far the nearest thing on each side is
+        // from the centre line, which is exactly the question "can I step that way".
+        let clearance = AvoidanceAdvisor.Clearance(ahead: hit?.depth,
+                                                   left: sceneContext?.leftClearance,
+                                                   right: sceneContext?.rightClearance)
+        let avoidTowards = avoidance.advise(clearance)
+        // ...and if there is not, the user still needs somewhere to go. Must be asked AFTER `advise`,
+        // which is what knows whether a way round was found (F-5, 2026-10-18).
+        let backUp = avoidance.isBoxedIn(clearance)
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
-             nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards)
+             nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards,
+             backUp: backUp)
     }
 
     /// Simulated driver: one timer tick.
@@ -320,7 +340,8 @@ final class NavigationController: ObservableObject {
     // MARK: The shared loop
 
     private func tick(camera: simd_float4x4, mapToWorld: simd_float4x4, trackingOK: Bool, nearestDepth: Float?,
-                      report: ObstacleReport?, time: TimeInterval, avoidTowards: Side? = nil) {
+                      report: ObstacleReport?, time: TimeInterval, avoidTowards: Side? = nil,
+                      backUp: Bool = false) {
         let level = obstacles.update(nearest: nearestDepth)
         if level != obstacleLevel { obstacleLevel = level }
 
@@ -362,7 +383,10 @@ final class NavigationController: ObservableObject {
             // Only publish real changes (see setIfChanged): at 10 Hz an unconditional assignment keeps the screen redrawing and the UI tests never idle.
             setIfChanged(\.mapPosition, mapPosition)
             setIfChanged(\.headingRadians, atan2(mapForward.x, -mapForward.z))
-            if !jumped { updateMovement(position: mapPosition, time: time) }
+            if !jumped {
+                let forward = Geometry.cameraForward(of: camera)
+                updateMovement(position: mapPosition, yaw: atan2(forward.x, -forward.z), time: time)
+            }
             updateRouteWorldPositions(mapToWorld: mapToWorld)
 
             // ROUTE CONTINUOUSLY, rather than deciding when the old route has gone stale.
@@ -426,7 +450,7 @@ final class NavigationController: ObservableObject {
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
                                    posture: posture, report: report, time: time, context: sceneContext, isMoving: isMoving,
-                                   avoidTowards: avoidTowards)
+                                   avoidTowards: avoidTowards, backUp: backUp)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 
@@ -434,16 +458,21 @@ final class NavigationController: ObservableObject {
     /// permission - CMPedometer/CMMotionActivity would need `NSMotionUsageDescription` and would tell
     /// us about the PHONE, while the pose tells us about the user's position in the map.
     /// Used to stop repeating "stop, there is a door ahead" at somebody who has already stopped.
-    private func updateMovement(position: SIMD3<Float>, time: TimeInterval) {
+    private func updateMovement(position: SIMD3<Float>, yaw: Float, time: TimeInterval) {
         guard let last = lastMovementSample else {
-            lastMovementSample = (position, time)
+            lastMovementSample = (position, yaw, time)
             return
         }
         let elapsed = time - last.time
         guard elapsed >= Self.movementSampleSeconds else { return }
         let travelled = Geometry.horizontalDistance(last.position, position)
-        isMoving = travelled / Float(elapsed) >= Self.movingSpeed
-        lastMovementSample = (position, time)
+        let walking = travelled / Float(elapsed) >= Self.movingSpeed
+        // Shortest way round the circle, so crossing +/-pi is not read as a spin.
+        var turned = abs(yaw - last.yaw).truncatingRemainder(dividingBy: 2 * .pi)
+        if turned > .pi { turned = 2 * .pi - turned }
+        let turning = (turned * 180 / .pi) / Float(elapsed) >= Self.turningDegreesPerSecond
+        isMoving = walking || turning
+        lastMovementSample = (position, yaw, time)
     }
 
     /// Route waypoints in world space for the AR overlay. Cheap guard: only rebuild when the route or

@@ -90,10 +90,10 @@ build: gen ## Build + sign the app for your phone (set DEVICE=...)
 	$(XCODEBUILD) $(SIGN_FLAGS) build | tail -25
 
 backup-maps: ## Copy the maps (scans, 3D models) out of the app on the phone to ~/Library/Caches/Waypoint/map-backups (DEVICE=...)
-	@sh scripts/phone-maps.sh backup
+	@BUNDLE_ID=$(BUNDLE_ID) sh scripts/phone-maps.sh backup
 
 restore-maps: ## Copy the newest backup that has a scan back onto the phone (DEVICE=..., optional DIR=path)
-	@sh scripts/phone-maps.sh restore $(DIR)
+	@BUNDLE_ID=$(BUNDLE_ID) sh scripts/phone-maps.sh restore $(DIR)
 
 list-map-backups: ## List the map backups on this Mac
 	@sh scripts/phone-maps.sh list
