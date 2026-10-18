@@ -95,7 +95,9 @@ final class Speaker: NSObject {
     /// - Parameters:
     ///   - staysFresh: the opening briefing - not thrown away as stale, and only displaced by another such line.
     ///   - userRequested: the PERSON asked for this (repeat, distance). Never swallowed as a duplicate.
-    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, userRequested: Bool = false) {
+    ///   - clearsQueue: whatever is still waiting is now out of date (ARRIVAL: "In 3 meters, you will arrive" must not follow "You have arrived").
+    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, userRequested: Bool = false, clearsQueue: Bool = false) {
+        if clearsQueue { queue.clear() }
         switch gate.decide(text: text, priority: priority, isSpeaking: isBusy, now: now,
                            speakingPriority: speakingPriority, allowRepeat: userRequested) {
         case .drop:

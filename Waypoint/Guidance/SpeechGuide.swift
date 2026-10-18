@@ -13,8 +13,8 @@ import WaypointCore
 
 final class SpeechGuide {
 
-    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false) {
-        Speaker.shared.say(text, priority: priority, staysFresh: staysFresh)
+    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, clearsQueue: Bool = false) {
+        Speaker.shared.say(text, priority: priority, staysFresh: staysFresh, clearsQueue: clearsQueue)
     }
 
     /// Tell `handler` (main thread) whenever a line was thrown away before it was heard. Cleared by `stop()`'s owner via `nil`.

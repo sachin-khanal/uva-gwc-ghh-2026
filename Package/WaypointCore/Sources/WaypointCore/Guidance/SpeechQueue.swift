@@ -70,3 +70,24 @@ public struct SpeechQueue: Sendable {
     /// Deliberate stop (navigation ended): forget what waits. Not a loss, so nothing is returned.
     public mutating func clear() { pending = nil }
 }
+
+/// Decides whether a lost line is worth saying again NOW. Found on the phone (simulated walk, Floor 4 map, 2026-10-18): with the voice busy,
+/// "Continue straight." and "In 5 meters, turn right." displaced each other, each loss re-armed the cue, and the pair ping-ponged every tick
+/// (58 lost lines in one 12 s walk) while the turn itself was never said. A line may come back at most once per `minimumGap`. (Even
+/// "Continue straight." may come back: losing it after a turn was a reported bug, 2026-10-17.)
+public struct LossThrottle: Sendable {
+    public static let minimumGap: TimeInterval = 3
+
+    private var lastRearmed: [String: TimeInterval] = [:]
+
+    public init() {}
+
+    public mutating func shouldRearm(_ text: String, now: TimeInterval) -> Bool {
+        if let last = lastRearmed[text], now - last < Self.minimumGap { return false }
+        lastRearmed[text] = now
+        if lastRearmed.count > 24 { lastRearmed = [text: now] }
+        return true
+    }
+
+    public mutating func reset() { lastRearmed = [:] }
+}

@@ -77,6 +77,28 @@ final class SpeechQueueTests: XCTestCase {
     }
 }
 
+final class LossThrottleTests: XCTestCase {
+
+    /// The ping-pong seen on the phone: two lines displacing each other every tick must not each come back every tick.
+    func testALineComesBackAtMostOncePerGap() {
+        var t = LossThrottle()
+        XCTAssertTrue(t.shouldRearm("In 5 meters, turn right.", now: 10))
+        XCTAssertFalse(t.shouldRearm("In 5 meters, turn right.", now: 10.1))
+        XCTAssertFalse(t.shouldRearm("In 5 meters, turn right.", now: 12.9))
+        XCTAssertTrue(t.shouldRearm("In 5 meters, turn right.", now: 13.1))
+    }
+
+    func testDifferentLinesAreIndependent() {
+        var t = LossThrottle()
+        XCTAssertTrue(t.shouldRearm("Right, toward Room 409.", now: 1))
+        XCTAssertTrue(t.shouldRearm("In 2 meters, turn right.", now: 1))
+        XCTAssertTrue(t.shouldRearm("Continue straight.", now: 1), "losing it after a turn was a reported bug")
+        XCTAssertFalse(t.shouldRearm("Continue straight.", now: 2))
+        t.reset()
+        XCTAssertTrue(t.shouldRearm("Right, toward Room 409.", now: 1.1))
+    }
+}
+
 // MARK: - Obstacle vs voice: who is allowed to talk over whom
 
 final class ObstacleVersusVoiceTests: XCTestCase {

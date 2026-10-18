@@ -100,6 +100,8 @@ final class NavigationController: ObservableObject {
     private var navigationGeneration = 0
     /// Rewritten text -> the plain sentence the planner knows it by (for `FeedbackPlanner.lineLost`). Small: only recent lines matter.
     private var spokenAliases: [String: String] = [:]
+    /// Keeps a busy voice from turning every displaced line into a re-announcement next tick (see `LossThrottle`).
+    private var lossThrottle = LossThrottle()
     /// Where to save remembered routes (real mode only; simulation does not persist).
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
@@ -230,6 +232,7 @@ final class NavigationController: ObservableObject {
         navigationGeneration += 1
         narration = nil
         spokenAliases = [:]
+        lossThrottle.reset()
         statusText = "Stopped"
     }
 
@@ -273,7 +276,8 @@ final class NavigationController: ObservableObject {
         // so it is said again if it still applies.
         speech.onLineLost { [weak self] text in
             guard let self else { return }
-            self.planner.lineLost(self.spokenAliases[text] ?? text)
+            let plain = self.spokenAliases[text] ?? text
+            if self.lossThrottle.shouldRearm(plain, now: ProcessInfo.processInfo.systemUptime) { self.planner.lineLost(plain) }
         }
         openingQueued = false
         openingBriefingText = nil
@@ -609,11 +613,11 @@ final class NavigationController: ObservableObject {
                             if let i = self.recentSpeech.lastIndex(of: plain) { self.recentSpeech[i] = rich }
                             Log.guidance.info("narrated: \(plain) -> \(rich)")
                         }
-                        self.speech.say(text, priority: priority, staysFresh: staysFresh)
+                        self.speech.say(text, priority: priority, staysFresh: staysFresh, clearsQueue: isArrival)
                     }
                 }
             } else {
-                speech.say(line.text, priority: priority, staysFresh: staysFresh)
+                speech.say(line.text, priority: priority, staysFresh: staysFresh, clearsQueue: isArrival)
             }
         }
 
