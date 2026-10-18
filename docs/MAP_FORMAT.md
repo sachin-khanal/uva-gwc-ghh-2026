@@ -293,6 +293,10 @@ route-memory methods; do not copy this older branch's whole MapStore over main.
 
 **Update 2026-10-18 (Codex, mesh integration):** Retain incoming notes below; final integration behavior is recorded in WORKLOG.
 
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Also retain incoming notes below.
+
 - ~~The native 3D model is `model.usdz` next to `map.json` (not listed in the map JSON); the web viewer reads OBJ. A USDZ-to-OBJ export is not built.~~
   **Update 2026-10-18 (Claude, branch `feature/web-mesh-obj`):** the app now ALSO writes a web copy of the scan as `mesh-<asset id>.obj` next to `map.json` and lists it in `meshAssets` (`ObjExport`, `MapStore.attachMesh`); `SyncEngine.push` uploads it to `meshes/<owner>/<map>/<asset>.obj` and lists it on the server with `publish_mesh_assets` (migration ~~0007~~ **Update 2026-10-18 (Claude):** 0008 (renamed: a different 0007 exists on the live project), not yet applied). `model.usdz` stays the phone's own viewer format. UNVERIFIED ON DEVICE.
 
@@ -300,3 +304,6 @@ route-memory methods; do not copy this older branch's whole MapStore over main.
 
 
 **Update 2026-10-18 (Codex, U3 conflict integration):** Combined format is schema 4 with optional stairs, retaining extents and keyframes. Mesh approval requires publish_mesh_assets after upload. Migration order: audit 0006, secure mesh 0008, rich format 0009, validator alias 0010. Browser 58/58, UI 23/23 and Python 22/22 pass. Native tests/typecheck unavailable on Windows; SQL not executed. UNVERIFIED ON DEVICE.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Also retain incoming notes below.

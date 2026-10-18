@@ -1,4 +1,5 @@
 // Owner: U3. Actual map-frame LiDAR triangles, depth-tested and lit; no inferred walls.
+import { surfaceBuffer } from "./meshloader.js";
 export function surfaceVertices(mesh) {
   const data = new Float32Array(mesh.triangles.length * 18);
   let offset = 0;
@@ -63,8 +64,13 @@ export class SurfaceRenderer {
     this.buffers=[];this.clear();
   }
   add(mesh) {
-    this.initialize();const gl=this.gl, base=surfaceVertices(mesh), data=new Float32Array(mesh.triangles.length*27), buffer=gl.createBuffer();
-    for(let i=0;i<base.length/6;i++){data.set(base.subarray(i*6,i*6+6),i*9);data.set(mesh.colors?.[Math.floor(i/3)]||[.79,.82,.78],i*9+6);}
+    this.initialize();const gl=this.gl, buffer=gl.createBuffer();
+    let data;
+    if(mesh.positions){data=surfaceBuffer(mesh);} // typed-array scan mesh (meshloader.js): one pass, no temporaries
+    else{ // estimated building / legacy array-of-arrays meshes
+      const base=surfaceVertices(mesh);data=new Float32Array(mesh.triangles.length*27);
+      for(let i=0;i<base.length/6;i++){data.set(base.subarray(i*6,i*6+6),i*9);data.set(mesh.colors?.[Math.floor(i/3)]||[.79,.82,.78],i*9+6);}
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
     this.buffers.push({buffer,count:data.length/9,ceiling:!!mesh.ceiling});
   }

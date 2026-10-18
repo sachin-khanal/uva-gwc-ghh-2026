@@ -36,16 +36,55 @@ export class CloudLibrary {
     return binary ? response.arrayBuffer() : response.json();
   }
 
-  async mesh(map, asset) {
+  /** Download one scan file. `onProgress(received, total)` is called as bytes arrive. The 20 s limit is per STALL (no bytes),
+   *  not for the whole transfer, so a 26 MB scan on slow Wi-Fi is not cut off. The size is capped at the manifest's byteCount. */
+  async mesh(map, asset, { onProgress } = {}) {
     if (!asset.storageOwner) throw new Error("This mesh has not been published.");
     const path = `/storage/v1/object/authenticated/meshes/${asset.storageOwner.toLowerCase()}/${map.id.toLowerCase()}/${asset.id.toLowerCase()}.obj`;
     const session = await this.ensureSession();
-    try { return await this.request(path, {}, session.access_token, true); }
+    try { return await this.download(path, session.access_token, asset.byteCount, onProgress); }
     catch (error) {
       if (error.status !== 401) throw error;
       this.session.until = 0;
-      return this.request(path, {}, (await this.ensureSession()).access_token, true);
+      return this.download(path, (await this.ensureSession()).access_token, asset.byteCount, onProgress);
     }
+  }
+
+  async download(path, token, expected, onProgress, stallMs = 20000) {
+    const controller = new AbortController();
+    let timer; const arm = () => { clearTimeout(timer); timer = setTimeout(() => controller.abort(), stallMs); };
+    arm();
+    try {
+      let response;
+      try {
+        response = await this.fetcher(this.url + path, { headers: { apikey: this.anonKey, Authorization: `Bearer ${token}` }, signal: controller.signal });
+      } catch { throw new Error("Cannot reach Supabase. Check your connection and project URL."); }
+      if (!response.ok) {
+        const error = new Error(response.status === 401 || response.status === 403 ? "Access denied. Check the anon key and anonymous sign-ins."
+          : response.status === 404 ? "The referenced 3D scan file is missing." : `Supabase returned ${response.status}. Check that the project is available.`);
+        error.status = response.status; throw error;
+      }
+      const reader = response.body?.getReader?.();
+      if (!reader) {
+        const whole = await response.arrayBuffer();
+        if (Number.isFinite(expected) && whole.byteLength !== expected) throw new Error("Mesh size does not match its manifest.");
+        onProgress?.(whole.byteLength, whole.byteLength); return whole;
+      }
+      const limit = Number.isFinite(expected) && expected > 0 ? expected : Infinity;
+      let buffer = new Uint8Array(Number.isFinite(limit) ? limit : 1 << 20), received = 0;
+      for (;;) {
+        let chunk;
+        try { chunk = await reader.read(); } catch { throw new Error("The 3D scan download stalled. Check your connection and try again."); }
+        if (chunk.done) break;
+        arm();
+        if (received + chunk.value.byteLength > limit) { controller.abort(); throw new Error("Mesh size does not match its manifest."); }
+        if (received + chunk.value.byteLength > buffer.length) { const grown = new Uint8Array(Math.max(buffer.length * 2, received + chunk.value.byteLength)); grown.set(buffer.subarray(0, received)); buffer = grown; }
+        buffer.set(chunk.value, received); received += chunk.value.byteLength;
+        onProgress?.(received, Number.isFinite(limit) ? limit : 0);
+      }
+      if (Number.isFinite(expected) && received !== expected) throw new Error("Mesh size does not match its manifest.");
+      return buffer.buffer.byteLength === received ? buffer.buffer : buffer.buffer.slice(0, received);
+    } finally { clearTimeout(timer); }
   }
 
   async ensureSession() {

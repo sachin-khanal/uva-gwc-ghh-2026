@@ -666,4 +666,3 @@ the app's Siri pick (fallback), or a voice the person chooses from the installed
 system default, 0.75x-1.6x (`SpeechRate`); (3) "Hear a sample". Logic in WaypointCore (`VoiceCatalog`, `SpeechRate`, `VoiceSelection`), 4 tests; previews go through the SAME synthesizer as guidance, so they cannot overlap it.
 Why a speed setting: the fixed default rate is slow for experienced screen-reader users. Why a picker: nobody has yet listened to "the phone's default voice" and judged it; this lets the team and the user settle it by ear.
 **Status:** accepted; UNVERIFIED ON DEVICE (how the previews sound, whether every listed voice can be selected by identifier, the screen with VoiceOver on). Not done: a pace that adapts to the walker, Gemini text-to-speech for calm lines.
-

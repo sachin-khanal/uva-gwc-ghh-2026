@@ -1,5 +1,5 @@
 -- File: supabase/tests/rich_map_schema.sql
--- Owner: U3. Run AFTER migration 0009. Transactional metadata tests, no real mesh files.
+-- Owner: U3. Run AFTER migration 0011. Transactional metadata tests, no real mesh files.
 begin;
 insert into auth.users(id) values ('10000000-0000-4000-8000-000000000004');
 do $$
@@ -25,8 +25,8 @@ begin
   perform public.publish_mesh_assets((legacy->>'id')::uuid, rich->'meshAssets');
   perform public.extend_building(legacy || '{"schemaVersion":2}'::jsonb);
   select map_json into actual from public.canonical_buildings where map_id = (legacy->>'id')::uuid;
-  if actual->>'schemaVersion' <> '4' or actual->'nodes'->0->'extent' is distinct from rich->'nodes'->0->'extent'
-     or jsonb_array_length(actual->'meshAssets') <> 1 then
+  if actual->>'schemaVersion' is distinct from '4' or actual->'nodes'->0->'extent' is distinct from rich->'nodes'->0->'extent'
+     or jsonb_array_length(actual->'meshAssets') is distinct from 1 then
     raise exception 'FAIL: stale upload erased rich data or downgraded format';
   end if;
   begin
@@ -43,7 +43,7 @@ begin
   perform public.publish_mesh_assets((legacy->>'id')::uuid,
     jsonb_set(rich,'{meshAssets,0,sha256}',to_jsonb(repeat('b',64)))->'meshAssets');
   select map_json into actual from public.canonical_buildings where map_id = (legacy->>'id')::uuid;
-  if actual->'meshAssets'->0->>'sha256' <> repeat('a',64) then
+  if actual->'meshAssets'->0->>'sha256' is distinct from repeat('a',64) then
     raise exception 'FAIL: immutable mesh replaced';
   end if;
   raise notice 'PASS: schema upgrade, room enrichment, immutable mesh manifest, no stale downgrade';

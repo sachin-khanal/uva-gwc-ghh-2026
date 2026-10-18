@@ -2,6 +2,13 @@
 
 **Update 2026-10-18 (Codex, audible voice test):** added app `App/VoiceSelfTest.swift` and optional OS speech-event observer in `Guidance/Speaker.swift`. On Sachin's iPhone, VoiceOver OFF: 37 E2E checks PASS, including Gemini text actually starting/finishing speech, queued directions, safety cancellation/recovery, two STOPs without stutter, stale-arrival clearing, slow/fast previews and installed Aaron voice. Sachin confirmed speech was clear/as described. VoiceOver ON explicitly skipped at user's request; no claim about its overlap behavior.
 
+
+**Update 2026-10-18 (Codex, U3 team sync):** Also retain incoming notes below.
+
+**Update 2026-10-18 (Codex, live QA):** `tools/test_live_viewer.mjs` adds reproducible real-Supabase/browser coverage (23 checks PASS, 4 maps, 30,355 ordered routes, 676,599-triangle scan). Disabled-WebGL feedback fixed in `web/app.js`. Native build/tests/typecheck PASS. Deployment is NOT fully compatible with U3: schema-4 cloud uploads fail; an unpublished-mesh update can bypass `publish_mesh_assets`. Saved SQL regressions and report: `docs/VIEWER_QA_2026-10-18.md`. No production migration applied.
+
+**Update 2026-10-18 (Codex, viewer completion):** `web/` on `feature/web-viewer-integration` now accepts U3 schema 4, retains U3 routing/walkthrough/building reconstruction, and completes the existing large-scan loader (`meshloader.js`, typed geometry, progress, stall timeout, manifest-aware tab cache). Browser logic/WebGL 74/74 and UI 24/24 PASS; Node 73/73 with 2 explicit browser-only skips. Native branch tests 349/349 and typecheck PASS. Live cloud/real-scan fidelity remain unverified; no backend/native integration claimed.
+
 **Update 2026-10-17 (Claude):** the Codex/U3 notes below that say tests or SQL are "pending" or "UNVERIFIED" are partly closed: Swift 85/85, typecheck OK, SQL migrations 0001-0003 + both SQL tests PASS locally (stubbed storage schema), Python 9/9. Still open: live-server concurrency and everything on a phone (UNVERIFIED ON DEVICE). New unmerged work: branch `app-ui-workflows` (new Scanner/Navigator UI, `Flows/`, `Services/`).
 
 **Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.

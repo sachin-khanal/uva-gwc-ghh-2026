@@ -4,7 +4,7 @@ import { projectionForMap } from "./geometry3d.js";
 const iframe = document.getElementById("viewer"), results = [];
 const waitFor = async (predicate) => {
   for (let i = 0; i < 150; i++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 30)); }
-  throw new Error("Timed out waiting for UI");
+  throw new Error("Timed out waiting for UI: " + String(predicate).replace(/\s+/g, " ").slice(0, 140));
 };
 const assert = (value, message = "Assertion failed") => { if (!value) throw new Error(message); };
 async function check(name, operation) {
@@ -176,7 +176,55 @@ try {
     assert($('map-canvas').clientWidth>=before,'canvas before='+before+' after='+$('map-canvas').clientWidth);$('expand-map').click();
     assert($('expand-map').getAttribute('aria-pressed')==='false');
   });
-  await check("Empty shared library keeps explicitly imported local maps", async () => {
+  await check("Opening a scanned building shows download progress, never starts a walk, and re-opening reuses the verified mesh", async () => {
+    const objBytes = new TextEncoder().encode("# unique to the cloud-download check, so the tab cache cannot already hold it\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nf 1 2 3\nf 2 4 3\n");
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", objBytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const meshId = "bbbbbbbb-0000-4000-8000-0000000000aa", owner = "cccccccc-0000-4000-8000-0000000000bb";
+    const asset = { id: meshId, segmentId: "seg1", format: "obj", coordinateFrame: "map", byteCount: objBytes.length, sha256, boundsMin: [0, 0, 0], boundsMax: [1, 1, 0], storageOwner: owner };
+    const scanned = { ...sample, id: "dddddddd-0000-4000-8000-000000000001", name: "Scanned test floor", meshAssets: [asset] };
+    const plain = { ...sample, id: "dddddddd-0000-4000-8000-000000000002", name: "Graph-only test floor" };
+    let downloads = 0, release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    win.fetch = async (url) => {
+      const text = String(url);
+      if (text.includes("/auth/")) return new win.Response(JSON.stringify({ access_token: "t", refresh_token: "r", expires_in: 3600 }), { status: 200 });
+      if (text.includes("canonical_buildings")) return new win.Response(JSON.stringify([{ map_id: scanned.id, map_json: scanned }, { map_id: plain.id, map_json: plain }]), { status: 200 });
+      if (text.includes("/storage/")) {
+        downloads++;
+        const body = new win.ReadableStream({ async start(controller) { controller.enqueue(objBytes.slice(0, 10)); await gate; controller.enqueue(objBytes.slice(10)); controller.close(); } });
+        return new win.Response(body, { status: 200 });
+      }
+      return new win.Response("[]", { status: 404 });
+    };
+    $("connect-open").click(); $("anon-key").value = "TEST-ANON";
+    $("connect-form").dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    const open = (name) => [...$("buildings").querySelectorAll("button")].find((b) => b.textContent.includes(name))?.click();
+    await waitFor(() => [...$("buildings").querySelectorAll("button")].some((b) => b.textContent.includes("Scanned test floor")));
+    const cards = [...$("buildings").querySelectorAll("button")].map((b) => b.textContent);
+    const scannedAt = cards.findIndex((c) => c.includes("Scanned test floor")), plainAt = cards.findIndex((c) => c.includes("Graph-only test floor"));
+    assert(scannedAt >= 0 && plainAt > scannedAt, "scanned building must be listed before graph-only ones: " + cards.join(" | "));
+    assert(cards[scannedAt].endsWith("· 3D scan") && cards[plainAt].endsWith("· no 3D scan"), "badges: " + cards[scannedAt] + " / " + cards[plainAt]);
+    open("Scanned");
+    await waitFor(() => $("map-title").textContent === "Scanned test floor");
+    await waitFor(() => /Downloading/.test($("geometry-status").textContent)); // progress is visible while bytes are still arriving
+    assert($("walk-toggle").textContent === "Walk through" && $("map-canvas").dataset.view === "overview", "must not start in walk mode");
+    release();
+    await waitFor(() => $("geometry-status").textContent.includes("1/1 verified"));
+    assert($("walk-toggle").textContent === "Walk through" && $("map-canvas").dataset.view === "overview", "walk after load: " + $("walk-toggle").textContent);
+    assert(!/Walking/.test($("walk-status").textContent), "walk status: " + $("walk-status").textContent);
+    assert(downloads === 1, "downloads=" + downloads);
+    open("Graph-only"); await waitFor(() => $("map-title").textContent === "Graph-only test floor");
+    assert($("map-canvas").dataset.view === "overview" && $("walk-toggle").textContent === "Walk through", "graph-only walk state");
+    open("Scanned"); await waitFor(() => $("geometry-status").textContent.includes("1/1 verified"));
+    assert(downloads === 1, "the verified mesh must come from the tab cache, not another download");
+    assert($("map-canvas").dataset.view === "overview" && $("walk-toggle").textContent === "Walk through", "reopen walk state");
+    // A matching hash must not bypass verification of a different manifest's bounds.
+    await openFile({map:{...scanned,id:"dddddddd-0000-4000-8000-000000000003",meshAssets:[{...asset,boundsMax:[0.5,1,0]}]},meshFiles:{[meshId]:btoa(String.fromCharCode(...objBytes))}});
+    await waitFor(()=>$("geometry-status").textContent.includes("unavailable"));
+    assert($("status").textContent.includes("bounds"),"cached mesh bypassed the changed bounds: "+$("status").textContent);
+
+  });
+  await check("Empty shared library keeps the map you opened and explains it is empty", async () => {
     win.fetch = async (url) => new win.Response(JSON.stringify(String(url).includes("/auth/")
       ? { access_token: "test-token", refresh_token: "test-refresh", expires_in: 3600 } : []), { status: 200 });
     $("connect-open").click(); $("anon-key").value = "TEST-ANON";

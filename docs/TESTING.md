@@ -2,6 +2,13 @@
 
 **Update 2026-10-18 (Codex):** On `feature/guidance-overhaul`, classic UI tests now select a real saved scan using `nav.map`, with no fixed SAMPLE/Room 204 requirement. The obstacle naming test clears the trash-can hazard before introducing a wall, because stationary classifier kind changes are intentionally silent. `make test`: 406 pass; `make typecheck`: PASS. Revised UI tests are UNVERIFIED ON DEVICE; retain the prior results as historical evidence.
 
+
+**Update 2026-10-18 (Codex, U3 team sync):** Also retain incoming notes below.
+
+**Update 2026-10-18 (Codex, comprehensive live QA):** Real cloud/browser verification is now recorded in `docs/VIEWER_QA_2026-10-18.md`, with reproducible `tools/test_live_viewer.mjs` (23 PASS). Five transactional SQL suites PASS; two saved deployment regressions FAIL: schema-4 compatibility and unpublished-mesh update bypass. Deterministic browser suites 74/74 + 24/24 PASS; Node 73 PASS / 2 browser skips; Swift 349 PASS; typecheck/full unsigned build PASS; Python 22 PASS; hooks 15 PASS. Hardware and Safari remain unverified. Do not infer an all-green backend from the passing viewer tests.
+
+**Update 2026-10-18 (Codex, viewer completion):** From `feature/web-viewer-integration`, run `node web/test-web.mjs` (73 PASS, 2 browser-only SKIP), then `python3 -B web/serve.py --port 8041` and open `/web/tests.html` (74/74 PASS) and `/web/ui-tests.html` (24/24 PASS). Verified in fresh headless Chrome profiles with software WebGL, including schema 4, hostile OBJ bounds/indices, truncated downloads, route/walkthrough controls, progress, re-opening cache and changed-manifest revalidation. Native `make test` 349/349 PASS; `make typecheck` PASS (64 app files, 1 UI file; existing concurrency warnings). Live Supabase and real LiDAR visual fidelity were not tested in this session; native features remain UNVERIFIED ON DEVICE.
+
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
 
 First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
@@ -331,7 +338,7 @@ The phone must be **plugged in and UNLOCKED** (set Auto-Lock to Never while test
 
 | Command | What it does | Pass looks like |
 |---|---|---|
-| `DEVICE=<id> make selftest-sim` | launches with `-autoSimulate "Room 204"` (override: `ROOM="Room 206"`): runs the simulated walk, logs every instruction, spoken cue, haptic and beacon direction | ends with `SELFTEST PASS` and exit code 0. Exit 1 = timeout, exit 2 = no map has that destination, `Locked` error = unlock the phone |
+| `DEVICE=<id> make selftest-sim` | launches with `-autoSimulate "*"` (**Update 2026-10-18:** `*` = the first labelled place of the first scanned map; ~~`"Room 204"` on the sample map~~; override: `ROOM="Room 206"`): runs the simulated walk, logs every instruction, spoken cue, haptic and beacon direction | ends with `SELFTEST PASS` and exit code 0. Exit 1 = timeout, exit 2 = no map has that destination, `Locked` error = unlock the phone |
 | `DEVICE=<id> make selftest-scan` | launches with `-autoScan YES`: starts scanning immediately and prints `scan: tracking | mapping | nodes | meshAnchors | triangles | box` once per second | walk with the phone; `triangles` and `box` should grow. Ctrl-C to stop. Stuck at `meshAnchors=0` = the AR view is not sharing the session (known risk, U1.4) ~~|~~ **Update 2026-10-17:** that cause is ruled out (see "UI tests" below: frames reach our code). `meshAnchors=0` now means the camera is not looking at textured surfaces (aim at a room, not a desk/ceiling) or the phone has no LiDAR |
 
 What these CANNOT check: how the audio sounds, how the haptics feel, what the mesh looks like. A person must judge those. Reference run (2026-10-17, iPhone 16 Pro Max): turn right at bearing 57 deg fired `haptic: turnRight` + `say: Turn right.`, beacon local x=+1.5 (to the right), arrival spoke and fired `haptic: arrived`, `SELFTEST PASS`.
@@ -365,7 +372,7 @@ Record the results in docs/WORKLOG.md (phone, iOS, pass/fail, the console lines)
 | Unit (macOS, no phone) | `make test` (57) | all pure logic: model, validation, routing, planner rules, box math, cloud client vs a MOCK server | anything on a device |
 | Type-check / build | `make typecheck`, `make check` | the app and the UI tests compile against the iOS SDK | runtime behaviour |
 | **On-device E2E** | `make selftest-e2e` | the data path and the platform services on a REAL phone (storage, Keychain, audio engine, capabilities) | LiDAR geometry, relocalization, sound/haptic quality |
-| Simulated navigation | `make selftest-sim` | the guidance loop speaks the right cues and arrives (on the sample map) | that it sounds right |
+| Simulated navigation | `make selftest-sim` | the guidance loop speaks the right cues and arrives (on a scanned map; ~~the sample map~~ there is no sample any more) | that it sounds right |
 | UI tests on the phone | `make uitest` (5) | every main screen renders, the buttons work, HUD/status text, screenshots | motion through space |
 | Scan monitor | `make selftest-scan` (needs a person to walk) | live ARKit numbers: tracking, mesh, box, fps | correctness of the mesh |
 | **Not yet automated** | - | real Supabase (SQL + RLS + anonymous auth), two-phone Multipeer, real-room relocalization, audio/haptic feel | needs: a Supabase project or local Postgres (see below), a 2nd phone, a person |
@@ -515,3 +522,11 @@ Run on a built/installed guidance branch, keep the phone unlocked, and listen. V
 Recorded with VoiceOver OFF on Sachin's iPhone 16 Pro Max: **37 PASS, 0 FAIL, 1 SKIP** (cloud map-write test not requested). Output volume 0.3, Speaker route. Live Gemini phrase "You are passing Room 206 on your left." produced actual `didStart` and `didFinish`. Turn right finished before Continue straight started. A long line received `didCancel` and loss notification when interrupted by STOP; STOP and recovery then finished. Two safety lines finished in order without canceling one another. Arrival finished and the queued stale countdown never started. Preview 0.8x took 4.388 s; 1.4x took 1.917 s. Installed Aaron preview also produced start/finish callbacks. Sachin confirmed the audible output was clear and as described; the tests intentionally interrupt only their long safety/arrival setup lines.
 
 This closes the earlier gap between requesting speech and checking actual playback callbacks with human listening. It does not establish VoiceOver ON overlap behavior, acoustic quality on other devices/output routes, physical navigation or every available voice. VoiceOver overlap remains **UNVERIFIED ON DEVICE**. No microphone recording or persistent system-setting change was made.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Also retain incoming notes below.
+
+**Update 2026-10-18 (Claude):** the app and the web viewer no longer ship or open any sample/placeholder map (only scanned maps). Consequences for tests: (1) `make uitest` needs a phone that holds at least one real scan with a labelled place; its walk tests pick the scanned map with the most places and walk to its last place (check: `testSimulatedWalk...`). (2) `make selftest-e2e` checks `resource.noSampleMap` (the bundle must not contain `rice-hall-sample.json`). (3) An app that already had the old seeded sample removes it on launch. (4) `Samples/rice-hall-sample.json` and `web/fixtures/rice-hall-sample.json` stay as unit-test / web-test fixtures only.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Retain narration migration 0009; rich-schema and alias migrations are now 0011/0012 on U3 to avoid version collisions. No SQL deployed by this merge. Browser logic 74/74, UI 24/24, Python 22/22 PASS; merged native guidance requires Mac tests/typecheck and phone verification.

@@ -59,3 +59,6 @@ in this Windows workspace (no PostgreSQL installed). Mac teammate must also run
 
 
 **Update 2026-10-18 (Codex, U3 conflict integration):** Combined format is schema 4 with optional stairs, retaining extents and keyframes. Mesh approval requires publish_mesh_assets after upload. Migration order: audit 0006, secure mesh 0008, rich format 0009, validator alias 0010. Browser 58/58, UI 23/23 and Python 22/22 pass. Native tests/typecheck unavailable on Windows; SQL not executed. UNVERIFIED ON DEVICE.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Retain narration migration 0009; rich-schema and alias migrations are now 0011/0012 on U3 to avoid version collisions. No SQL deployed by this merge. Browser logic 74/74, UI 24/24, Python 22/22 PASS; merged native guidance requires Mac tests/typecheck and phone verification.

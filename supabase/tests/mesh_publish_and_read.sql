@@ -1,3 +1,5 @@
+-- Owner: U3 / D. Managed-Supabase compatible mesh publication and RLS regression.
+-- Fixtures and temporary grants are contained in BEGIN/ROLLBACK. Assertions scope to test map IDs.
 -- File:   supabase/tests/mesh_publish_and_read.sql
 -- Owner:  U3 / U1 (added 2026-10-18, branch feature/web-mesh-obj)
 -- Purpose: proves migration 0008: publish_mesh_assets accepts only the segment owner's well-formed, append-only OBJ entries, and the
@@ -9,7 +11,6 @@
 --         A plain Postgres lacks Supabase's default grants, so this file grants SELECT on the legacy public.buildings table
 --         (referenced by the older 0001 storage read rule) to `authenticated`, as a real project does.
 -- Expect: every line prints PASS; any failure raises an exception and stops.
-\set ON_ERROR_STOP on
 begin;
 
 create temp table t(a uuid default 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', b uuid default 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -17,7 +18,6 @@ create temp table t(a uuid default 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', b uui
 insert into t default values;
 grant select on t to authenticated;
 grant select on public.buildings to authenticated;
-alter table storage.objects add column if not exists metadata jsonb; -- real Supabase has it; the stand-in table may not
 insert into auth.users(id) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'); -- rolled back at the end
 insert into storage.objects(bucket_id, name, metadata) values
   ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj', '{"size": 1000}'),
@@ -35,7 +35,7 @@ create or replace function pg_temp.asset(owner text, seg text, bytes int default
 
 do $$ begin
   perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1')));
-  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'asset listed';
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 1, 'asset listed';
   raise notice 'PASS owner can list a mesh';
   -- same id again: skipped, not duplicated or replaced
   perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1'), '{sha256}', to_jsonb(repeat('b',64)))));
@@ -87,15 +87,15 @@ do $$ declare ok boolean; begin
   assert ok, 'wrong size must be refused'; raise notice 'PASS wrong-size mesh refused';
   -- delist and relist (uploaded file 4444... exists)
   perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1'), '{id}', '"44444444-4444-4444-8444-444444444444"')));
-  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 2, 'two listed';
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 2, 'two listed';
   perform public.remove_mesh_asset('11111111-1111-4111-8111-111111111111', '44444444-4444-4444-8444-444444444444');
-  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'owner can delist';
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 1, 'owner can delist';
   raise notice 'PASS owner can delist';
 end $$;
 select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', true), set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","role":"authenticated"}', true);
 do $$ begin
   perform public.remove_mesh_asset('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');
-  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'another user cannot delist';
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 1, 'another user cannot delist';
   raise notice 'PASS other user cannot delist';
 end $$;
 
@@ -129,7 +129,7 @@ insert into storage.objects(bucket_id, name, metadata) values
   ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/99999999-9999-4999-8999-999999999999/aaaaaaaa-0000-4000-8000-000000000001.obj', '{"size": 10}');
 set local role authenticated;
 do $$ declare n int; begin
-  select count(*) into n from storage.objects where bucket_id = 'meshes';
+  select count(*) into n from storage.objects where bucket_id = 'meshes' and name like '%/11111111-1111-4111-8111-111111111111/%';
   assert n = 1, 'B should read exactly the listed mesh, got ' || n;
   raise notice 'PASS other user reads only the listed mesh path, forged owner entry unreadable (% readable)', n;
 end $$;
@@ -139,7 +139,7 @@ reset role;
 update storage.objects set metadata = '{"size": 999}' where name like '%/22222222-2222-4222-8222-222222222222.obj' and bucket_id = 'meshes';
 set local role authenticated;
 do $$ declare n int; begin
-  select count(*) into n from storage.objects where bucket_id = 'meshes';
+  select count(*) into n from storage.objects where bucket_id = 'meshes' and name like '%/11111111-1111-4111-8111-111111111111/%';
   assert n = 0, 'a swapped (different size) file must not be readable, got ' || n;
   raise notice 'PASS swapped file not served';
 end $$;
