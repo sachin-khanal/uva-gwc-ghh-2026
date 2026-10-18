@@ -552,3 +552,22 @@ checked for finiteness.
 (`schemaVersion` 3 -> 4) to a disabled feature, and multi-segment is itself unimplemented
 (`Relocalizer.swift:95` `TODO(A)`). Recorded here so it is not rediscovered as a surprise.
 **Status:** accepted; 233 tests pass. UNVERIFIED ON DEVICE - the A/B that tests the hypothesis is in the WORKLOG entry.
+
+## D-044 — The resume cue was being dropped; turns now name their destination (2026-10-17)
+Report: "it doesn't say important stuff like continue straight after a turn", and a turn saying just "Right." lacks
+the reasoning a walker needs. First question answered: **nothing was overridden** - 3537ba1, df816a3 and 6478c3b are
+all still in the branch.
+**The missing resume cue was a real bug.** "Continue straight." was emitted at `.normal` priority, and `SpeechGate`
+DROPS a `.normal` line whenever the speaker is busy (`SpeechGate.swift:63-64`) - which it always is immediately after
+a turn. Worse, `FeedbackPlanner` records the cue as announced (`lastKey = key`) whether or not it was actually
+spoken, so it was never retried. The cue telling the user to carry on walking vanished silently after every single
+turn. All direction cues are now `.high`, which QUEUES them: nothing is dropped, nothing overlaps, and the resume cue
+follows the turn instead of competing with it.
+**Turns now name what they are for**, which is the reasoning that was missing: "Right, toward Room 402."
+`GuidanceInstruction` gained `destinationLabel` (a runtime type - NOT persisted, so no schema change), filled by
+`RouteFollower` from the route's last node, and `TurnSpeech.withDestination` appends it. Deliberately only on real
+turns: a small correction ("Slightly right 20 degrees") is housekeeping rather than a decision, and naming the
+destination every few seconds would bury the cues that matter. "Continue straight." stays bare for the same reason.
+The one-move-at-a-time rule from D-037 is intact - these are still single instructions, just ones that say what they
+are for.
+**Status:** accepted; 239 tests pass. UNVERIFIED ON DEVICE.

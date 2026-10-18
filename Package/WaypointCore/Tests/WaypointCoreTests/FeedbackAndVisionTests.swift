@@ -47,7 +47,9 @@ final class FeedbackAndVisionTests: XCTestCase {
         XCTAssertEqual(still, [.beacon(nil)]) // does not nag
         let back = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: true)
         XCTAssertTrue(back.contains(.speak("Position found.", priority: .normal)))
-        XCTAssertTrue(back.contains(.speak("Continue straight.", priority: .normal))) // re-announced
+        // `.high` since 2026-10-17: `.normal` was dropped whenever the speaker was busy, which lost
+        // the resume cue after every turn.
+        XCTAssertTrue(back.contains(.speak("Continue straight.", priority: .high))) // re-announced
     }
 
     func testArrivalAndHazardText() {
@@ -67,7 +69,7 @@ final class FeedbackAndVisionTests: XCTestCase {
         var straightSpeech = 0
         for _ in 0..<20 { // 20 consecutive breadcrumbs, all "straight ahead", each a NEW target node
             let actions = p.plan(instruction: instruction(.continueStraight, target: UUID()), obstacle: .clear, trackingOK: true)
-            straightSpeech += actions.filter { $0 == .speak("Continue straight.", priority: .normal) }.count
+            straightSpeech += actions.filter { $0 == .speak("Continue straight.", priority: .high) }.count
         }
         XCTAssertEqual(straightSpeech, 1, "found by the on-phone E2E test: it used to be spoken at every waypoint")
     }

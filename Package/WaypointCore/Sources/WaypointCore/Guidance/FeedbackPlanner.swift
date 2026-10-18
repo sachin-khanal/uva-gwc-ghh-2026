@@ -307,7 +307,8 @@ public struct FeedbackPlanner {
                 turnInProgress = kind
                 actions.append(.haptic(kind == .turnRight ? .turnRight : .turnLeft))
                 if let text = TurnSpeech.text(kind: kind, bearingRadians: corner.angleRadians ?? 0) {
-                    actions.append(.speak(text, priority: .high))
+                    actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
+                                          priority: .high))
                 }
             } else {
             switch i.kind {
@@ -321,7 +322,12 @@ public struct FeedbackPlanner {
                 break
             }
             if let text = TurnSpeech.text(kind: i.kind, bearingRadians: i.bearingRadians) {
-                actions.append(.speak(text, priority: i.kind == .continueStraight ? .normal : .high))
+                // All direction cues are `.high` so they QUEUE. "Continue straight." used to be
+                // `.normal`, which SpeechGate drops whenever the speaker is busy - and it always is
+                // right after a turn. The planner had already recorded it as announced, so the cue
+                // telling the user to carry on was lost every single time (reported 2026-10-17).
+                actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
+                                      priority: .high))
             }
             }
         }

@@ -60,7 +60,8 @@ public final class RouteFollower {
                 kind: .arrived, bearingRadians: 0,
                 distanceMeters: Geometry.horizontalDistance(position, destination.position),
                 targetNodeId: destination.id, targetLabel: destination.label,
-                targetPosition: destination.position, hazard: nil, targetKind: destination.kind)
+                targetPosition: destination.position, hazard: nil, targetKind: destination.kind,
+                destinationLabel: destination.label)
         }
 
         // Progress is measured by how far ALONG the route we are, not by touching each waypoint.
@@ -95,7 +96,8 @@ public final class RouteFollower {
             return GuidanceInstruction(
                 kind: .arrived, bearingRadians: 0, distanceMeters: distance,
                 targetNodeId: target.id, targetLabel: target.label,
-                targetPosition: target.position, hazard: nil, targetKind: target.kind)
+                targetPosition: target.position, hazard: nil, targetKind: target.kind,
+                destinationLabel: route.last?.label)
         }
         let upcoming = lookahead(from: position, distanceToTarget: distance)
 
@@ -117,7 +119,7 @@ public final class RouteFollower {
             // instead of jumping between breadcrumbs.
             targetPosition: aim, hazard: hazard,
             upcoming: upcoming, landmark: landmark(at: position, forward: forward, excluding: target.id),
-            targetKind: target.kind)
+            targetKind: target.kind, destinationLabel: route.last?.label)
     }
 
     /// How many segments ahead we are willing to jump in one tick. A route that passes near itself

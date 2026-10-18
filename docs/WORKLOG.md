@@ -1,5 +1,33 @@
 # Work log
 
+## 2026-10-17 — Claude (agent, for Anmol) — Resume cue was silently dropped; turns name their destination   [tags: BUILD, BUG]
+Area: B (Guidance). Branch `turn-context-and-resume` off `navigation-overhaul`. See D-044.
+
+Asked first whether the earlier speech commits had been overridden: **no** - `3537ba1`, `df816a3`, `6478c3b` are all
+ancestors of HEAD, verified with `git merge-base --is-ancestor`.
+THE BUG: "Continue straight." was `.normal`, and `SpeechGate` drops `.normal` whenever the speaker is busy - which it
+always is right after a turn. `FeedbackPlanner` marks a cue announced (`lastKey = key`) regardless of whether the
+speaker took it, so it was never retried. The resume cue was lost after every turn, silently.
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` (all direction cues are `.high` so they queue instead of
+being dropped; both the corner cue and the heading cue pass the destination), `Guidance/SpokenPhrases.swift`
+(+`TurnSpeech.withDestination`), `Routing/GuidanceInstruction.swift` (+`destinationLabel`),
+`Routing/RouteFollower.swift` (fills it from `route.last?.label` at all three construction sites).
+Tests added: `TurnContextAndResumeTests` (6) - a real turn names the destination, corrections and "continue straight"
+stay bare, an unlabelled destination changes nothing, the planner actually puts it in the cue, the resume cue is
+emitted at `.high`, and the gate QUEUES a `.high` line while a turn is still being spoken.
+Two existing assertions pinned `.normal` for "Continue straight." and were updated - that priority is precisely what
+caused the bug.
+No schema change: `GuidanceInstruction` is a runtime type, never persisted. `schemaVersion` stays 3 and existing
+recordings are unaffected.
+Verified: `make test` -> **239 tests, 0 failures** (was 233); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (run on its own line).
+NOT verified: **UNVERIFIED ON DEVICE.** What to listen for: after a turn you should now hear "Continue straight."
+rather than silence, and a square corner should say "Right, toward Room 402."
+Open / handoff: `TurnReason` (the "why" for turns that are NOT the route, e.g. avoiding a wall) is still built,
+tested and unwired - the third option offered and not chosen this round.
+
+---
+
 ## 2026-10-17 — Claude (agent, for Anmol) — Scan-both-directions coverage; keyframe recorder off the hot path   [tags: BUILD, BUG]
 Area: A (capture/relocalization) + shared core. Branch `bidirectional-coverage` off `navigation-overhaul`. See D-043.
 

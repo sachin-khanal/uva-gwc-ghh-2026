@@ -68,6 +68,9 @@ public struct GuidanceInstruction: Equatable, Sendable {
     /// ("You have arrived at Room 204. The door is right in front of you.") instead of being
     /// described by the depth sensor as an obstacle. nil when the producer did not set it.
     public var targetKind: NodeKind?
+    /// Where the whole route ends, e.g. "Room 402". Turn cues name it, so a turn says what it is FOR
+    /// rather than just which way to face (team request 2026-10-17). nil on an unlabelled destination.
+    public var destinationLabel: String?
     /// Target position in the MAP frame (the spatial-audio beacon is placed here).
     public var targetPosition: SIMD3<Float>
     /// Hazard on the edge being walked toward the target (e.g. stairs), if any.
@@ -80,7 +83,8 @@ public struct GuidanceInstruction: Equatable, Sendable {
     public init(
         kind: Kind, bearingRadians: Float, distanceMeters: Float,
         targetNodeId: UUID, targetLabel: String?, targetPosition: SIMD3<Float>, hazard: Hazard?,
-        upcoming: Maneuver? = nil, landmark: Landmark? = nil, targetKind: NodeKind? = nil
+        upcoming: Maneuver? = nil, landmark: Landmark? = nil, targetKind: NodeKind? = nil,
+        destinationLabel: String? = nil
     ) {
         self.kind = kind
         self.bearingRadians = bearingRadians
@@ -88,6 +92,7 @@ public struct GuidanceInstruction: Equatable, Sendable {
         self.targetNodeId = targetNodeId
         self.targetLabel = targetLabel
         self.targetKind = targetKind
+        self.destinationLabel = destinationLabel
         self.targetPosition = targetPosition
         self.hazard = hazard
         self.upcoming = upcoming

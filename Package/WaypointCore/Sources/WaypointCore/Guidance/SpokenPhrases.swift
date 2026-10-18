@@ -157,6 +157,18 @@ public enum TurnSpeech {
         }
     }
 
+    /// A real turn, named for what it is FOR: "Right, toward Room 402."
+    ///
+    /// Only genuine turns get the destination. A small correction ("Slightly right 20 degrees") is
+    /// housekeeping, not a decision, and naming the destination every few seconds would bury the
+    /// cues that matter. "Continue straight" likewise stays bare.
+    public static func withDestination(_ phrase: String, destination: String?) -> String {
+        guard let name = destination?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+              !phrase.hasPrefix("Slightly"), phrase != "Continue straight." else { return phrase }
+        guard phrase.hasSuffix(".") else { return "\(phrase), toward \(name)." }
+        return "\(phrase.dropLast()), toward \(name)."
+    }
+
     /// nil when the cue is not a turn (arrival is announced elsewhere).
     public static func text(kind: GuidanceInstruction.Kind, bearingRadians: Float) -> String? {
         switch kind {

@@ -514,3 +514,80 @@ final class ArrowMatchesSpeechTests: XCTestCase {
         XCTAssertNil(snapshot(instruction: "continueStraight, 5 m", spoken: "").spokenKind)
     }
 }
+
+// MARK: - Turns name their destination; the resume cue is never dropped (2026-10-17)
+
+final class TurnContextAndResumeTests: XCTestCase {
+
+    private func spoken(_ actions: [FeedbackAction]) -> [String] {
+        actions.compactMap { if case .speak(let t, _) = $0 { return t } else { return nil } }
+    }
+
+    private func instruction(_ kind: GuidanceInstruction.Kind, bearing: Float = 0,
+                             destination: String? = "Room 402",
+                             upcoming: Maneuver? = nil) -> GuidanceInstruction {
+        GuidanceInstruction(kind: kind, bearingRadians: bearing, distanceMeters: 6,
+                            targetNodeId: UUID(), targetLabel: nil, targetPosition: SIMD3(0, 0, -6),
+                            hazard: nil, upcoming: upcoming, targetKind: .corridor,
+                            destinationLabel: destination)
+    }
+
+    // MARK: Destination context
+
+    func testARealTurnNamesWhereItIsTakingYou() {
+        XCTAssertEqual(TurnSpeech.withDestination("Right.", destination: "Room 402"),
+                       "Right, toward Room 402.")
+        XCTAssertEqual(TurnSpeech.withDestination("Left 130 degrees.", destination: "Room 402"),
+                       "Left 130 degrees, toward Room 402.")
+        XCTAssertEqual(TurnSpeech.withDestination("Turn around.", destination: "Room 402"),
+                       "Turn around, toward Room 402.")
+    }
+
+    /// A small correction is housekeeping, not a decision - naming the destination every few seconds
+    /// would bury the cues that matter.
+    func testCorrectionsAndStraightStayBare() {
+        XCTAssertEqual(TurnSpeech.withDestination("Slightly right 20 degrees.", destination: "Room 402"),
+                       "Slightly right 20 degrees.")
+        XCTAssertEqual(TurnSpeech.withDestination("Continue straight.", destination: "Room 402"),
+                       "Continue straight.")
+    }
+
+    func testAnUnlabelledDestinationChangesNothing() {
+        XCTAssertEqual(TurnSpeech.withDestination("Right.", destination: nil), "Right.")
+        XCTAssertEqual(TurnSpeech.withDestination("Right.", destination: "   "), "Right.")
+    }
+
+    func testThePlannerPutsTheDestinationIntoTheTurnCue() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: instruction(.turnRight, bearing: 1.5),
+                                       obstacle: .clear, trackingOK: true, time: 1))
+        XCTAssertTrue(said.contains { $0.contains("toward Room 402") }, "\(said)")
+    }
+
+    // MARK: The resume cue
+
+    /// The bug: "Continue straight." was `.normal`, which SpeechGate drops whenever the speaker is
+    /// busy - and it always is right after a turn. The planner had already marked it announced, so
+    /// the cue telling the user to carry on was lost every time.
+    func testTheResumeCueIsQueuedNotDroppable() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: instruction(.turnRight, bearing: 1.5), obstacle: .clear,
+                         trackingOK: true, time: 1)
+        let actions = planner.plan(instruction: instruction(.continueStraight), obstacle: .clear,
+                                   trackingOK: true, time: 5)
+        for action in actions {
+            if case .speak(let text, let priority) = action, text.hasPrefix("Continue straight") {
+                XCTAssertEqual(priority, .high, "a droppable resume cue is how it went missing")
+                return
+            }
+        }
+        XCTFail("the resume cue was not emitted at all: \(spoken(actions))")
+    }
+
+    /// A `.high` line queues rather than being discarded when the speaker is mid-sentence.
+    func testGateQueuesTheResumeCueWhileATurnIsStillBeingSpoken() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Continue straight.", priority: .high,
+                                   isSpeaking: true, now: 1), .enqueue)
+    }
+}
