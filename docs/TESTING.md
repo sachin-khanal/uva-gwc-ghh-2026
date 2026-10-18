@@ -1,5 +1,7 @@
 # Testing — what is proven, and the device test plan
 
+**Update 2026-10-18 (Codex):** On `feature/guidance-overhaul`, classic UI tests now select a real saved scan using `nav.map`, with no fixed SAMPLE/Room 204 requirement. The obstacle naming test clears the trash-can hazard before introducing a wall, because stationary classifier kind changes are intentionally silent. `make test`: 406 pass; `make typecheck`: PASS. Revised UI tests are UNVERIFIED ON DEVICE; retain the prior results as historical evidence.
+
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
 
 First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
