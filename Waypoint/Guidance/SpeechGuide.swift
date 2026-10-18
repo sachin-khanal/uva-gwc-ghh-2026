@@ -13,8 +13,8 @@ import WaypointCore
 
 final class SpeechGuide {
 
-    func say(_ text: String, priority: SpeechPriority) {
-        Speaker.shared.say(text, priority: priority)
+    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false) {
+        Speaker.shared.say(text, priority: priority, staysFresh: staysFresh)
     }
 
     func stop() {

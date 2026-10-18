@@ -37,6 +37,11 @@ public struct GuidanceSnapshot: Equatable, Sendable {
     public var destinationLabel: String
     /// Raw status from the source, for the escort panel only.
     public var rawStatus: String
+    /// The line the app most recently SPOKE, when a live service is driving guidance.
+    /// The screen shows this so that what is written and what is heard agree - they were derived
+    /// separately and drifted apart, which is confusing when you can see and hear both
+    /// (device report 2026-10-17). nil in mock mode, where the UI does the talking.
+    public var lastSpoken: String?
 
     public init(
         phase: GuidancePhase = .idle,
@@ -65,12 +70,45 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         switch phase {
         case .idle: return "Ready"
         case .localizing: return "Finding your position"
-        case .guiding: return SpokenText.instruction(kind ?? .continueStraight)
+        case .guiding:
+            // Prefer the words actually spoken, so the screen is not a paraphrase of the voice - but
+            // only when they are a short DIRECTIVE. A briefing ("Walk straight about 8 metres, then
+            // turn left.") is narration: as a headline it truncates to nonsense and can contradict the
+            // arrow beside it, which was exactly what happened on a walk (2026-10-17). Long lines go
+            // in `detail` instead.
+            if let line = Self.directive(lastSpoken) { return line }
+            return SpokenText.instruction(kind ?? .continueStraight)
         case .lost: return "Position lost"
         case .obstacleStop: return "Stop"
         case .arrived: return "You have arrived"
         case .failed: return "Guidance can't continue"
         }
+    }
+
+    /// The direction the user was actually TOLD, read back out of the spoken line.
+    ///
+    /// The arrow used to come from `kind`, which updates every tick, while speech is deliberately
+    /// rate limited - so the screen could show a left arrow while the voice had just said "Right."
+    /// On a debugging screen that is merely confusing; for anyone trusting both it is contradictory
+    /// (device report 2026-10-17). The arrow now follows the words.
+    public var spokenKind: GuidanceInstruction.Kind? {
+        guard let line = lastSpoken?.lowercased(), !line.isEmpty else { return nil }
+        if line.hasPrefix("turn around") { return .turnAround }
+        if line.contains("left") { return .turnLeft }
+        if line.contains("right") { return .turnRight }
+        if line.hasPrefix("continue straight") || line.hasPrefix("walk straight") { return .continueStraight }
+        return nil
+    }
+
+    /// Longest line we are willing to show as a headline before it truncates on a phone.
+    static let maxHeadlineCharacters = 30
+
+    /// A short, single instruction ("Right.", "Turn around.") rather than narration. nil when the text
+    /// is missing, long, or is a sentence describing several steps.
+    static func directive(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        guard text.count <= maxHeadlineCharacters, !text.contains(", then ") else { return nil }
+        return text
     }
 
     /// The line under the headline.
@@ -79,6 +117,8 @@ public struct GuidanceSnapshot: Equatable, Sendable {
         case .idle: return ""
         case .localizing: return "Slowly turn left and right"
         case .guiding:
+            // Narration that was too long to headline still belongs on screen.
+            if let spoken = lastSpoken, !spoken.isEmpty, Self.directive(spoken) == nil { return spoken }
             guard let d = distanceToNext else { return "" }
             return SpokenText.capitalizingFirst(SpokenText.distance(d)) + " to the next point"
         case .lost: return "Hold still"

@@ -83,12 +83,16 @@ final class NavigationController: ObservableObject {
     private var planner = FeedbackPlanner()
     private var obstacles = ObstacleClassifier()
     private var postureMonitor = PostureMonitor()
+    /// Suggests a way round a blocked path, so a cue can say why it is asking for a turn.
+    private var avoidance = AvoidanceAdvisor()
     private let identifier = ObstacleIdentifier()
     private let signReader = SignReader()
     private var routePlanner: RoutePlanner?
     /// What the sensors say about the surroundings right now (room on each side, how close ahead). Feeds warnings and the opening briefing.
     private var sceneContext: SceneContext?
     private var openingQueued = false
+    /// The text of the opening briefing, so the speaker can be told it must not be dropped as stale (see Speaker.openingMaxQueuedAge).
+    private var openingBriefingText: String?
     /// Where to save remembered routes (real mode only; simulation does not persist).
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
@@ -104,8 +108,11 @@ final class NavigationController: ObservableObject {
     private var follower: RouteFollower?
     /// Holds the first route back until the relocalized pose has settled (see StartGate).
     private var startGate = StartGate()
-    /// Consecutive ticks spent far from the route; drives re-routing.
-    private var offRouteTicks = 0
+    /// How often the route is recomputed from the CURRENT position. A* over a few hundred nodes is
+    /// microseconds; this interval is about not thrashing the published route, not about cost.
+    private static let routeRecomputeSeconds: TimeInterval = 0.5
+    private var lastRouteComputation: TimeInterval = -.greatestFiniteMagnitude
+    private var lastRerouteAnnouncement: TimeInterval = -.greatestFiniteMagnitude
     /// Recent positions, for working out whether the user is actually walking.
     private var lastMovementSample: (position: SIMD3<Float>, time: TimeInterval)?
     private var isMoving = true
@@ -115,10 +122,18 @@ final class NavigationController: ObservableObject {
     /// How far apart movement samples are taken. Shorter than this and ARKit's pose noise looks like
     /// walking; longer and we react too slowly.
     private static let movementSampleSeconds: TimeInterval = 0.6
-    /// How far off the route counts as "off route". Wider than a corridor, so normal drift is ignored.
-    private static let rerouteMeters: Float = 5
-    /// ~1.5 s at the 10 Hz tick: long enough that a bad pose sample cannot trigger a re-route.
-    private static let rerouteTicks = 15
+    /// How far off the route counts as "off route". Still wider than a corridor so normal drift is
+    /// ignored, but 5 m meant walking the wrong way for several seconds before anything happened
+    /// (device report 2026-10-17).
+    private static let rerouteMeters: Float = 3
+    /// A position change larger than this between ticks is not walking - it is relocalization
+    /// correcting itself. Treating it as walking made the app think the user had left the route and
+    /// re-route, over and over (device report 2026-10-17). 3 m in a 0.1 s tick is 30 m/s.
+    private static let poseJumpMeters: Float = 3
+    /// How often we are willing to SAY "Recalculating". The computation is continuous now; the
+    /// SPEECH is what must not machine-gun.
+    private static let minimumSecondsBetweenReroutes: TimeInterval = 5
+    private var lastTickPosition: SIMD3<Float>?
     private var lastTick: TimeInterval = 0
     private var beaconLogCounter = 0
     private var lastLoggedKind: GuidanceInstruction.Kind?
@@ -218,15 +233,18 @@ final class NavigationController: ObservableObject {
         headingRadians = nil
         self.destination = destination
         follower = nil
-        offRouteTicks = 0
         lastMovementSample = nil
         isMoving = true
+        lastTickPosition = nil
+        lastRouteComputation = -.greatestFiniteMagnitude
+        lastRerouteAnnouncement = -.greatestFiniteMagnitude
         routeWorldPositions = []
         lastRouteWorldKey = ""
         startGate.reset()
         planner.reset()
         obstacles.reset()
         postureMonitor.reset()
+        avoidance.reset()
         identifier.reset()
         simulatedTime = 0
         lastSpoken = ""
@@ -235,6 +253,7 @@ final class NavigationController: ObservableObject {
 
         do { try audio.start() } catch { Log.guidance.error("audio start failed: \(error.localizedDescription)") }
         openingQueued = false
+        openingBriefingText = nil
         sceneContext = nil
         // Short on purpose: the full "where you are / what is around / how to go" briefing follows as soon as the position has settled.
         speech.say("Navigating to \(destination.label ?? "your destination").", priority: .normal)
@@ -267,8 +286,10 @@ final class NavigationController: ObservableObject {
         }
         sceneContext = ObstacleDetector.sideClearances(in: frame, ahead: hit?.depth)
         if trackingOK { signReader.process(frame) }
+        // Is there a clearly better way round? Suggestion only - see AvoidanceAdvisor's safety note.
+        let avoidTowards = avoidance.advise(hit?.clearance ?? .init())
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
-             nearestDepth: hit?.depth, report: report, time: frame.timestamp)
+             nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards)
     }
 
     /// Simulated driver: one timer tick.
@@ -299,7 +320,7 @@ final class NavigationController: ObservableObject {
     // MARK: The shared loop
 
     private func tick(camera: simd_float4x4, mapToWorld: simd_float4x4, trackingOK: Bool, nearestDepth: Float?,
-                      report: ObstacleReport?, time: TimeInterval) {
+                      report: ObstacleReport?, time: TimeInterval, avoidTowards: Side? = nil) {
         let level = obstacles.update(nearest: nearestDepth)
         if level != obstacleLevel { obstacleLevel = level }
 
@@ -319,39 +340,66 @@ final class NavigationController: ObservableObject {
                 follower = makeFollower(from: mapPosition, graph: graph, destination: destination)
                 routeNodeIds = follower?.route.map(\.id) ?? []
             }
+            // A position change larger than a person can walk between ticks is relocalization
+            // correcting itself, not movement. It must not be read as walking.
+            let jumped = lastTickPosition.map {
+                Geometry.horizontalDistance($0, mapPosition) > Self.poseJumpMeters
+            } ?? false
+            lastTickPosition = mapPosition
+            if jumped { lastMovementSample = nil }
+
             if !openingQueued, let f = follower {
                 // Once per navigation: where you are, what is around, how to get there (kept short; see StartBriefing).
                 openingQueued = true
                 let first = f.update(position: mapPosition, forward: mapForward)
                 if first.kind != .arrived {
-                    planner.queueBriefing(StartBriefing.text(position: mapPosition, forward: mapForward, graph: graph, route: f.route,
-                                                             destination: destination, context: sceneContext, firstManeuver: first.upcoming))
+                    let opening = StartBriefing.text(position: mapPosition, forward: mapForward, graph: graph, route: f.route,
+                                                     destination: destination, context: sceneContext, firstManeuver: first.upcoming)
+                    openingBriefingText = opening
+                    planner.queueBriefing(opening)
                 }
             }
             // Only publish real changes (see setIfChanged): at 10 Hz an unconditional assignment keeps the screen redrawing and the UI tests never idle.
             setIfChanged(\.mapPosition, mapPosition)
             setIfChanged(\.headingRadians, atan2(mapForward.x, -mapForward.z))
-            updateMovement(position: mapPosition, time: time)
+            if !jumped { updateMovement(position: mapPosition, time: time) }
             updateRouteWorldPositions(mapToWorld: mapToWorld)
-            // Re-route when the user is genuinely somewhere else. The route used to be computed once
-            // and kept for the whole session, so walking a different (often shorter) way than the one
-            // the volunteer scanned left the app insisting on its original path (device report
-            // 2026-10-17).
-            if let current = follower, current.distanceFromRoute(position: mapPosition) > Self.rerouteMeters {
-                offRouteTicks += 1
-                if offRouteTicks >= Self.rerouteTicks {
-                    offRouteTicks = 0
-                    if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
-                        follower = rebuilt
+
+            // ROUTE CONTINUOUSLY, rather than deciding when the old route has gone stale.
+            //
+            // Three attempts at that decision each fixed one case and broke another - off-route
+            // counters, drift detection, pose-jump suppression - and the user still ended up following
+            // a route that started where they had never been (device reports, 2026-10-17). A* over a
+            // few hundred nodes is cheap, so the route is simply recomputed from the CURRENT position
+            // a couple of times a second. It cannot be stale, whatever the pose does.
+            //
+            // Speech is what needs rationing, not computation: a new route is adopted silently, and
+            // "Recalculating" is said only when the user had genuinely wandered off the old one.
+            if follower != nil, time - lastRouteComputation >= Self.routeRecomputeSeconds {
+                lastRouteComputation = time
+                let strayed = follower.map { $0.distanceFromRoute(position: mapPosition) > Self.rerouteMeters } ?? false
+                if let rebuilt = makeFollower(from: mapPosition, graph: graph, destination: destination) {
+                    let changed = rebuilt.route.map(\.id) != routeNodeIds
+                    follower = rebuilt
+                    if changed {
                         routeNodeIds = rebuilt.route.map(\.id)
                         lastRouteWorldKey = ""
-                        planner.reset()
-                        speech.say("Recalculating.", priority: .high)
-                        Log.nav.info("re-routed: \(rebuilt.route.count) waypoints")
+                        // Diagnostic: if the route ever starts somewhere the user is not, these two
+                        // numbers say so immediately instead of needing another walk to guess from.
+                        if let first = rebuilt.route.first {
+                            Log.nav.info(String(format: "route from (%.1f, %.1f) starts at (%.1f, %.1f), %.1f m away, %d waypoints",
+                                                mapPosition.x, mapPosition.z,
+                                                first.position.x, first.position.z,
+                                                Geometry.horizontalDistance(mapPosition, first.position),
+                                                rebuilt.route.count))
+                        }
+                        if strayed, time - lastRerouteAnnouncement >= Self.minimumSecondsBetweenReroutes {
+                            lastRerouteAnnouncement = time
+                            speech.say("Recalculating.", priority: .high)
+                            Log.nav.info("re-routed: \(rebuilt.route.count) waypoints, user was off route")
+                        }
                     }
                 }
-            } else {
-                offRouteTicks = 0
             }
             // Our addition (feature/route-memory): a path that stays blocked (STOP for several seconds) is detoured for a while.
             if !isSimulating, let current = follower {
@@ -377,7 +425,8 @@ final class NavigationController: ObservableObject {
         }
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
-                                   posture: posture, report: report, time: time, context: sceneContext, isMoving: isMoving)
+                                   posture: posture, report: report, time: time, context: sceneContext, isMoving: isMoving,
+                                   avoidTowards: avoidTowards)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 
@@ -472,20 +521,29 @@ final class NavigationController: ObservableObject {
     /// Executes FeedbackPlanner output. Beacon positions arrive in the MAP frame and are converted
     /// to the camera-local frame here because that is what the audio engine expects.
     private func perform(_ actions: [FeedbackAction], camera: simd_float4x4, mapToWorld: simd_float4x4) {
-        // One tick can produce several `.speak` actions (e.g. arrival + a hazard). Saying them one by
-        // one made each `.high` line cut off the one before it mid-word, because SpeechGuide stops the
-        // synthesizer for every high-priority utterance. Join them into a single sentence instead, at
-        // the highest priority present, so nothing is clipped and nothing overlaps.
-        let spoken = actions.compactMap { action -> (String, SpeechPriority)? in
-            if case .speak(let text, let priority) = action { return (text, priority) }
-            return nil
+        // ONE MOVE AT A TIME. A tick can produce several `.speak` actions (a turn, a landmark, a
+        // hazard). Joining them into a single utterance stopped them clipping each other, but it
+        // produced run-on paragraphs - "Walk straight about 8 meters, then turn left. Turn around. I..."
+        // - instead of the one thing to do now (device report 2026-10-17).
+        // They are handed over SEPARATELY, most important first: `Speaker` says the first and holds at
+        // most one more, so the user hears a single instruction and then, if it still applies a moment
+        // later, the next one.
+        let spoken = actions
+            .compactMap { action -> (text: String, priority: SpeechPriority)? in
+                if case .speak(let text, let priority) = action { return (text, priority) }
+                return nil
+            }
+            .sorted { $0.priority > $1.priority } // stable: equal priorities keep planner order
+        if let first = spoken.first {
+            setIfChanged(\.lastSpoken, first.text)
+            recentSpeech = Array((recentSpeech + [first.text]).suffix(6))
         }
-        if !spoken.isEmpty {
-            let text = spoken.map(\.0).joined(separator: " ")
-            let priority: SpeechPriority = spoken.contains { $0.1 == .high } ? .high : .normal
-            setIfChanged(\.lastSpoken, text)
-            recentSpeech = Array((recentSpeech + [text]).suffix(6))
-            speech.say(text, priority: priority)
+        for line in spoken {
+            // ARRIVAL must never wait or be dropped as stale behind a longer line (the opening briefing, a countdown): once you are there, whatever is
+            // still being said is out of date. It interrupts, like a safety cue (found on the phone 2026-10-18: "You have arrived" was dropped after
+            // 2.7 s queued behind the briefing in the simulated walk).
+            let isArrival = line.text.hasPrefix("You have arrived")
+            speech.say(line.text, priority: isArrival ? .critical : line.priority, staysFresh: line.text == openingBriefingText)
         }
 
         for action in actions {

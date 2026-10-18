@@ -30,7 +30,7 @@ public enum DistanceSpeech {
 
 public enum ObstacleSpeech {
 
-    private static func noun(_ kind: ObstacleKind) -> String {
+    static func noun(_ kind: ObstacleKind) -> String {
         switch kind {
         case .wall: return "a wall"
         case .door: return "a door"
@@ -116,20 +116,111 @@ public enum TurnSpeech {
     /// heading estimate nor a person turning on the spot is accurate to one degree.
     public static let stepDegrees: Float = 5
 
+    /// Bands, as specified by the team after walking Rice Hall (2026-10-17):
+    ///   < 5     nothing to do, you are on course
+    ///   5-45    "Slightly right 20 degrees."   - a correction while walking
+    ///   45-60   "Right 50 degrees."            - a real but odd-sized turn
+    ///   60-120  "Right."                       - the ordinary corner; the angle adds nothing
+    ///   120-150 "Right 130 degrees."           - sharper than a corner
+    ///   >= 150  "Turn around."
+    public static let onCourseDegrees: Float = 5
+    public static let slightMaxDegrees: Float = 45
+    public static let squareMinDegrees: Float = 60
+    public static let squareMaxDegrees: Float = 120
+    public static let turnAroundDegrees: Float = 150
+
     public static func rounded(degrees: Float) -> Int {
         let step = stepDegrees
         return max(Int(step), Int((degrees / step).rounded() * step))
     }
 
+    /// The words for a turn of `bearingRadians` (positive = right), independent of WHY we are turning.
+    public static func phrase(bearingRadians: Float) -> String {
+        // The epsilon keeps the band edges honest: 5 degrees converted to radians and back is
+        // 4.9999995, which would otherwise read as "on course".
+        let degrees = abs(bearingRadians) * 180 / .pi + 1e-3
+        let side = bearingRadians > 0 ? "right" : "left"
+        switch degrees {
+        case ..<onCourseDegrees:
+            return "Continue straight."
+        case ..<slightMaxDegrees:
+            return "Slightly \(side) \(rounded(degrees: degrees)) degrees."
+        case ..<squareMinDegrees:
+            return "\(side.capitalized) \(rounded(degrees: degrees)) degrees."
+        case ..<squareMaxDegrees:
+            // A square corner. Saying "90 degrees" adds nothing a person can act on.
+            return "\(side.capitalized)."
+        case ..<turnAroundDegrees:
+            return "\(side.capitalized) \(rounded(degrees: degrees)) degrees."
+        default:
+            return "Turn around."
+        }
+    }
+
+    /// A suggestion to step aside, with the reason: "Slightly left, there is a wall ahead."
+    /// A suggestion, never a command - see the safety note on `AvoidanceAdvisor`.
+    public static func avoidance(side: Side, obstacle: ObstacleKind?) -> String? {
+        let direction: String
+        switch side {
+        case .left: direction = "left"
+        case .right: direction = "right"
+        case .ahead: return nil
+        }
+        guard let obstacle else { return "Slightly \(direction)." }
+        return "Slightly \(direction), there is \(ObstacleSpeech.noun(obstacle)) ahead."
+    }
+
+    /// A real turn, named for what it is FOR: "Right, toward Room 402."
+    ///
+    /// Only genuine turns get the destination. A small correction ("Slightly right 20 degrees") is
+    /// housekeeping, not a decision, and naming the destination every few seconds would bury the
+    /// cues that matter. "Continue straight" likewise stays bare.
+    public static func withDestination(_ phrase: String, destination: String?) -> String {
+        guard let name = destination?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+              !phrase.hasPrefix("Slightly"), phrase != "Continue straight." else { return phrase }
+        guard phrase.hasSuffix(".") else { return "\(phrase), toward \(name)." }
+        return "\(phrase.dropLast()), toward \(name)."
+    }
+
     /// nil when the cue is not a turn (arrival is announced elsewhere).
     public static func text(kind: GuidanceInstruction.Kind, bearingRadians: Float) -> String? {
-        let degrees = abs(bearingRadians) * 180 / .pi
         switch kind {
-        case .turnLeft:  return "Turn left \(rounded(degrees: degrees)) degrees."
-        case .turnRight: return "Turn right \(rounded(degrees: degrees)) degrees."
-        case .turnAround: return "Turn around."
-        case .continueStraight: return "Continue straight."
         case .arrived: return nil
+        case .continueStraight: return "Continue straight."
+        case .turnAround: return "Turn around."
+        case .turnLeft, .turnRight:
+            let words = phrase(bearingRadians: bearingRadians)
+            // The planner has decided this IS a turn, so never answer "continue straight" just because
+            // the measured bearing is small. Use the side the planner chose.
+            guard words == "Continue straight." else { return words }
+            let side = (kind == .turnRight) ? "right" : "left"
+            return "Slightly \(side) \(rounded(degrees: onCourseDegrees)) degrees."
+        }
+    }
+
+    /// Same turn, but say WHY when the reason is not simply the route - a user who is turning to avoid
+    /// a wall deserves to know that is what is happening (team request 2026-10-17).
+    public static func text(kind: GuidanceInstruction.Kind, bearingRadians: Float,
+                            reason: TurnReason) -> String? {
+        guard let base = text(kind: kind, bearingRadians: bearingRadians) else { return nil }
+        guard let because = reason.clause else { return base }
+        return "\(base) \(because)"
+    }
+}
+
+/// Why a turn is being asked for. `.route` is the normal case and says nothing extra.
+public enum TurnReason: Equatable, Sendable {
+    case route
+    case avoiding(ObstacleKind)
+    case backOnRoute
+
+    var clause: String? {
+        switch self {
+        case .route: return nil
+        case .backOnRoute: return "Getting you back on the route."
+        case .avoiding(let kind):
+            let noun = ObstacleSpeech.noun(kind)
+            return "There is \(noun) ahead."
         }
     }
 }
@@ -148,14 +239,15 @@ public enum ManeuverSpeech {
     }
 
     /// Spoken once at the start of a route: "Walk about 12 meters, then turn right."
+    /// ONE move, not an itinerary. The "..., then turn left" tail was dropped (2026-10-17): the
+    /// countdown already announces the turn at 10, 5 and 2 metres, and a blind user walking needs the
+    /// move they are making now - not a preview of the one after it, spoken in the same breath.
     public static func briefing(distanceToFirstManeuver m: Maneuver?) -> String? {
         guard let m else { return nil }
         let d = DistanceSpeech.meters(m.distanceMeters)
         switch m.kind {
         case .arrive: return "Walk straight about \(d)\(m.label.map { " to \($0)" } ?? "")."
-        case .turnLeft: return "Walk straight about \(d), then turn left."
-        case .turnRight: return "Walk straight about \(d), then turn right."
-        case .stairs: return "Walk straight about \(d). Then there are stairs."
+        case .turnLeft, .turnRight, .stairs: return "Walk straight about \(d)."
         }
     }
 

@@ -1,5 +1,14 @@
 # Work log
 
+## 2026-10-18 06:20 — Claude (agent, for Sachin) — Integrated U2's navigation-overhaul (12 commits) with main; conflicts resolved; two fixes   [tags: CONTRACT CHANGE, BUILD]
+Area: shared integration (U1 merge captain). Branch `integrate/navigation-overhaul` = main f912ef5 + origin/navigation-overhaul a107f85 (Anmol, 12 commits: keyframe relocalization with visual fingerprints OFF by default, "one move at a time" speech, sooner re-routing, route continuously, scan both directions (`CoverageTracker`), suggest a way round a blockage (`AvoidanceAdvisor`)). Cross-referenced first: main = origin/main; U3 and app-ui-workflows unchanged; Anmol pushed 3 more commits while this was being prepared (latest a107f85, minutes old).
+Conflicts (4 files, 8 blocks) and how they were resolved, keeping BOTH sides: `FeedbackPlanner.swift` (params `context:` + `isMoving:` + U2's `avoidTowards:`); `BuildingMap.swift` (kept my instance `schemaVersion` + `meshAssets` + U2's `keyframes`; U2's own hand-written decoder was a DUPLICATE of mine and was removed, `keyframes` is now decoded by the single decoder with `decodeIfPresent ?? []`; format 3 now also means `keyframes`, MAP_FORMAT.md updated); `NavigationController.swift` (my sensor context + opening briefing + sign speech + U2's pose-jump guard + avoidance advice); WORKLOG (both entries).
+Merge-induced problems found on the phone and fixed: (1) NAME CLASH: U2's `CaptureController.coverage` (CoverageTracker, walked both ways) vs my published `coverage` (unscanned-areas tiles): mine renamed `gaps` (+ HUD id `hud.gaps`); (2) the opening briefing was DROPPED ("dropped stale line after 2.5s") by U2's new speaker rule (one pending line, discarded after 2 s): `Speaker.say(..., staysFresh:)` lets the opening briefing wait up to 15 s and not be displaced by a newer cue (default behaviour unchanged for everything else); (3) "You have arrived at Room 204" was DROPPED the same way when it queued behind the longer briefing: the controller now sends arrival at interrupt priority (planner and its tests untouched); (4) two way-round suggestions at once ("Slightly left, there is a wall ahead" + my "Open space on your left"): my hint stays quiet whenever U2's advisor has a suggestion (+1 test); (5) my briefing test and E2E walk check updated to U2's new wording ("Walk straight about 12 meters." / "Right, toward E2E Room 2.").
+Observed, not changed (U2's design): in the 9-node sample map the destination is among the nearest start candidates, so the route becomes the straight line to Room 204 ("route has 1 nodes") and the simulated walk no longer contains the right turn; "route has N nodes" is logged every tick (noisy).
+Verified: `make test` 337 pass; `make typecheck` OK (64 app files); `make check` BUILD SUCCEEDED; ON THE PHONE (installed with `make build install`): `make selftest-e2e` 25 passed / 0 failed / 1 skipped, `make uitest` 11/11, `make selftest-sim` PASS (spoken: "Navigating to Room 204." / the opening briefing / "You have arrived at Room 204." with nothing dropped).
+NOT verified: ANY of U2's relocalization / keyframe code on a real hallway (it is OFF by default for visual fingerprints; the rest runs); a real walk with the new speech rules; `tools/validate_map.py`, `web/router.js` and migration 0005 do not check `keyframes` yet.
+Open problems / handoff: Anmol: pull main (it contains your 12 commits plus the fixes above) and tell me if you object to the `staysFresh` speaker parameter or arrival at interrupt priority; add `keyframes` limits to the validator/web/SQL with U3.
+
 ## 2026-10-18 05:40 — Claude (agent, for Sachin) — Phone results for the scan-size policy   [tags: BUILD]
 Verified: on Sachin's iPhone 16 Pro Max, build installed with `make build install` (this branch): `make selftest-e2e` 25 passed / 0 failed / 1 skipped, incl. NEW `share.overLimitSavesLocally` (a 51,000,000-byte scan saved and flagged local-only) and `share.overLimitRefusedFromOutside` (an incoming bundle with it is refused); `make uitest` 11/11 (incl. the Share maps sheet); `make selftest-sim` PASS; `make check` BUILD SUCCEEDED; the install made a fresh map backup (10 files).
 NOT verified: a real over-50 MB scan from the camera; the oversize captions on the Share screen by eye.
@@ -193,6 +202,101 @@ Verified: all of the above.
 NOT verified: RoutePlanner is NOT wired into NavigationController/SignReader/ObstacleDetector yet, so the app does not use it; no real blockage/sign detection on a device (UNVERIFIED ON DEVICE); `make uitest`, `make selftest-scan`, `make check`, SQL/Supabase tests and live cloud were not run; real LiDAR scanning and relocalization (Gate G2) still need a human walk.
 Open problems / handoff: TODO(B) wire planner into NavigationController (replace direct `Router.route`, call `detour` when ObstacleClassifier reports a persistent block, call `interpretSign` on SignReader confirmations); persist `RouteMemory` next to the map in MapStore; decide TTL and `signAgreementRadius` (5 m) from field data.
 **Update 2026-10-17 (Claude), CORRECTION:** `make selftest-sim` / `selftest-e2e` / `selftest-scan` only LAUNCH the build already installed on the phone; they do NOT rebuild or install (see Makefile). Only `make uitest`, `make run`, or `make build install` put new code on the phone. So the on-phone selftest results quoted in this entry ran on whichever build was installed at that moment (not necessarily this entry's code). The `make uitest` runs did build and install the code current at that time. Treat sim/e2e claims in this entry as NOT verified for this entry's code.
+## 2026-10-17 — Claude (agent, for Anmol) — Suggest a way round a blockage, with the reason   [tags: BUILD]
+Area: C (Vision) + B (Guidance). Branch `avoidance-reasoning` off `navigation-overhaul`. See D-045.
+
+Request: "there should also be reasonings like 'Turn slightly left, there is a wall ahead'". `TurnReason` existed and
+was tested but had no caller, because nothing produced an avoidance turn in the first place.
+Files created (WaypointCore): `Vision/AvoidanceAdvisor.swift` - ahead/left/right clearances in, a suggested side out;
+conservative by design (see D-045), sticky while blocked so the cue cannot flutter.
+Files edited (WaypointCore): `Guidance/SpokenPhrases.swift` (+`TurnSpeech.avoidance(side:obstacle:)`),
+`Guidance/FeedbackPlanner.swift` (+`avoidTowards:`; says the way round once per obstacle, re-armed when clear; never
+for a door we were routed through).
+Files edited (app): `Waypoint/Vision/ObstacleDetector.swift` (`DepthHit.clearance` - nearest thing per side, split by
+`Geometry.cameraLocalToUser` so the axis is the USER's left/right, not the image's),
+`Waypoint/Navigation/NavigationController.swift` (holds the advisor, feeds it the clearance, passes the suggestion).
+Tests added: `AvoidanceAdvisorTests` (8) - silent while the way is open, picks the clearly better side, silent when
+neither is clearly better or the better one is still too tight, nothing-detected counts as open, the suggestion is
+held while blocked and forgotten when clear, and the wording. `AvoidanceCueTests` (6) - the cue is spoken, the STOP
+warning is still given alongside it, said once per obstacle, re-armed for the next, NOT offered for a door on the
+route, and absent entirely when no side was measured.
+Verified: `make test` -> **253 tests, 0 failures** (was 247); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** No schema change; recordings unaffected. Thresholds (blocked under 1.5 m,
+decisive margin 0.6 m, usable 1.2 m, 0.35 m ahead/side split) are guesses.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Resume cue was silently dropped; turns name their destination   [tags: BUILD, BUG]
+Area: B (Guidance). Branch `turn-context-and-resume` off `navigation-overhaul`. See D-044.
+
+Asked first whether the earlier speech commits had been overridden: **no** - `3537ba1`, `df816a3`, `6478c3b` are all
+ancestors of HEAD, verified with `git merge-base --is-ancestor`.
+THE BUG: "Continue straight." was `.normal`, and `SpeechGate` drops `.normal` whenever the speaker is busy - which it
+always is right after a turn. `FeedbackPlanner` marks a cue announced (`lastKey = key`) regardless of whether the
+speaker took it, so it was never retried. The resume cue was lost after every turn, silently.
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` (all direction cues are `.high` so they queue instead of
+being dropped; both the corner cue and the heading cue pass the destination), `Guidance/SpokenPhrases.swift`
+(+`TurnSpeech.withDestination`), `Routing/GuidanceInstruction.swift` (+`destinationLabel`),
+`Routing/RouteFollower.swift` (fills it from `route.last?.label` at all three construction sites).
+Tests added: `TurnContextAndResumeTests` (6) - a real turn names the destination, corrections and "continue straight"
+stay bare, an unlabelled destination changes nothing, the planner actually puts it in the cue, the resume cue is
+emitted at `.high`, and the gate QUEUES a `.high` line while a turn is still being spoken.
+Two existing assertions pinned `.normal` for "Continue straight." and were updated - that priority is precisely what
+caused the bug.
+No schema change: `GuidanceInstruction` is a runtime type, never persisted. `schemaVersion` stays 3 and existing
+recordings are unaffected.
+Verified: `make test` -> **239 tests, 0 failures** (was 233); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (run on its own line).
+NOT verified: **UNVERIFIED ON DEVICE.** What to listen for: after a turn you should now hear "Continue straight."
+rather than silence, and a square corner should say "Right, toward Room 402."
+Open / handoff: `TurnReason` (the "why" for turns that are NOT the route, e.g. avoiding a wall) is still built,
+tested and unwired - the third option offered and not chosen this round.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Scan-both-directions coverage; keyframe recorder off the hot path   [tags: BUILD, BUG]
+Area: A (capture/relocalization) + shared core. Branch `bidirectional-coverage` off `navigation-overhaul`. See D-043.
+
+Trigger: "I scan one direction, but when walking back from that direction, it struggles."
+Finding that reframed it: the keyframe matcher requires `!usingWorldMap` and every saved scan has a world map, so the
+matcher has almost certainly NEVER run on a real map. ARKit's own relocalization is viewpoint-dependent, so the
+directional problem is ARKit's, not the fingerprints'.
+Files created (WaypointCore): `Scan/CoverageTracker.swift` - floor-plane cells x heading octants; a cell is covered
+once two of its headings are roughly reciprocal; `returnCoverage` and `shouldPromptReturnWalk`.
+Files edited (WaypointCore): `Model/BuildingMap.swift` (`merged(with:)` now unions keyframes by id - it silently
+dropped them before), `Model/MapStore.swift` (`validate()` now checks keyframe count, descriptor size and finiteness;
++`maxKeyframes`, +`maxKeyframeDescriptorBytes`).
+Files edited (app): `Waypoint/Capture/CaptureController.swift` (samples `CoverageTracker` ~4 Hz, publishes
+`returnCoverage` / `shouldWalkBack`; keyframe recording now gated on `UIPrefs.visualFingerprintsEnabled` AND throttled
+to 0.5 s - it used to run on every frame at 60 Hz), `Waypoint/Services/ScanService.swift` + `LiveScanService.swift`
+(coverage through the snapshot seam), `Waypoint/UI/VolunteerView.swift` and `Waypoint/UI/Scanner/LiveScanScreen.swift`
+(percentage in the HUD + a warning banner; WARNS, never blocks).
+Tests added: `CoverageTrackerTests` (11) - one-direction scores 0 and prompts, there-and-back scores 1, half a return
+is in between, approximately-opposite headings count, sweeping left/right does NOT count, wrap-around at 350/170
+degrees, negative yaw, a short walk is not judged, empty is safe, non-finite poses ignored, reset.
+`KeyframeMergeAndValidationTests` (6) - both sides' keyframes survive a merge, no duplicates, NaN position and
+infinite yaw refused, oversized descriptor refused, too many refused, a reasonable one passes.
+One test of mine failed first and the TEST was wrong, not the code: my `walkBack` helper stopped a stride short of the
+start, leaving the first cell seen one way, so coverage read 10/11. A volunteer walks all the way back.
+Model/* was touched (`BuildingMap.merged`, `MapStore.validate`) but the JSON SHAPE is unchanged: no field added or
+renamed, `schemaVersion` stays 3, `Samples/rice-hall-sample.json` untouched. Behaviour only - a merge that used to
+lose keyframes now keeps them, and invalid keyframes are now refused. Hence no CONTRACT CHANGE tag.
+Verified: `make test` -> **233 tests, 0 failures** (was 216); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (run on its own, not chained).
+NOT verified: **UNVERIFIED ON DEVICE.** No map format change - `schemaVersion` stays 3 and existing recordings load
+unchanged. Coverage thresholds (2 m cells, 8 octants, 60-degree tolerance, prompt under 60%) are guesses.
+Open / handoff - the A/B that tests the hypothesis:
+1. Scan a corridor ONE way. HUD coverage should stay low and the prompt appear. Save, kill the app, relaunch, stand at
+   the FAR end facing back, Navigate. This is the control; expect the reported difficulty.
+2. Scan the same corridor BOTH ways until coverage is high. Save as a second map. Repeat step 1's walk against it.
+   Success = it relocalizes from the far end where the one-direction map did not.
+3. Console: "using world map for segment X" confirms ARKit's path is in use and keyframes are not involved.
+4. `DEVICE=<id> make selftest-scan` shows tracking quality per second - useful for comparing a scan with fingerprints
+   on (old behaviour) against off, since per-frame Vision work is the suspect for the degraded maps.
+5. Known gap, documented not fixed: `Keyframe` has no `segmentId` (D-043).
+
+---
 
 ## 2026-10-17 16:20 — Claude (agent, for Sachin) — Docs-on-every-commit hook for agents and humans (AGENTS.md rule 12)   [tags: BUILD, DOCS]
 Area: D (build system/docs), shared; also touches `.github/` (U3's lane per ROADMAP, did not exist yet) at U1's request that every dev follows this.
@@ -284,6 +388,228 @@ Verified:       <what you ran and the result, e.g. `make test` -> 25 passed>
 NOT verified:   <anything involving a phone/AR/audio/haptics/Multipeer: "UNVERIFIED ON DEVICE">
 Open problems / handoff: <what the next person must know>
 ```
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Fingerprints off by default; align once; arrow follows speech   [tags: BUILD, BUG]
+Area: A (relocalization) + UI. Branch `keyframe-oneshot` off `navigation-overhaul`. See D-042.
+
+The user's question answered the diagnosis: the embeddings set `mapToWorld`, and position, route, instructions and
+speech are all computed through it, so a bad alignment presents as broken pathfinding. Route length swung 0.7 -> 2.2
+-> 10.3 -> 13.3 m between recomputes, i.e. the position was moving, not the router.
+Cause: the re-arm added in D-039 fired on every `.limited(.relocalizing)` dip, which in a corridor is constant, so a
+different keyframe re-anchored the world every few seconds.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` (re-arm removed - one alignment per session; matching also
+gated on the new preference), `Waypoint/Services/ServiceMode.swift` (+`visualFingerprints`, default FALSE, and
+`visualFingerprintsEnabled`), `Waypoint/UI/SettingsView.swift` (toggle + explanation),
+`Package/WaypointCore/Sources/WaypointCore/Flows/GuidanceState.swift` (+`spokenKind`),
+`Waypoint/UI/Navigator/GuidingView.swift` (arrow uses `spokenKind` first).
+Tests added: `ArrowMatchesSpeechTests` (3) - the arrow follows the spoken direction rather than the latest
+instruction, turn-around and straight are recognised, and non-directions ("You have arrived", "Recalculating", empty,
+nil) leave the arrow alone.
+Verified: `make test` -> **216 tests, 0 failures** (was 213); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched - keyframes are still RECORDED on
+every scan, only their USE is now opt-in.
+Open / handoff:
+1. With fingerprints OFF the app should behave as it did before D-038. That is the configuration to demo with.
+2. To make them usable: calibrate `KeyframeIndex.defaultMaxDistance` using the log line
+   "recognised a keyframe (distance X)", then turn the toggle on.
+3. Still unknown: whether the matcher ever runs on a map that HAS a saved world map (D-040). The console says
+   "using world map for segment X" or "no world map on disk".
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Route continuously; delete the staleness machinery   [tags: BUILD, BUG]
+Area: B (Navigation). Branch `continuous-routing` off `navigation-overhaul`. See D-041.
+
+Fourth report of the same fault: the user at Start, the route starting across the building, 5 waypoints / 14.3 m
+unchanged across every screenshot. My three previous fixes all added logic to decide WHEN the route had gone stale;
+each fixed one case and exposed another.
+Change: `NavigationController` recomputes the route from the current position every 0.5 s, unconditionally, and adopts
+it silently when it differs. "Recalculating" is spoken only if the user had strayed >3 m from the previous route, at
+most once per 5 s. `planner.reset()` is no longer called on a recompute - that was what bypassed the direction
+cooldown and caused bursts of contradictory speech.
+Deleted: `offRouteTicks`, `routeDistanceHistory`, `rerouteDriftMeters`, `rerouteTicks`, `lastRerouteTime` and the
+whole off-route/drift decision. Pose-jump detection remains for one job: keeping a relocalization correction out of
+the movement detector.
+Added: a log line when the route changes - user position, first waypoint position, distance between them, waypoint
+count. If this ever recurs, that line diagnoses it without another walk.
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED. No leftover references to the removed machinery.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched.
+Open / handoff:
+1. If the route STILL starts away from the user after this, the fault is not in when we recompute but in the position
+   itself - the new log line will show the user's position and the route's first waypoint and settle it.
+2. Still unknown whether keyframes run at all on a map with a saved world map (D-040); the console says
+   "using world map for segment X" or "no world map on disk".
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Clear the coarse alignment; rebuild the route after a correction   [tags: BUILD, BUG]
+Area: A (relocalization) + B (navigation). Branch `route-rebuild-on-fix` off `navigation-overhaul`. See D-040.
+
+Report with screenshots: the user stands at Start while the route begins across the building.
+Both faults were mine, from the last two commits.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` - when the fix becomes `.worldMap`, `mapToWorld` is reset to
+the identity, because ARKit's world frame IS the map frame once it has relocalized into the saved map; a leftover
+keyframe transform offset every coordinate.
+`Waypoint/Navigation/NavigationController.swift` - a pose jump now REBUILDS the route from the corrected position
+instead of merely being ignored. Quietly: no planner reset and no "Recalculating", since nothing changed for the user,
+only our estimate of where they are.
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched; existing recordings are unaffected.
+Open / handoff:
+1. **Keyframes may not be doing anything on a map that has a saved world map** - the matcher needs `.normal` tracking
+   and is skipped when a world map was supplied, and ARKit only reports `.normal` once it has already relocalized.
+   The console says which case applies: "using world map for segment X" or "no world map on disk". Worth checking
+   before investing further in keyframes.
+2. Still uncalibrated: `KeyframeIndex.defaultMaxDistance` (18).
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Latch the keyframe fix; ignore pose jumps   [tags: BUILD, BUG]
+Area: A (relocalization) + B (navigation). Branch `keyframe-latch` off `navigation-overhaul`. See D-039.
+
+Report after testing D-038: relocalization got "very quick", but pathfinding broke and directions came in
+contradicting bursts. Screenshots showed the user's marker at the destination, then mid-building, then off the trail.
+Cause (mine): the keyframe matcher kept running while `fix == .keyframe`, so a different keyframe re-anchored
+`mapToWorld` every 0.5 s. Each re-anchor teleported the position -> looked off-route -> re-route -> `planner.reset()`
+-> direction cooldown cleared -> burst of contradictory speech.
+Files edited: `Waypoint/Relocalization/Relocalizer.swift` (match only while `fix == .none`; re-arm when tracking is
+lost), `Waypoint/Navigation/NavigationController.swift` (pose-jump detection BEFORE anything consumes the position -
+over 3 m between ticks resets the off-route counters and the movement sampler and skips the off-route test; re-routes
+limited to one per 5 s).
+Verified: `make test` -> 213 tests, 0 failures; `make typecheck` OK (61 app files, 1 UI test file); `make check` ->
+BUILD SUCCEEDED (run on its own line).
+NOT verified: **UNVERIFIED ON DEVICE.** The three new constants (3 m jump, 5 s between re-routes, re-arm on lost
+tracking) are guesses.
+Open / handoff:
+1. Still needs calibration: `KeyframeIndex.defaultMaxDistance` (18) - the log line
+   "recognised a keyframe (distance X)" gives the real numbers.
+2. If the position still drifts after this, the next suspect is the keyframe pose itself: a descriptor match assumes
+   the user stands where the volunteer stood, so a match from 2 m away seeds a pose 2 m out. ARKit should absorb that
+   once it relocalizes properly; if it does not, the seed should be treated as a hint for ARKit rather than as the
+   answer.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Keyframe relocalization (D-035 option 2)   [tags: BUILD, CONTRACT CHANGE]
+Area: A (maps/relocalization) + C (vision). Branch `keyframe-relocalization` off `navigation-overhaul`. See D-038.
+
+CONTRACT CHANGE: `BuildingMap.keyframes: [Keyframe]`, `schemaVersion` 2 -> 3.
+Files created (WaypointCore): `Model/Keyframe.swift` - `Keyframe` (position, yaw, opaque descriptor; pose recovery by
+the same maths as the marker) and `KeyframeIndex` (nearest match with a maxDistance, an AMBIGUITY test, and a spacing
+rule), with the distance function injected so the whole thing is testable without Vision.
+Files created (app): `Waypoint/Vision/KeyframeRecorder.swift` - Vision feature prints, archived for storage, and the
+distance between two of them.
+Files edited: `Model/BuildingMap.swift` (+keyframes, +hand-written `init(from:)`), `Waypoint/Capture/CaptureController.swift`
+(records one keyframe per 2.5 m on a background queue, only while tracking is normal; written into the map on save),
+`Waypoint/Relocalization/Relocalizer.swift` (+`fix` telling coarse from exact; matches a live frame at most twice a
+second until something exact arrives).
+Tests added: `KeyframeTests` (9) - closest match, REFUSES to choose between two places that look alike, neighbours of
+the same spot do not count as ambiguity, nothing-close is no match, uncomparable descriptors are skipped, pose
+recovery round-trips, spacing, and TWO format-compatibility tests.
+A mistake worth recording: I added `keyframes` with a default value and claimed old maps would still decode. They did
+not - Swift's synthesized decoder requires the key regardless of the default - and 37 tests failed at once. Fixed with
+an explicit `init(from:)` using `decodeIfPresent`. This is the second time this session a "safe optional field"
+assumption was wrong; the lesson is that a default value is not the same as an optional KEY.
+Verified: `make test` -> **213 tests, 0 failures** (was 204); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED; `tools/validate_map.py` PASSes both the sample map and a hand-written map WITH
+keyframes.
+NOT verified: **UNVERIFIED ON DEVICE.** No feature print has been computed on a phone. The `maxDistance` of 18 is a
+guess - Vision's distances are not normalised - and must be calibrated in a real corridor before this is trusted. The
+`.right` image orientation passed to Vision assumes a portrait phone and wants checking.
+Open / handoff:
+1. Calibrate `KeyframeIndex.defaultMaxDistance` and `defaultAmbiguityRatio` on a phone: log the distances of correct
+   and incorrect matches in a corridor, then set the threshold between them.
+2. Only maps scanned AFTER this change have keyframes; older maps relocalize exactly as before.
+3. Map files grow by a few KB per keyframe - worth measuring against the 40 MB export budget on a long scan.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — One move at a time: stop speaking paragraphs   [tags: BUILD, BUG]
+Area: B (Guidance). Branch `one-move-at-a-time` off `navigation-overhaul`. See D-037.
+
+Cause was my own earlier fix: `perform` joined every `.speak` action in a tick into one utterance (D-023, to stop
+lines clipping each other), which produced run-on paragraphs.
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` (lines handed over separately, sorted most
+important first), `Waypoint/Guidance/Speaker.swift` (the one pending slot now keeps the most IMPORTANT line, not the
+newest; equal priorities still prefer the newest).
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` (`SpeechPriority: Comparable` with an explicit rank),
+`Guidance/SpokenPhrases.swift` (briefing drops the ", then turn left" / ". Then there are stairs." tails).
+Tests added: `OneMoveAtATimeTests` (5) - the briefing describes only the move being made, arrival keeps its
+destination, stairs are still warned by the countdown, NO line the planner emits contains ", then ", and priorities
+are ordered.
+Three existing briefing assertions were updated to the shorter wording.
+Verified: `make test` -> **204 tests, 0 failures** (was 199); `make typecheck` OK (60 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (checked on its own, after pushing a broken build earlier today by reading a chained
+command's output).
+NOT verified: **UNVERIFIED ON DEVICE.** Recording and the map format are untouched; existing recordings are unaffected.
+Open / handoff: unchanged - relocalization anchoring (D-035), `TurnReason` has no caller, CarPlay-style layout,
+the stashed account-auth work.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Fix a broken build I pushed one commit earlier   [tags: BUILD, BUG]
+Area: B (Navigation). Branch `navigation-overhaul`.
+My previous commit (28c88fd) left an EXTRA CLOSING BRACE in `Waypoint/Navigation/NavigationController.swift` when I
+restructured the re-route block, so the app target did not compile. I committed and pushed it anyway: I read
+"BUILD SUCCEEDED" from `make check` in a combined command whose earlier step had already failed, and `make test` passes
+regardless because it only builds WaypointCore, not the app.
+Fix: removed the stray brace. `make typecheck` OK (60 app files, 1 UI test file); `make check` -> BUILD SUCCEEDED;
+`make test` -> 199 tests, 0 failures.
+Lesson for anyone chaining these: `make test` green says nothing about the app target. Check `make typecheck` or
+`make check` output on its own line before committing app-side changes.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Faster re-routing; no briefing while facing backwards   [tags: BUILD, BUG]
+Area: B (Navigation/Guidance) + UI text. Branch `reroute-and-briefing` off `navigation-overhaul`. See D-036.
+
+Reported after a good run: it did not recalculate until the user was very far off the path, and when it did it said
+"walk straight" while the screen and the right action were "turn around".
+Files edited (app): `Waypoint/Navigation/NavigationController.swift` - re-route threshold 5 m -> 3 m and 1.5 s -> 1 s,
+plus a drift trigger (distance from the route grown by 1.5 m within 2 s while moving). Both counters reset on a
+re-route and on `begin`.
+Files edited (WaypointCore): `Guidance/FeedbackPlanner.swift` - the route briefing is suppressed while the cue is
+`.turnAround`; `Flows/GuidanceState.swift` - `directive(_:)` decides whether the spoken line is short enough to be a
+headline, otherwise it becomes the detail line.
+Tests added: `RecalculationWordingTests` (5) - no briefing while facing the wrong way, the briefing arrives once they
+have turned, a short directive headlines, long narration goes to detail, and directive recognition.
+Verified: `make test` -> **199 tests, 0 failures** (was 194); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** Nothing here touches recording or the map format - existing recordings are
+unaffected.
+Open / handoff:
+1. The drift trigger depends on `isMoving`, which comes from the camera pose; if that proves noisy on a phone the
+   trigger will fire late rather than wrongly (it requires movement to fire at all).
+2. Still open from D-035: relocalization is slow because nothing anchors it. The printed marker remains the answer.
+3. `TurnReason` is still unused by callers - obstacle-driven turns do not yet say why.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Turn vocabulary, stale-line fix, screen/speech agreement   [tags: BUILD, BUG]
+Area: B (Guidance) + UI. Branch `speech-accuracy` off `navigation-overhaul`. See D-034 and D-035.
+
+Files edited (WaypointCore): `Guidance/SpokenPhrases.swift` (`TurnSpeech` rewritten to the team's bands, +`TurnReason`,
+epsilon on the band edges because 5 degrees round-trips through radians as 4.9999995), `Flows/GuidanceState.swift`
+(+`lastSpoken`, headline prefers it).
+Files edited (app): `Waypoint/Guidance/Speaker.swift` (own single-slot queue with a 2 s freshness limit;
+`AVSpeechSynthesizerDelegate` to speak the pending line when the current one ends; cancel clears it),
+`Waypoint/Services/LiveGuidanceService.swift` (feeds `lastSpoken`).
+Tests added: `TurnWordingTests` (9) - every band, a decided turn never spoken as straight, reasons appended, and the
+screen showing the spoken words with a fallback for mock mode.
+Seven existing tests asserted the old "Turn right 85 degrees." vocabulary and were updated to the new bands.
+Verified: `make test` -> **194 tests, 0 failures** (was 185); `make typecheck` OK; `make check` -> BUILD SUCCEEDED.
+NOT verified: **UNVERIFIED ON DEVICE.** The 2 s staleness limit is a guess and is the number most likely to need
+tuning - too low and cues go missing, too high and they contradict again.
+Open / handoff:
+1. **Relocalization slowness is NOT fixed** - analysis in D-035. The honest answer is the printed marker (D-008),
+   unbuilt since the first architecture. A cheap stopgap is recording the scan's start pose and telling the user where
+   to stand and which way to face.
+2. `TurnReason` exists and is tested but no caller passes anything but `.route` yet; wiring the obstacle-driven turns
+   to pass `.avoiding(...)` is the follow-up.
 
 ---
 

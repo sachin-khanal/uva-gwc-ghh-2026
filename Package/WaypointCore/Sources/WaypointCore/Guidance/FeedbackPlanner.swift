@@ -28,7 +28,7 @@
 import Foundation
 import simd
 
-public enum SpeechPriority: Equatable, Sendable {
+public enum SpeechPriority: Equatable, Comparable, Sendable {
     /// Safety: cuts off whatever is being said, right now. Only an obstacle at STOP range, or losing
     /// position, earns this - everything else can wait a second.
     case critical
@@ -38,6 +38,18 @@ public enum SpeechPriority: Equatable, Sendable {
     case high
     /// Ambient. Skipped entirely if something is already being said; it will come round again.
     case normal
+
+    /// Higher means more important. Declared explicitly rather than relying on declaration order, so
+    /// adding a case later cannot silently reorder guidance.
+    var rank: Int {
+        switch self {
+        case .critical: return 2
+        case .high: return 1
+        case .normal: return 0
+        }
+    }
+
+    public static func < (a: SpeechPriority, b: SpeechPriority) -> Bool { a.rank < b.rank }
 }
 
 public enum HapticCue: Equatable, Sendable {
@@ -104,6 +116,8 @@ public struct FeedbackPlanner {
     private var turnInProgress: GuidanceInstruction.Kind?
     /// The "you will need to open it" line has been said for the door we are standing at.
     private var announcedWayThrough = false
+    /// The way round the current obstacle has been suggested. Re-armed when the way is clear.
+    private var announcedAvoidance = false
 
     public init() {}
 
@@ -126,6 +140,7 @@ public struct FeedbackPlanner {
         announcedCorners = []
         turnInProgress = nil
         announcedWayThrough = false
+        announcedAvoidance = false
     }
 
     /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
@@ -140,7 +155,8 @@ public struct FeedbackPlanner {
         report: ObstacleReport? = nil,
         time: TimeInterval? = nil,
         context: SceneContext? = nil,
-        isMoving: Bool? = nil
+        isMoving: Bool? = nil,
+        avoidTowards: Side? = nil
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
 
@@ -210,12 +226,24 @@ public struct FeedbackPlanner {
                     actions.append(.haptic(.obstacleCaution))
                 }
             } else {
+                // A way round, with the reason - "Slightly left, there is a wall ahead." Said once per
+                // obstacle, right after the warning, and only when the sides were actually measured.
+                // It SUGGESTS: the depth sensor cannot promise the floor that way is safe, so the
+                // stop warning below is never replaced by it (see AvoidanceAdvisor).
+                if let avoidTowards, !announcedAvoidance,
+                   let text = TurnSpeech.avoidance(side: avoidTowards, obstacle: report?.kind) {
+                    announcedAvoidance = true
+                    actions.append(.speak(text, priority: .high))
+                }
+                // ONE way round, not two: when `AvoidanceAdvisor` (U2) has a suggestion ("Slightly left, there is a wall ahead.") the plain
+                // surroundings hint ("Open space on your left.") stays quiet; it only speaks when the advisor has no clear side to suggest.
+                let hintContext = avoidTowards == nil ? context : nil
                 switch obstacle {
                 case .stop:
-                    actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, context), priority: .critical))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.stop(report), report, hintContext), priority: .critical))
                     if levelChanged || repeatDue { actions.append(.haptic(.obstacleStop)) }
                 case .caution:
-                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, context), priority: .critical))
+                    actions.append(.speak(Self.withHint(ObstacleSpeech.caution(report), report, hintContext), priority: .critical))
                     if levelChanged { actions.append(.haptic(.obstacleCaution)) }
                 case .clear:
                     break
@@ -224,7 +252,10 @@ public struct FeedbackPlanner {
             lastObstacleSpeech = time ?? lastObstacleSpeech
         }
         lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
-        if obstacle == .clear { announcedWayThrough = false } // through it (or it moved): arm for the next one
+        if obstacle == .clear {
+            announcedWayThrough = false // through it (or it moved): arm for the next one
+            announcedAvoidance = false
+        }
         lastObstacle = obstacle
         // Keep guiding toward a door/stairs we are meant to go through; only a real obstacle silences
         // the beacon and stops everything else.
@@ -273,7 +304,10 @@ public struct FeedbackPlanner {
         }
 
         // 4a. Route briefing, once: how far to the first turn/stairs/destination. Replaces the first "Continue straight."
-        if !briefed, i.kind != .arrived {
+        // Never brief somebody who is facing the wrong way: "walk straight about 8 metres, then turn
+        // left" is nonsense until they have turned around, and it directly contradicts the turn-around
+        // cue they are being given at the same moment (device report 2026-10-17). The briefing waits.
+        if !briefed, i.kind != .arrived, i.kind != .turnAround {
             briefed = true
             if let opening = pendingBriefing {
                 // The full opening (where you are, what is around, how to go). High priority so the "Navigating to ..." line cannot swallow it.
@@ -338,7 +372,8 @@ public struct FeedbackPlanner {
                 turnInProgress = kind
                 actions.append(.haptic(kind == .turnRight ? .turnRight : .turnLeft))
                 if let text = TurnSpeech.text(kind: kind, bearingRadians: corner.angleRadians ?? 0) {
-                    actions.append(.speak(text, priority: .high))
+                    actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
+                                          priority: .high))
                 }
             } else {
             switch i.kind {
@@ -352,7 +387,12 @@ public struct FeedbackPlanner {
                 break
             }
             if let text = TurnSpeech.text(kind: i.kind, bearingRadians: i.bearingRadians) {
-                actions.append(.speak(text, priority: i.kind == .continueStraight ? .normal : .high))
+                // All direction cues are `.high` so they QUEUE. "Continue straight." used to be
+                // `.normal`, which SpeechGate drops whenever the speaker is busy - and it always is
+                // right after a turn. The planner had already recorded it as announced, so the cue
+                // telling the user to carry on was lost every single time (reported 2026-10-17).
+                actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
+                                      priority: .high))
             }
             }
         }

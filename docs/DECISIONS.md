@@ -352,3 +352,238 @@ Cancellation matters here: a load that finishes AFTER the user backed out must n
 **Status:** accepted; 185 tests pass. **UNVERIFIED ON DEVICE** - the freeze was reported on a phone and the fix has
 not been timed on one. If "Start recording" still pauses on a NEW (non-extend) scan, the remaining cost is ARKit
 starting the camera, which we cannot move.
+
+## D-034 — Turn vocabulary; one fresh queued line; the screen says what the voice says (2026-10-17)
+Three reports from a walk, plus a wording spec from the team.
+1. **Queued lines went stale.** D-032 stopped speech chopping itself up by queuing instead of interrupting, and
+created the opposite problem: a direction spoken two seconds late to somebody who has kept walking contradicts what
+they can feel. `Speaker` now holds **at most one** waiting line, always the newest, and throws it away if it is more
+than 2 s old when its turn comes. We no longer use `AVSpeechSynthesizer`'s own queue, because once handed over an
+utterance cannot be revised. So: no fragments (nothing interrupts except safety), no backlog (one slot), no stale
+lines (TTL), and contradictions resolve in favour of the latest cue.
+2. **Turn wording**, to the team's spec: under 5 degrees "Continue straight."; 5-45 "Slightly right 20 degrees.";
+45-60 and 120-150 "Right 50 degrees."; 60-120 just "Right." (a square corner needs no number); 150+ "Turn around."
+A turn the planner has DECIDED on is never spoken as "continue straight" even if the measured bearing is tiny.
+`TurnReason` adds a clause when the turn is not simply the route ("Right. There is a wall ahead.") - wired into the
+phrasing now, with the obstacle-driven callers still to follow.
+3. **Screen and speech disagreed** because each derived its own words from the same state. `GuidanceSnapshot` now
+carries `lastSpoken`, fed from `NavigationController`, and the guiding headline prefers it. Mock mode, where the UI
+does the talking, keeps its own wording.
+**Status:** accepted; 194 tests pass. UNVERIFIED ON DEVICE. Tune on a phone: the 2 s staleness limit and the band
+edges.
+
+## D-035 — Relocalization is slow because nothing anchors it; the marker is still the answer (2026-10-17)
+Report: finding the start position "takes a while and a bunch of walking around... the environment hadn't changed."
+Not yet fixed, and recorded so the reasoning is not lost. ARKit relocalization matches live feature points against the
+saved `ARWorldMap`, and it needs enough overlap from a similar viewpoint. Today the user is told "slowly turn left and
+right" and nothing else: the app knows WHERE the scan began but never tells them, and a corridor looks much the same
+from either end, so they can be standing in the right place facing the wrong way and the match never lands.
+Options, cheapest first: (a) record the scan's starting POSE in the map and tell the user where to stand and which way
+to face - a contract change plus a capture change, and it only helps if they can find that spot; (b) try EVERY segment's
+world map rather than only the first that exists (`Relocalizer` still has that TODO); (c) the printed image marker from
+D-008, which has been the designed fallback since the first architecture and is still unbuilt - it gives an exact pose
+instantly and does not care how similar the corridor looks. The marker is the real answer; (a) is a useful stopgap.
+**Status:** accepted as analysis; nothing implemented yet. Needs U4.6 (print the marker) and U1.7 (wire it up).
+
+## D-036 — Notice the wrong way sooner, and never brief someone facing backwards (2026-10-17)
+From a good Rice Hall run, two faults in the same moment.
+1. **Re-routing was too slow.** It needed 5 m off the route for 1.5 s. Walking down the wrong corridor stayed under
+that for several seconds. Now 3 m for 1 s, plus a second trigger: if the distance from the route has GROWN by 1.5 m
+within the last 2 s while the user is moving, they are walking away from it and the route is already wrong - no need
+to wait for them to get far. Both reset on a re-route so it cannot fire twice for the same departure.
+2. **The recalculated route was described from the wrong place.** `planner.reset()` re-armed the route briefing, which
+then said "Walk straight about 8 metres, then turn left." at the same moment the user was being told to turn around.
+The briefing now waits while the current cue is `.turnAround`: describing the walk before they are facing the right
+way is both wrong and contradicts the cue beside it.
+3. **The screen contradicted the arrow.** D-034 made the headline show the spoken line so screen and voice agreed, but
+a long briefing truncated to "Walk straight about 8 meters, t..." next to a turn-around arrow. The headline now takes
+the spoken line only when it is a short DIRECTIVE (<= 30 characters, not a "..., then ..." sentence); longer narration
+drops to the detail line, where it fits and cannot be mistaken for the current instruction.
+**Status:** accepted; 199 tests pass. UNVERIFIED ON DEVICE. Tune: 3 m, 1 s, and the 1.5 m / 2 s drift test.
+
+## D-037 — One move at a time: a spoken line is a single instruction (2026-10-17)
+Report: "it tries to say the entire thing in one go, rather than properly breaking it down to what's the current/next
+move." Two causes, both mine.
+1. **The controller joined a tick's lines into ONE utterance.** That was the D-023 fix for lines clipping each other,
+and it worked, but it turned "Walk straight about 8 metres, then turn left." + "Turn around." + a landmark into one
+run-on paragraph. `NavigationController.perform` now hands each line to `Speaker` SEPARATELY, most important first
+(`SpeechPriority` is `Comparable`, with an explicit rank so adding a case later cannot silently reorder guidance).
+The speaker says the first and holds at most one more, so the user hears one instruction, then - if it still applies a
+moment later - the next.
+2. **`Speaker`'s single pending slot kept the NEWEST line.** An incidental landmark could therefore displace a turn.
+It now keeps the most important one offered, falling back to newest when priorities are equal (so two competing
+directions still resolve in favour of the latest).
+3. **The route briefing was an itinerary.** "Walk straight about 8 metres, then turn left." asked a walking blind user
+to hold two moves at once. The tail is gone: the briefing is "Walk straight about 8 metres." The turn is announced by
+the countdown at 10, 5 and 2 metres, and the turn cue itself fires at the corner, so nothing is lost - the stairs
+clause goes the same way and stairs are still warned by the countdown, earlier than the briefing did. Arrival keeps
+its destination ("...about 12 metres to Room 442."), because reaching that place IS the move.
+A test now asserts that no line the planner emits contains ", then " at all.
+**Status:** accepted; 204 tests pass. UNVERIFIED ON DEVICE.
+
+## D-038 — Keyframes: recognise the PLACE to relocalize faster (2026-10-17)   [CONTRACT CHANGE]
+Chosen by the team from the options in D-035, option 2. ARKit's relocalization is already image-based, so more of the
+same kind of matching would not help; a keyframe adds DIFFERENT information - a whole-image descriptor compared by
+nearest neighbour, which recognises a place from one frame instead of accumulating feature matches.
+While scanning, one `Keyframe` is recorded every ~2.5 m: an Apple Vision feature print plus the camera's position and
+yaw in the map frame. Relocalizing, a live frame is compared against them at most twice a second; a confident match
+gives `mapToWorld` immediately, by the same derivation the marker path uses (`cameraWorld * poseInMap.inverse`).
+**It is a COARSE fix and is labelled as one.** The descriptor says "this looks like where the volunteer stood", not an
+exact pose - standing a metre aside or 20 degrees off still matches. `Relocalizer.fix` records whether the position
+came from a keyframe, the world map or a marker, and an exact fix always supersedes a coarse one. The point is to
+start guiding in seconds instead of waiting, with ARKit refining when it lands.
+**Refusing to answer is part of the design.** A corridor photographs much the same from several places, so a match is
+rejected unless it is clearly better than the best match from somewhere ELSE (more than 3 m away). A confident wrong
+position is far worse for a blind user than no position. Covered by a test.
+**Privacy:** the DESCRIPTOR is stored, never the photograph. It cannot be inverted to the image, which matters because
+these are recorded inside buildings full of people and maps get shared between phones and to the cloud.
+**CONTRACT CHANGE:** `BuildingMap.keyframes` and `schemaVersion` 2 -> 3. A hand-written `init(from:)` was needed:
+a property with a default value is still REQUIRED by Swift's synthesized decoder, so simply adding the field made
+every existing map fail to load with "Key 'keyframes' not found". The test suite caught it; there is now a test that
+decodes a map with no `keyframes` key. `tools/validate_map.py` accepts the new field unchanged (checked).
+**Status:** accepted; 213 tests pass. **UNVERIFIED ON DEVICE** - no feature print has ever been computed on a phone.
+The distance threshold (18) is a guess: Vision's feature-print distances are not normalised and MUST be calibrated in
+a real corridor before this is trusted.
+
+## D-039 — A keyframe SEEDS the pose once; it does not keep correcting it (2026-10-17)
+D-038 worked - relocalization became "very quick" on a phone - but it broke navigation, and the user's diagnosis was
+right: the app leaned on the embeddings instead of the tracked world model.
+**The bug was mine and it was a loop.** `matchKeyframeIfDue` kept matching while `fix == .keyframe`, so every half
+second a *different* keyframe re-anchored `mapToWorld`. The user's position teleported around the map (screenshots
+show it at the destination, then mid-building, then off the trail within a minute). Each teleport looked like leaving
+the route, which forced a re-route, which called `planner.reset()`, which cleared the direction cooldown - so the
+cascade ended in several contradicting directions spoken within seconds.
+Three changes:
+1. **The keyframe fix is latched.** It is taken ONCE, from `fix == .none`, and ARKit's own tracking carries the pose
+from there. It re-arms only when tracking is lost, which is the one case where nothing is carrying it.
+2. **A pose jump is not walking.** More than 3 m between ticks (30 m/s) is relocalization correcting itself. On a jump
+the off-route counters and the movement sampler are reset and the tick does not test for leaving the route, so a
+correction can no longer masquerade as the user wandering off.
+3. **Re-routes are rate limited** to one per 5 s. Even if something else ever produces a burst, the spoken directions
+cannot machine-gun again, because the reset-the-planner path is what bypassed the cooldown.
+The principle worth keeping: the embedding answers "where am I, roughly, right now" ONCE; the LiDAR-backed world model
+is what maintains the position afterwards. Anything that re-aligns the map continuously will fight the tracker.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-040 — A pose correction invalidates the ROUTE, and an exact fix must clear the coarse one (2026-10-17)
+Report: "the pathfinding doesn't actually start from where you are" - screenshots show the user standing at Start
+while the route's first waypoint is across the building.
+Two faults, both introduced by me in D-038/D-039.
+1. **The coarse alignment was never cleared.** When ARKit relocalizes into the SAVED world map, its world frame IS the
+map frame, so the alignment is the identity. A keyframe may have set a coarse transform minutes earlier; leaving it in
+place silently offset every map coordinate, so the user and the route were drawn in different frames. `updateState`
+now resets `mapToWorld` to the identity the moment the fix becomes `.worldMap`.
+2. **I suppressed the re-route that would have repaired the route.** D-039 correctly stopped treating a pose jump as
+the user walking off course - but a jump still means the route was computed in a frame we no longer believe. It is now
+rebuilt QUIETLY from the corrected position: no `planner.reset()`, no "Recalculating", because nothing changed for the
+user, only our idea of where they are. Re-briefing here is what caused the earlier bursts of contradictory speech.
+**Known limitation, written down rather than hidden:** the keyframe matcher requires `.normal` tracking and is skipped
+when a world map was supplied. With `initialWorldMap` set, ARKit reports `.limited(.relocalizing)` until it matches and
+only then `.normal` - so on a map that HAS a saved world map, keyframes never run, and the fast relocalization observed
+on a phone was either ARKit itself or a map whose world map failed to load. Letting keyframes run during `.relocalizing`
+would not help guidance either, because `NavigationController` requires `.normal` tracking before it guides at all.
+Making keyframes actually accelerate a world-mapped session means allowing guidance from a coarse fix - a real design
+decision, not a tweak, and not taken here. The log line "using world map for segment X" versus "no world map on disk"
+says which case a given map is in.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-041 — Route continuously instead of deciding when the route has gone stale (2026-10-17)
+After three attempts, the user reported the same fault again: standing at Start while the route began across the
+building, never rebuilding.
+Each attempt added machinery to DECIDE when the existing route was stale - off-route tick counters (D-029), a drift
+test (D-036), pose-jump suppression and then pose-jump rebuilding (D-039, D-040). Each fixed one case and exposed
+another, and after three rounds the fault was unchanged. That is a signal about the approach, not about the thresholds.
+**The decision has been deleted.** A* over a few hundred nodes is microseconds, so the route is now recomputed from the
+CURRENT position twice a second, unconditionally. It cannot be stale, whatever relocalization does to the pose, and
+there is no longer any state to get wrong: no counters, no drift history, no jump suppression, no rate limiter on the
+computation.
+What still needs rationing is SPEECH, not computation. A newly computed route is adopted silently; "Recalculating" is
+said only when the user had genuinely strayed more than 3 m from the previous route, and at most once every 5 s. The
+planner is never reset by a recompute, which is what used to bypass the direction cooldown and produce bursts.
+Removed with it: `offRouteTicks`, `routeDistanceHistory`, `rerouteDriftMeters`, `rerouteTicks`, `lastRerouteTime`.
+Pose-jump detection survives for ONE purpose only - not feeding a jump to the movement detector as if the user had
+sprinted.
+Added a diagnostic: when the route changes, the log prints the user's position, the first waypoint's position and the
+distance between them. If this fault ever recurs, that line identifies it without another walk.
+**Status:** accepted; 213 tests pass. UNVERIFIED ON DEVICE.
+
+## D-042 — Visual fingerprints are OFF by default, and align the map exactly once (2026-10-17)
+The user asked the right question: "what could be the reason that the pathfinding could break while the only changes
+were the embeddings?" Because a keyframe match sets `mapToWorld`, and EVERY position, route, instruction and spoken
+cue is computed through that transform. A wrong or changing alignment does not look like a relocalization fault - it
+looks like the pathfinder going mad. Screenshots showed the recomputed route swinging between 0.7 m and 13.3 m from
+one half-second to the next: the router was fine, it was being asked from a different place each time.
+Cause: D-039 latched the fix, but then re-armed it whenever tracking dipped to `.limited(.relocalizing)`. ARKit dips
+into that constantly in a corridor, so a DIFFERENT keyframe re-anchored the world every few seconds.
+1. **One alignment per session.** The re-arm is gone. If tracking is truly lost, ARKit recovers and carries the pose;
+re-anchoring from a second guess is worse than waiting.
+2. **Off by default**, behind Settings > "Use visual fingerprints to find you". The feature is genuinely promising -
+relocalization was much faster with it - but its distance threshold has never been calibrated on hardware, and an
+uncalibrated match silently corrupts everything downstream. The default is the behaviour that has been walked
+successfully. This also makes the A/B deliberate instead of accidental.
+3. **The arrow follows the words.** The on-screen arrow came from `kind`, which updates every tick, while speech is
+deliberately rate limited - so the screen could show a left arrow a second after the voice said "Right."
+`GuidanceSnapshot.spokenKind` reads the direction back out of the spoken line and the arrow uses that.
+**Status:** accepted; 216 tests pass. UNVERIFIED ON DEVICE.
+
+## D-043 — Scan both directions; the keyframe matcher had never run (2026-10-17)
+Report: a corridor scanned walking one way relocalizes badly when the user walks BACK the other way. The assumption
+was that the visual fingerprints only covered one direction.
+**What was actually true.** The keyframe matcher requires `!usingWorldMap` (`Relocalizer.swift:168`), and
+`usingWorldMap` becomes true as soon as any `.arworldmap` loads (`:125`) - which is always, because every saved scan
+produces one. So **the matcher has almost certainly never run on a real map**. The fast relocalization seen on device
+was ARKit; the teleporting that followed the keyframe commit came from something else in it, most likely the RECORDING
+side, which ran Vision work plus a linear scan on every frame at 60 Hz inside the capture loop and can degrade
+tracking and thermals - producing a worse ARWorldMap, which then relocalizes worse.
+**The real cause of the directional problem.** ARKit's own world-map relocalization is viewpoint-dependent too. A
+corridor walked once contains almost no reverse-facing views, so a returning user gives ARKit little to match. No
+amount of tuning the fingerprints addresses this; walking the route BOTH WAYS does, and costs the volunteer a minute.
+Changes: `CoverageTracker` (WaypointCore, pure, unit-tested) buckets the floor plane and records which heading octants
+each cell has been seen from; a cell counts once two of its headings are roughly reciprocal. `CaptureController`
+samples it a few times a second and publishes `returnCoverage` / `shouldWalkBack`; both scanner HUDs show the
+percentage and prompt "Walk back the way you came...". It WARNS, never blocks - consistent with the existing finish
+gate. Keyframe recording is now behind the same preference as matching (off by default) and throttled to 0.5 s, so the
+capture loop no longer pays for a feature that cannot fire.
+Also fixed, both found by exploration rather than by failure: `BuildingMap.merged(with:)` never merged `keyframes`, so
+an extension scan or any import into a map already held silently discarded them; and `MapBundle.validate()` never
+inspected keyframes, so a NaN pose would have flowed into `mapToWorld` - now capped by count and descriptor size and
+checked for finiteness.
+**Deliberately NOT changed:** `Keyframe` has no `segmentId` while `MapNode` does. Adding it is a contract change
+(`schemaVersion` 3 -> 4) to a disabled feature, and multi-segment is itself unimplemented
+(`Relocalizer.swift:95` `TODO(A)`). Recorded here so it is not rediscovered as a surprise.
+**Status:** accepted; 233 tests pass. UNVERIFIED ON DEVICE - the A/B that tests the hypothesis is in the WORKLOG entry.
+
+## D-044 — The resume cue was being dropped; turns now name their destination (2026-10-17)
+Report: "it doesn't say important stuff like continue straight after a turn", and a turn saying just "Right." lacks
+the reasoning a walker needs. First question answered: **nothing was overridden** - 3537ba1, df816a3 and 6478c3b are
+all still in the branch.
+**The missing resume cue was a real bug.** "Continue straight." was emitted at `.normal` priority, and `SpeechGate`
+DROPS a `.normal` line whenever the speaker is busy (`SpeechGate.swift:63-64`) - which it always is immediately after
+a turn. Worse, `FeedbackPlanner` records the cue as announced (`lastKey = key`) whether or not it was actually
+spoken, so it was never retried. The cue telling the user to carry on walking vanished silently after every single
+turn. All direction cues are now `.high`, which QUEUES them: nothing is dropped, nothing overlaps, and the resume cue
+follows the turn instead of competing with it.
+**Turns now name what they are for**, which is the reasoning that was missing: "Right, toward Room 402."
+`GuidanceInstruction` gained `destinationLabel` (a runtime type - NOT persisted, so no schema change), filled by
+`RouteFollower` from the route's last node, and `TurnSpeech.withDestination` appends it. Deliberately only on real
+turns: a small correction ("Slightly right 20 degrees") is housekeeping rather than a decision, and naming the
+destination every few seconds would bury the cues that matter. "Continue straight." stays bare for the same reason.
+The one-move-at-a-time rule from D-037 is intact - these are still single instructions, just ones that say what they
+are for.
+**Status:** accepted; 239 tests pass. UNVERIFIED ON DEVICE.
+
+## D-045 — Suggest a way round a blockage, and say why (2026-10-17)
+Team request: cues like "Turn slightly left, there is a wall ahead" - the reasoning case from the original turn spec,
+which `TurnReason` was built for but which had no caller because nothing GENERATED an avoidance turn.
+`ObstacleDetector` already unprojected every depth sample; it now also records the nearest thing to each SIDE, using
+`Geometry.cameraLocalToUser` (the same conversion the audio beacon uses, because in portrait the camera's own x axis
+points at the bottom of the phone, not the user's right). `AvoidanceAdvisor` (WaypointCore, pure, tested) turns
+ahead/left/right clearances into a suggestion, and `FeedbackPlanner` speaks it once per obstacle.
+**It suggests; it never commands.** A clearer depth reading is not a promise that the floor is safe - descending
+stairs, a drop-off and a down ramp all read as "far away". So the advisor is deliberately conservative: it speaks only
+when the way ahead is actually blocked; the chosen side must be clearly better than the other (0.6 m), not marginally;
+it must itself have real room (1.2 m), so nobody is sent toward a second wall; and once chosen it is held until the
+way clears, so the cue cannot flutter side to side while the user walks. The STOP warning is never replaced by it.
+A door we were routed through is excluded - that is the way IN and the "you will need to open it" line still wins.
+**Status:** accepted; 253 tests pass. UNVERIFIED ON DEVICE. The three thresholds and the 0.35 m ahead/side split are
+guesses that want a real corridor.

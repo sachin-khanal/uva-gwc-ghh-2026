@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(UIPrefs.newInterface) private var newInterface = UIPrefs.newInterfaceDefault
     @AppStorage(UIPrefs.serviceMode) private var serviceModeRaw = ServiceMode.defaultMode.rawValue
     @AppStorage(UIPrefs.debugOverlay) private var debugOverlay = false
+    @AppStorage(UIPrefs.visualFingerprints) private var visualFingerprints = false
     @AppStorage(UIPrefs.spokenPrompts) private var spokenPrompts = true
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
 
@@ -59,6 +60,9 @@ struct SettingsView: View {
                     Toggle("Spoken prompts when VoiceOver is off", isOn: $spokenPrompts)
                     Toggle("Open in Navigate on launch", isOn: $openInNavigate)
                     Toggle("Show debug overlay while guiding", isOn: $debugOverlay)
+                    Toggle("Use visual fingerprints to find you", isOn: $visualFingerprints)
+                    Text("Faster relocalization, but the match is approximate and its distance threshold is not calibrated yet. Turn it off if the route or your position looks wrong.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text("Sighted debugging: the camera and the route the app computed. Not for the blind user.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } header: {

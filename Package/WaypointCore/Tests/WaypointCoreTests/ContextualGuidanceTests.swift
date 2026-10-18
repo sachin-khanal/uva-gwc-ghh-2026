@@ -95,6 +95,19 @@ final class ContextualGuidanceTests: XCTestCase {
         XCTAssertEqual(plain.first, "Stop. You are about to walk into a chair.")
     }
 
+    func testOnlyOneWayRoundIsSpokenWhenTheAdvisorHasASuggestion() {
+        let ctx = SceneContext(leftClearance: 2, rightClearance: 0.3)
+        var a = FeedbackPlanner()
+        let both = spoken(a.plan(instruction: instr(), obstacle: .stop, trackingOK: true, report: ObstacleReport(kind: .chair, distanceMeters: 0.6),
+                                 time: 1, context: ctx, avoidTowards: .left))
+        XCTAssertTrue(both.contains { $0.contains("Slightly left") || $0.lowercased().contains("left") }, "\(both)")
+        XCTAssertFalse(both.contains { $0.contains("Open space") }, "my hint must stay quiet when the advisor speaks: \(both)")
+        var b = FeedbackPlanner()
+        let alone = spoken(b.plan(instruction: instr(), obstacle: .stop, trackingOK: true, report: ObstacleReport(kind: .chair, distanceMeters: 0.6),
+                                  time: 1, context: ctx))
+        XCTAssertTrue(alone.contains { $0.contains("Open space on your left.") }, "without an advisor suggestion my hint still speaks: \(alone)")
+    }
+
     func testNarrowSpaceIsAnnouncedOnceThenRateLimited() {
         var p = FeedbackPlanner()
         let narrow = SceneContext(leftClearance: 0.5, rightClearance: 0.6)
@@ -144,7 +157,8 @@ final class ContextualGuidanceTests: XCTestCase {
         let first = Maneuver(kind: .turnRight, distanceMeters: 12, nodeId: route[1].id)
         let text = StartBriefing.text(position: [0, 0, 0.2], forward: [0, 0, -1], graph: graph, route: route, destination: dest,
                                       context: nil, firstManeuver: first)
-        XCTAssertEqual(text, "You are near Room 206. Stairs on your left. Room 204 is about 22 meters away. Walk straight about 12 meters, then turn right.")
+        // U2 ("one move at a time", 2026-10-18) shortened the route briefing to the FIRST move only.
+        XCTAssertEqual(text, "You are near Room 206. Stairs on your left. Room 204 is about 22 meters away. Walk straight about 12 meters.")
         XCTAssertLessThanOrEqual(text.split(separator: " ").count, 35, "must stay short")
     }
 

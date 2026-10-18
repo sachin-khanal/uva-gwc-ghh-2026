@@ -95,7 +95,7 @@ private struct ScanningView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             LiveScanView(session: controller.session, box: controller.scanBox,
-                         showMesh: controller.showMeshOverlay && !controller.isPaused, coverage: controller.showCoverage && !controller.isPaused ? controller.coverage : nil)
+                         showMesh: controller.showMeshOverlay && !controller.isPaused, coverage: controller.showCoverage && !controller.isPaused ? controller.gaps : nil)
                 .ignoresSafeArea()
 
             VStack(spacing: 10) {
@@ -117,6 +117,17 @@ private struct ScanningView: View {
             Text(controller.trackingSummary).font(.headline).accessibilityIdentifier("hud.tracking")
             Text("Mapping: \(Self.name(controller.mappingStatus))  ·  Nodes: \(controller.nodeCount)").accessibilityIdentifier("hud.mapping")
             Text("Mesh: \(controller.triangleCount.formatted()) triangles").accessibilityIdentifier("hud.mesh")
+            // Both-directions coverage. A map walked one way only relocalizes badly when the user
+            // comes back the other way, so this is as important as the mesh count (D-043).
+            Text("Both directions: \(Int(controller.returnCoverage * 100))%")
+                .accessibilityIdentifier("hud.coverage")
+                .foregroundStyle(controller.shouldWalkBack ? .orange : .primary)
+            if controller.shouldWalkBack {
+                Text("Walk back the way you came so the map works in both directions.")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("hud.walkBack")
+            }
             if let box = controller.scanBox {
                 Text(String(format: "Box: %.1f × %.1f × %.1f m", box.size.x, box.size.y, box.size.z)).accessibilityIdentifier("hud.box")
             } else {
@@ -129,9 +140,9 @@ private struct ScanningView: View {
             if let status = controller.extensionStatus {
                 Text(status).accessibilityIdentifier("scan.extension.status")
             }
-            if controller.showCoverage, let c = controller.coverage {
+            if controller.showCoverage, let c = controller.gaps {
                 Text(String(format: "Scanned: %.0f%% of the box surfaces (yellow = not scanned yet)", c.percent * 100))
-                    .accessibilityIdentifier("hud.coverage")
+                    .accessibilityIdentifier("hud.gaps")
             }
         }
         .font(.footnote.monospacedDigit())

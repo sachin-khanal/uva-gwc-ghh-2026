@@ -69,7 +69,7 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
-    var coverageOverlay: CoverageSnapshot? { controller.coverage }
+    var coverageOverlay: CoverageSnapshot? { controller.gaps }
 
     func setShowCoverage(_ on: Bool) {
         controller.showCoverage = on
@@ -143,12 +143,14 @@ final class LiveScanService: ScanService {
         s.triangleCount = controller.triangleCount
         s.boxSize = controller.scanBox?.size
         s.boxMargin = controller.boxMargin
+        s.returnCoverage = controller.returnCoverage
+        s.shouldWalkBack = controller.shouldWalkBack
         s.tags = tags
         s.errorMessage = controller.errorMessage
         s.extensionStatus = controller.extensionStatus
         s.isPaused = controller.isPaused
         s.showCoverage = controller.showCoverage
-        s.coveragePercent = controller.coverage?.percent
+        s.coveragePercent = controller.gaps?.percent
         s.canRecord = controller.extensionStatus == nil || controller.canRecord
         snapshot = s
     }

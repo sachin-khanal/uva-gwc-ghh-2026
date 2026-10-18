@@ -257,7 +257,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertEqual(spoken(back), ["Phone position is good."], "only the confirmation on the recovery tick")
         let next = p.plan(instruction: instruction(.turnRight), obstacle: .clear, trackingOK: true,
                           posture: PostureUpdate(reading: ok.reading, issue: nil, announcement: nil, recovered: false))
-        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.hasPrefix("Turn right") } else { return false } },
+        XCTAssertTrue(next.contains { if case .speak(let t, _) = $0 { return t.lowercased().contains("right") } else { return false } },
                       "guidance resumes with the current instruction on the next tick")
     }
 
@@ -305,7 +305,9 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
     func testRouteBriefingReplacesFirstContinueStraightAndIsSaidOnce() {
         var p = FeedbackPlanner()
         let a = p.plan(instruction: instruction(upcoming: turn(12, UUID())), obstacle: .clear, trackingOK: true)
-        XCTAssertEqual(spoken(a), ["Walk straight about 12 meters, then turn right."])
+        // One move at a time: the turn is announced by the countdown at 10, 5 and 2 metres, not
+        // tacked onto the end of this sentence (D-037).
+        XCTAssertEqual(spoken(a), ["Walk straight about 12 meters."])
         XCTAssertTrue(spoken(p.plan(instruction: instruction(upcoming: turn(11.5, UUID())), obstacle: .clear, trackingOK: true)).isEmpty)
     }
 
@@ -319,9 +321,9 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         // 10/5/2 m warnings, then the turn ITSELF at the corner with the route's real angle, then the
         // new leg. The corner cue was added after a walk where easing into a corner meant the live
         // bearing never tripped the heading cue and a real turn went unannounced (D-030).
-        XCTAssertEqual(said, ["Walk straight about 14 meters, then turn right.",
+        XCTAssertEqual(said, ["Walk straight about 14 meters.",
                               "In 10 meters, turn right.", "In 5 meters, turn right.", "In 2 meters, turn right.",
-                              "Turn right 85 degrees.", "Continue straight."])
+                              "Right.", "Continue straight."]) // 85 degrees is a square corner
     }
 
     func testFirstSeenCloseDoesNotBurstOldWarnings() {
@@ -338,7 +340,7 @@ final class AccessibleGuidancePlannerTests: XCTestCase {
         XCTAssertEqual(ManeuverSpeech.briefing(distanceToFirstManeuver: Maneuver(kind: .arrive, distanceMeters: 12, nodeId: node, label: "Room 204")),
                        "Walk straight about 12 meters to Room 204.")
         XCTAssertEqual(ManeuverSpeech.briefing(distanceToFirstManeuver: Maneuver(kind: .stairs, distanceMeters: 8, nodeId: node)),
-                       "Walk straight about 8 meters. Then there are stairs.")
+                       "Walk straight about 8 meters.")
         XCTAssertNil(ManeuverSpeech.briefing(distanceToFirstManeuver: nil))
     }
 

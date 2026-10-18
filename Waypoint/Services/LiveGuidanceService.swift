@@ -70,10 +70,14 @@ final class LiveGuidanceService: GuidanceService {
     func skipToArrival() {}
 
     private func refresh() {
-        snapshot = GuidanceSnapshot.derive(
+        var next = GuidanceSnapshot.derive(
             status: controller.statusText,
             instruction: controller.instructionText,
             obstacle: controller.obstacleLevel,
             destinationLabel: destinationLabel)
+        // Show what was actually said. The screen used to paraphrase the same state independently and
+        // the two drifted apart (device report 2026-10-17).
+        next.lastSpoken = controller.lastSpoken
+        snapshot = next
     }
 }

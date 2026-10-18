@@ -13,7 +13,8 @@ import Foundation
 /// Versions of the map JSON FORMAT. One spec per version lives in docs/MAP_FORMAT.md.
 ///  * 1 - original shape; has no `schemaVersion` key (so "missing" means 1).
 ///  * 2 - identical shape, plus `schemaVersion` written explicitly (CONTRACT CHANGE 2026-10-17).
-///  * 3 - adds the OPTIONAL `MapNode.extent` (room floor area, from navigation-overhaul). Older maps simply have none.
+///  * 3 - adds the OPTIONAL `MapNode.extent` (room floor area), `extent.heightMeters`, `meshAssets` (3D surface files, shared with the web viewer) and
+///        `keyframes` (visual fingerprints for faster relocalization, from navigation-overhaul). All optional: older maps simply have none.
 /// To add version N+1: bump `current`, add a spec + fixture (docs/map-format/), extend `migrate`, add a test in MapSchemaTests,
 /// update tools/validate_map.py (`CURRENT_SCHEMA`), and announce CONTRACT CHANGE in the WORKLOG.
 public enum MapSchema {
@@ -52,6 +53,10 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     public var marker: MarkerRef?
     /// Optional 3D surface files (format 3). nil = none, and then the key is absent from the JSON (maps without any are byte-for-byte unchanged).
     public var meshAssets: [MeshAsset]?
+    /// Visual fingerprints recorded along the walk, used to recognise WHERE the user is standing much
+    /// faster than ARKit's own feature matching manages in a repetitive corridor (see `Keyframe`).
+    /// Empty on maps scanned before this existed; relocalization then behaves exactly as it did.
+    public var keyframes: [Keyframe] = []
 
     public init(
         id: UUID = UUID(),
@@ -61,7 +66,8 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         edges: [MapEdge] = [],
         marker: MarkerRef? = nil,
         schemaVersion: Int = MapSchema.current,
-        meshAssets: [MeshAsset]? = nil
+        meshAssets: [MeshAsset]? = nil,
+        keyframes: [Keyframe] = []
     ) {
         self.meshAssets = meshAssets
         self.schemaVersion = schemaVersion
@@ -71,11 +77,12 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         self.nodes = nodes
         self.edges = edges
         self.marker = marker
+        self.keyframes = keyframes
     }
 
     // MARK: Decoding (format versioning)
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker, meshAssets }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker, meshAssets, keyframes }
 
     /// Accepts every format from `MapSchema.oldestReadable` to `MapSchema.current` (a missing `schemaVersion` means format 1) and
     /// migrates it to the current one. A file written by a NEWER app is refused with a clear message instead of being half-understood.
@@ -97,6 +104,8 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         edges = try c.decode([MapEdge].self, forKey: .edges)
         marker = try c.decodeIfPresent(MarkerRef.self, forKey: .marker)
         meshAssets = try c.decodeIfPresent([MeshAsset].self, forKey: .meshAssets)
+        // `keyframes` (U2's visual fingerprints) is optional on the way IN: every older map decodes with none.
+        keyframes = try c.decodeIfPresent([Keyframe].self, forKey: .keyframes) ?? []
         schemaVersion = MapSchema.migrate(from: found)
     }
 
@@ -123,6 +132,7 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     ///  * Nodes are matched by `id`. If both have the same id, `self`'s copy wins.
     ///  * Edges are matched as an unordered pair of node ids. `self`'s copy wins.
     ///  * `marker` prefers `self`'s.
+    ///  * Keyframes are unioned by `id`, like nodes.
     ///  * `version` becomes max(self, other) + 1 so peers can tell the merged map is newer.
     ///  * No position reconciliation and no duplicate-label detection (documented limitation).
     public func merged(with other: BuildingMap) -> BuildingMap {
@@ -135,6 +145,13 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         for e in other.edges where !result.edges.contains(where: { $0.connects(e.from, e.to) }) {
             result.edges.append(e)
         }
+        // Keyframes union by id, like nodes. Without this an extension scan - or ANY import into a
+        // map we already hold - silently threw the incoming ones away, because `MapStore.importBundle`
+        // routes through here (found 2026-10-17).
+        let knownKeyframeIds = Set(keyframes.map(\.id))
+        for k in other.keyframes where !knownKeyframeIds.contains(k.id) {
+            result.keyframes.append(k)
+        }
         if result.marker == nil { result.marker = other.marker }
         // 3D surface files: keep ours, add any of theirs we do not have (matched by id).
         if let theirs = other.meshAssets, !theirs.isEmpty {
@@ -146,6 +163,9 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     }
 
     // MARK: JSON
+
+    // (Decoding lives above in `init(from:)`: one decoder for the format version, `meshAssets` and U2's `keyframes`, which must stay optional
+    //  on the way IN - a stored property with a default is still REQUIRED by Swift's synthesized decoder.)
 
     /// Pretty, stable-ordered JSON so diffs are readable in git and Live Share.
     public func jsonData() throws -> Data {

@@ -27,9 +27,24 @@ enum UIPrefs {
     static let openInNavigate = "ui.openInNavigate"
     /// One-shot: map id the Navigator should preselect ("Try it in Navigate" from the scanner).
     static let pendingMapId = "ui.pendingMapId"
+    /// Use stored visual fingerprints to recognise the place when relocalizing. Default OFF.
+    ///
+    /// It makes relocalization much faster, but a keyframe match is a COARSE alignment and everything
+    /// downstream - position, route, instructions - is computed through it. Until the distance
+    /// threshold has been calibrated on real hardware, the safe default is the behaviour that has been
+    /// walked successfully: ARKit's own relocalization only (D-042).
+    static let visualFingerprints = "ui.visualFingerprints"
+
     /// Show the sighted debug overlay (camera + computed route) during guidance. Default false.
     static let debugOverlay = "ui.debugOverlay"
     static func recentsKey(mapId: UUID) -> String { "ui.recents.\(mapId.uuidString)" }
+}
+
+extension UIPrefs {
+    /// Defaults to false: see `visualFingerprints`.
+    static var visualFingerprintsEnabled: Bool {
+        UserDefaults.standard.bool(forKey: UIPrefs.visualFingerprints)
+    }
 }
 
 enum ServiceMode: String, CaseIterable, Identifiable {

@@ -136,7 +136,7 @@ enum E2ESelfTest {
             }
             // No chatter: the same phrase must never be spoken twice in a row (it used to repeat "Continue straight." at every waypoint).
             let noRepeats = zip(spoken, spoken.dropFirst()).allSatisfy { $0 != $1 }
-            check("nav.simulatedWalk", spoken.last == "You have arrived at E2E Room 2." && spoken.contains { $0.hasPrefix("Turn right") } && noRepeats,
+            check("nav.simulatedWalk", spoken.last == "You have arrived at E2E Room 2." && spoken.contains { $0.hasPrefix("Turn right") || $0.hasPrefix("Right") } && noRepeats,
                   "route \(route.count) nodes, \(steps) steps, said \(spoken)")
         } else {
             fail("nav.simulatedWalk", "no route in the synthetic map")

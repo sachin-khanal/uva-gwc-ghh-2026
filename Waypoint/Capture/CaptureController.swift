@@ -36,6 +36,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var savedMap: BuildingMap?
     @Published private(set) var extensionStatus: String?
     @Published private(set) var canRecord = false
+    /// 0...1: how much of the walk has been seen from BOTH directions. A map scanned one way only
+    /// relocalizes badly when the user comes back the other way (D-043).
+    @Published private(set) var returnCoverage: Float = 0
+    /// True once enough has been walked to judge and the coverage is still low.
+    @Published private(set) var shouldWalkBack = false
     @Published var errorMessage: String?
 
     // Live-scan stats and bounding box (updated ~1 Hz)
@@ -59,7 +64,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var isPaused = false
     /// "Unscanned areas" overlay (yellow tiles on the box faces where no mesh exists yet). Off by default; turning it on costs one background pass per second.
     @Published var showCoverage = CaptureController.launchFlag("scanCoverage", default: false)
-    @Published private(set) var coverage: CoverageSnapshot?
+    /// The yellow "unscanned areas" tiles (named `gaps` so it does not collide with U2's `coverage` = how much was walked BOTH ways)
+    @Published private(set) var gaps: CoverageSnapshot?
     private var pausedAt: SIMD3<Float>?
     @Published var showMeshOverlay: Bool = CaptureController.launchFlag("scanOverlay", default: true)
     private var framesSinceStatus = 0
@@ -102,6 +108,20 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var isPreparing = false
     /// The decoded world map, handed back to `start` by `prepareExtension`.
     private var preparedExtension: ARWorldMap?
+    /// Visual fingerprints collected during this scan; written into the map on save.
+    private var keyframes: [Keyframe] = []
+    /// One visual fingerprint attempt at a time, and no more often than this. It used to be tried on
+    /// EVERY frame (60 Hz), doing Vision work plus a linear scan inside the capture loop - the prime
+    /// suspect for the degraded scans seen after it was added (2026-10-17).
+    private static let keyframeAttemptInterval: TimeInterval = 0.5
+    private var lastKeyframeAttempt: TimeInterval = -.greatestFiniteMagnitude
+    /// Has the space been walked both ways? (CoverageTracker, WaypointCore.)
+    private var coverage = CoverageTracker()
+    /// A few samples a second is plenty to fill 2 m cells.
+    private static let coverageSampleInterval: TimeInterval = 0.25
+    private var lastCoverageSample: TimeInterval = -.greatestFiniteMagnitude
+    /// One feature print at a time: they are cheap but not free, and frames arrive at 60 Hz.
+    private var isMakingKeyframe = false
 
     /// Reads and decodes the segment's world map off the main thread, then calls `done` on the main
     /// one. Any failure is reported in `errorMessage` and `done` is not called.
@@ -166,6 +186,13 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             config.initialWorldMap = prepared
         }
         isExtension = map != nil
+        keyframes = []
+        isMakingKeyframe = false
+        lastKeyframeAttempt = -.greatestFiniteMagnitude
+        coverage.reset()
+        returnCoverage = 0
+        shouldWalkBack = false
+        lastCoverageSample = -.greatestFiniteMagnitude
         isSaving = false
         extensionAttached = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -202,6 +229,57 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
     }
 
+    /// Tracks whether the space has been walked in BOTH directions. ARKit's relocalization matches
+    /// what the camera sees against what it saw while scanning, so a corridor walked once gives a
+    /// returning user almost nothing to match (device report 2026-10-17). Cheap: a dictionary insert
+    /// a few times a second, no Vision, no allocation of consequence.
+    private func updateCoverage(_ frame: ARFrame) {
+        guard builder != nil, case .normal = frame.camera.trackingState else { return }
+        guard frame.timestamp - lastCoverageSample >= Self.coverageSampleInterval else { return }
+        lastCoverageSample = frame.timestamp
+
+        let transform = frame.camera.transform
+        let forward = Geometry.cameraForward(of: transform)
+        coverage.observe(position: Geometry.translation(of: transform),
+                         yaw: atan2(forward.x, -forward.z))
+        // Same rule as the HUD values below: only publish real changes, this runs several times a second.
+        let fraction = coverage.returnCoverage
+        if abs(returnCoverage - fraction) > 0.01 { returnCoverage = fraction }
+        let prompt = coverage.shouldPromptReturnWalk
+        if shouldWalkBack != prompt { shouldWalkBack = prompt }
+    }
+
+    /// Records a visual fingerprint of this spot, at most one per `KeyframeRecorder.defaultSpacing`
+    /// metres walked. The Vision work happens on a background queue; only the result comes back here.
+    /// Skipped entirely while tracking is poor, because a keyframe whose pose we do not trust is worse
+    /// than none - it would hand a returning user a confident wrong position.
+    private func recordKeyframeIfDue(_ frame: ARFrame) {
+        // Off unless the user has opted in, so recording and matching are enabled together (D-042).
+        // Recording cost the scan something even though the matcher could never run.
+        guard UIPrefs.visualFingerprintsEnabled,
+              builder != nil, !isMakingKeyframe,
+              case .normal = frame.camera.trackingState else { return }
+        guard frame.timestamp - lastKeyframeAttempt >= Self.keyframeAttemptInterval else { return }
+        lastKeyframeAttempt = frame.timestamp
+        let position = Geometry.translation(of: frame.camera.transform)
+        guard KeyframeIndex(keyframes: keyframes).shouldRecord(at: position,
+                                                               spacing: KeyframeRecorder.defaultSpacing) else { return }
+
+        isMakingKeyframe = true
+        let pixelBuffer = frame.capturedImage
+        let forward = Geometry.cameraForward(of: frame.camera.transform)
+        let yaw = atan2(forward.x, -forward.z)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let descriptor = KeyframeRecorder.storableDescriptor(for: pixelBuffer, orientation: .right)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isMakingKeyframe = false
+                guard let descriptor else { return }
+                self.keyframes.append(Keyframe(position: position, yaw: yaw, descriptor: descriptor))
+            }
+        }
+    }
+
     func cancelPreparing() {
         isPreparing = false
         preparedExtension = nil
@@ -236,7 +314,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     func stop() {
         isPaused = false
         pausedAt = nil
-        coverage = nil
+        gaps = nil
         isPreparing = false
         preparedExtension = nil
         session.pause()
@@ -319,7 +397,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Saves map JSON + ARWorldMap. Disabled in the UI until `mappingStatus == .mapped`.
     func save() {
         guard canRecord, mappingStatus == .mapped, let builder else { return }
-        let map = builder.map
+        var map = builder.map
+        map.keyframes += keyframes
+        Log.capture.info("saving \(self.keyframes.count) keyframe(s)")
         let savedSegment = segmentId
         // Freeze acquisition while obtaining the world map so JSON and scan bytes describe
         // the same capture. Tracking telemetry continues until the save completes.
@@ -378,6 +458,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         latestCameraTransform = frame.camera.transform
+        updateCoverage(frame)
+        recordKeyframeIfDue(frame)
         // PERFORMANCE (lossless): assigning an @Published property re-renders the SwiftUI screen even when the value is unchanged, and this
         // runs ~60x per second. Only publish real changes.
         if mappingStatus != frame.worldMappingStatus { mappingStatus = frame.worldMappingStatus }
@@ -415,7 +497,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 }
             }
             let box = scanBox.map { String(format: "%.1fx%.1fx%.1f", $0.size.x, $0.size.y, $0.size.z) } ?? "none"
-            Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay) | coverage=\(coverage.map { String(format: "%.0f%% (%d open tiles, %d outline dashes)", $0.percent * 100, $0.tiles.count, $0.outline.count) } ?? "off") | paused=\(isPaused)")
+            Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay) | gaps=\(gaps.map { String(format: "%.0f%% (%d open tiles, %d outline dashes)", $0.percent * 100, $0.tiles.count, $0.outline.count) } ?? "off") | paused=\(isPaused)")
         }
 
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
@@ -459,7 +541,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 if self.triangleCount != measurement.triangleCount { self.triangleCount = measurement.triangleCount }
                 if self.meshAnchorCount != measurement.anchorCount { self.meshAnchorCount = measurement.anchorCount }
                 self.fittedBox = box
-                if wantCoverage { self.coverage = snapshot } else if self.coverage != nil { self.coverage = nil }
+                if wantCoverage { self.gaps = snapshot } else if self.gaps != nil { self.gaps = nil }
                 let shown = box?.expanded(by: self.boxMargin)
                 if self.scanBox != shown { self.scanBox = shown }
             }
