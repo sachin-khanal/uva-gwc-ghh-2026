@@ -8,6 +8,7 @@ Does not check real-world accuracy or the safety of a route.
 import argparse
 import base64
 import glob
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -19,6 +20,7 @@ from uuid import UUID
 MAX_NODES = 5_000
 MAX_EDGES = 20_000
 MAX_WORLD_MAP_BYTES = 50_000_000
+CURRENT_SCHEMA = 3
 SEGMENT = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
@@ -83,6 +85,10 @@ def validate(document):
             require(len(decoded) <= MAX_WORLD_MAP_BYTES, "world map exceeds 50 MB")
     else:
         data = document
+    schema = data.get("schemaVersion", 1)
+    if schema is None:
+        schema = 1
+    require(type(schema) is int and 1 <= schema <= CURRENT_SCHEMA, "unsupported schemaVersion; update Waypoint")
     uuid_value(data.get("id"), "id")
     string(data.get("name"), "name")
     version = data.get("version")
@@ -105,6 +111,55 @@ def validate(document):
         string(node.get("createdBy"), path + ".createdBy")
         segment(node.get("segmentId"), path + ".segmentId")
         positions[node_id] = position(node.get("position"), path + ".position")
+        extent = node.get("extent")
+        if extent is not None:
+            object_value(extent, path + ".extent")
+            require(node["kind"] == "room", "extent belongs to a room")
+            position(extent.get("center"), "extent.center")
+            half = extent.get("halfExtents")
+            require(isinstance(half, list) and len(half) == 2, "extent.halfExtents: expected two numbers")
+            half = [float32(v, "extent.halfExtents") for v in half]
+            require(all(v > 0 for v in half), "extent dimensions must be positive")
+            float32(extent.get("yaw"), "extent.yaw")
+            area = float32(extent.get("areaSquareMeters"), "extent.areaSquareMeters")
+            require(0 < area <= 4 * half[0] * half[1] + 0.01, "invalid enclosed area")
+            if extent.get("heightMeters") is not None:
+                require(float32(extent["heightMeters"], "extent.heightMeters") > 0, "height must be positive")
+    assets = data.get("meshAssets")
+    if assets is None:
+        assets = []
+    require(isinstance(assets, list) and len(assets) <= 100, "invalid meshAssets")
+    asset_ids = {}
+    segments = {n["segmentId"] for n in nodes}
+    total_bytes = 0
+    for asset in assets:
+        object_value(asset, "mesh asset")
+        asset_id = uuid_value(asset.get("id"), "asset.id")
+        require(asset_id not in asset_ids, "duplicate mesh asset")
+        asset_ids[asset_id] = asset
+        require(asset.get("segmentId") in segments, "asset segment is missing")
+        require(asset.get("format") == "obj" and asset.get("coordinateFrame") == "map", "unsupported mesh format/frame")
+        count = asset.get("byteCount")
+        require(type(count) is int and 1 <= count <= 40_000_000, "mesh byteCount outside 1..40000000")
+        total_bytes += count
+        digest = asset.get("sha256")
+        require(isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest), "invalid mesh checksum")
+        lo = position(asset.get("boundsMin"), "boundsMin")
+        hi = position(asset.get("boundsMax"), "boundsMax")
+        require(all(a <= b for a, b in zip(lo, hi)), "inverted mesh bounds")
+        if asset.get("storageOwner") is not None:
+            uuid_value(asset["storageOwner"], "storageOwner")
+    require(total_bytes <= 80_000_000, "mesh assets exceed 80 MB total")
+    if "map" in document and document.get("meshFiles") is not None:
+        for asset_key, payload in object_value(document["meshFiles"], "meshFiles").items():
+            asset = asset_ids.get(uuid_value(asset_key, "meshFiles key"))
+            require(asset is not None and isinstance(payload, str), "unknown mesh payload")
+            require(len(payload) <= 4 * ((40_000_000 + 2) // 3), "mesh payload too large")
+            try:
+                raw = base64.b64decode(payload, validate=True)
+            except ValueError:
+                raise ValueError("invalid mesh base64") from None
+            require(len(raw) == asset["byteCount"] and hashlib.sha256(raw).hexdigest() == asset["sha256"], "mesh integrity mismatch")
     for i, edge in enumerate(edges):
         path = f"edges[{i}]"
         object_value(edge, path)
@@ -140,6 +195,9 @@ def main(argv=None):
     failed = False
     for pattern in patterns:
         matches = sorted(glob.glob(pattern))
+        if not args.paths:
+            # Shared routing fixtures are test vectors, not a BuildingMap document.
+            matches = [name for name in matches if Path(name).name != "route-vectors.json"]
         if not matches:
             print(f"FAIL {pattern}: no files matched")
             failed = True

@@ -182,7 +182,14 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         var fwd = Geometry.cameraForward(of: t)
         fwd.y = 0
         let ahead = simd_length(fwd) > 1e-3 ? simd_normalize(fwd) : SIMD3<Float>(0, 0, -1)
-        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead)
+        let anchors = session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
+        var extent: RoomExtent?
+        if kind == .room, let floor = MeshExporter.floorHeight(anchors, near: pos) {
+            let points = MeshSampler.wallPoints(anchors: anchors, seed: SIMD3(pos.x, floor, pos.z),
+                                               radius: RoomExtractor.defaultMaxRadius)
+            extent = RoomExtractor.extract(seed: pos, wallPoints: points, floorY: floor)?.extent
+        }
+        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead, extent: extent)
         nodeCount = builder.map.nodes.count
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")")
     }
@@ -196,31 +203,57 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Saves map JSON + ARWorldMap. Disabled in the UI until `mappingStatus == .mapped`.
     func save() {
         guard canRecord, mappingStatus == .mapped, let builder else { return }
-        let map = builder.map
+        let baseMap = builder.map
         let savedSegment = segmentId
-        // Freeze acquisition while obtaining the world map so JSON and scan bytes describe
-        // the same capture. Tracking telemetry continues until the save completes.
+        let snapshot: MeshExporter.Snapshot
+        do {
+            // Copy AR buffers on the session queue. Encoding/compression runs off-main.
+            let anchors = session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
+            snapshot = try MeshExporter.snapshot(anchors)
+        } catch {
+            errorMessage = "3D export failed: \(error.localizedDescription)"
+            return
+        }
         canRecord = false
         isSaving = true
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
-            DispatchQueue.main.async {
-                defer { self.isSaving = false }
-                guard self.isRunning else { return }
-                guard let worldMap else {
+            guard let worldMap else {
+                DispatchQueue.main.async {
+                    self.isSaving = false
                     self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
-                    return
                 }
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
-                    // Merge against the latest local copy so a download arriving during capture
-                    // cannot be erased by saving this older starting snapshot.
-                    let saved = try self.store.importBundle(MapBundle(map: map, worldMaps: [savedSegment: data]))
-                    self.savedMap = saved
-                    self.stop()
-                    Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
+                    var map = baseMap
+                    var meshes: [String: Data] = [:]
+                    if !snapshot.triangles.isEmpty {
+                        let (asset, bytes) = try OBJEncoder.encode(vertices: snapshot.vertices,
+                            triangles: snapshot.triangles, segmentId: savedSegment)
+                        map.meshAssets.append(asset)
+                        meshes[asset.id.uuidString] = bytes
+                    }
+                    let worldBytes = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    let bundle = MapBundle(map: map, worldMaps: [savedSegment: worldBytes],
+                                           meshFiles: meshes.isEmpty ? nil : meshes)
+                    try bundle.validate()
+                    DispatchQueue.main.async {
+                        defer { self.isSaving = false }
+                        guard self.isRunning else { return }
+                        do {
+                            // Merge the latest local state; never overwrite a download made during capture.
+                            self.savedMap = try self.store.importBundle(bundle)
+                            self.stop()
+                            Log.capture.info("saved schema-3 map \(bundle.map.name) meshes=\(bundle.map.meshAssets.count)")
+                        } catch { self.errorMessage = "Save failed: \(error.localizedDescription)" }
+                    }
                 } catch {
-                    self.errorMessage = "Save failed: \(error.localizedDescription)"
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        self.errorMessage = "3D export/save failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }

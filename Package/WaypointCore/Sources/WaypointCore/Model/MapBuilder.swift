@@ -80,10 +80,10 @@ public final class MapBuilder {
     /// volunteer tags before walking anywhere). It does NOT become the new breadcrumb anchor, so
     /// the corridor chain stays continuous.
     @discardableResult
-    public func addPOI(kind: NodeKind, label: String?, position: SIMD3<Float>) -> MapNode {
+    public func addPOI(kind: NodeKind, label: String?, position: SIMD3<Float>, extent: RoomExtent? = nil) -> MapNode {
         let node = MapNode(
             kind: kind, label: label, position: position,
-            segmentId: segmentId, createdBy: deviceName)
+            segmentId: segmentId, createdBy: deviceName, extent: extent)
         map.nodes.append(node)
         if let anchor = lastBreadcrumb {
             let hazard: Hazard? = (kind == .stairs) ? .stairs : nil

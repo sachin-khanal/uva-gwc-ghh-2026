@@ -91,6 +91,15 @@ signs, Android, App Store release, user accounts with email/password (anonymous 
 
 # Revision 3 — Detailed plan from now to demo, by person (2026-10-17)
 
+**Update 2026-10-17 (Codex, requested by U3):** schema 3 + actual untextured OBJ
+export/storage/sync are implemented on U3, alongside room footprints ported from
+navigation-overhaul and a 3D web renderer. This advances U3.6/U3.8 for OBJ/web;
+USDZ/Quick Look is still separate. Native tests/typecheck, live migration 0004
+and physical capture/roundtrip are pending. Browser and Python checks pass; do
+not mark the device or export gates complete until those pending checks pass.
+
+**Update 2026-10-17 (Codex, U3 redo):** U3.7 viewer restored locally with canonical library connection, sample mode, local import, labeled canvas plan and selectable routes. 33 logic/API-mock and 13 browser interaction checks PASS. Shared vectors and a Swift consumer test added; live-cloud verification and Mac execution remain pending. No deployment, commit or push.
+
 **Update 2026-10-17 (Codex, explicitly requested by U3):** U1.10 extend-map flow is now implemented as a scaffold in VolunteerView/CaptureController/MapBuilder: select building+saved area, relocalize before recording, attach near an existing corridor, use a unique segment, preserve map identity. U3 also added migration 0003 to match local connection rules. Neither task is device-verified; Mac compilation, Swift tests, SQL execution and the new TESTING checklist remain required. Original assignments are retained.
 
 **Update 2026-10-17 (Codex, U3):** U3.4 standalone validator implemented: `python tools/validate_map.py` passes on the sample, and 9 Python regression tests pass on Windows. Usage: `tools/README.md`. CI integration remains pending under INF-2; Swift make checks need a Mac. Original task table retained below.

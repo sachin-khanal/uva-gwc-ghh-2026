@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Waypoint viewer checks</title>
+<style>body{font:16px system-ui;max-width:900px;margin:40px auto;padding:20px}li{padding:5px}.fail{color:#a22}.pass{color:#176d5b}</style>
+<h1>Waypoint viewer checks</h1><p id="summary" role="status">Running…</p><ol id="results"></ol>
+<script type="module">
+import { runRouteChecks } from "./route-tests.js";
+import { runCloudChecks } from "./cloud-tests.js";
+import { runGeometryChecks } from "./geometry-tests.js";
+try {
+  const load = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(`Cannot load ${url}`); return r.json(); };
+  const vectors = await load("../Samples/route-vectors.json"), samples = {};
+  for (const fixture of vectors.fixtures) if (fixture.sample) samples[fixture.sample] = await load(`../Samples/${fixture.sample}`);
+  const results = [...runRouteChecks(vectors, samples), ...await runCloudChecks(), ...await runGeometryChecks(samples["rice-hall-sample.json"])];
+  for (const test of results) {
+    const item = document.createElement("li"); item.className = test.pass ? "pass" : "fail";
+    item.textContent = `${test.pass ? "PASS" : "FAIL"} ${test.name}${test.error ? `: ${test.error}` : ""}`;
+    document.getElementById("results").append(item);
+  }
+  const failures = results.filter((r) => !r.pass).length;
+  document.getElementById("summary").textContent = `${results.length - failures}/${results.length} passed`;
+  document.title = failures ? "FAIL: Waypoint viewer checks" : "PASS: Waypoint viewer checks";
+} catch (error) { document.getElementById("summary").textContent = error.message; }
+</script></html>

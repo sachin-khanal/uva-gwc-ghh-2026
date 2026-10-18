@@ -8,12 +8,39 @@
 //           <Documents>/Maps/<map-uuid>/worldmap-<segmentId>.arworldmap  (binary ARWorldMap)
 //           See MapStore.swift.
 //
+// Status: Schema 3 implementation; native tests pending Mac; UNVERIFIED ON DEVICE.
 import Foundation
+
+/// Versions of the map JSON FORMAT. One spec per version lives in docs/MAP_FORMAT.md.
+///  * 1 - original shape; has no `schemaVersion` key (so "missing" means 1).
+///  * 2 - explicit schemaVersion.
+///  * 3 - optional room extents and mesh asset manifest; legacy maps gain no invented geometry.
+/// To add version N+1: bump `current`, add a spec + fixture (docs/map-format/), extend `migrate`, add a test in MapSchemaTests,
+/// update tools/validate_map.py (`CURRENT_SCHEMA`), and announce CONTRACT CHANGE in the WORKLOG.
+public enum MapSchema {
+    public static let current = 3
+    public static let oldestReadable = 1
+
+    /// Upgrades a decoded map's format number step by step. Shapes 1 and 2 are identical, so this only advances the number;
+    /// later versions put real field conversions in the matching `case`.
+    public static func migrate(from version: Int) -> Int {
+        var v = version
+        while v < current {
+            switch v {
+            case 1: v = 2 // Legacy graph: no geometry can be inferred.
+            case 2: v = 3 // Rich fields remain absent/empty until captured.
+            default: v = current
+            }
+        }
+        return v
+    }
+}
 
 public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
 
-    /// Bump when the JSON shape changes incompatibly, and note it in docs/WORKLOG.md.
-    public static let schemaVersion = 1
+    /// FORMAT version of the JSON (not the content revision, that is `version`). Always `MapSchema.current` after decoding:
+    /// older files are migrated in memory on load. See `MapSchema` and docs/MAP_FORMAT.md.
+    public var schemaVersion: Int
 
     public var id: UUID
     /// Display name, e.g. "Rice Hall, floor 1".
@@ -24,6 +51,8 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     public var edges: [MapEdge]
     /// Optional fallback relocalization marker (see MarkerRef).
     public var marker: MarkerRef?
+    /// Schema 3: separately stored, integrity-checked OBJ geometry in map-frame meters.
+    public var meshAssets: [MeshAsset]
 
     public init(
         id: UUID = UUID(),
@@ -31,14 +60,45 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         version: Int = 1,
         nodes: [MapNode] = [],
         edges: [MapEdge] = [],
-        marker: MarkerRef? = nil
+        marker: MarkerRef? = nil,
+        meshAssets: [MeshAsset] = [],
+        schemaVersion: Int = MapSchema.current
     ) {
+        self.meshAssets = meshAssets
+        self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
         self.version = version
         self.nodes = nodes
         self.edges = edges
         self.marker = marker
+    }
+
+    // MARK: Decoding (format versioning)
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker, meshAssets }
+
+    /// Accepts every format from `MapSchema.oldestReadable` to `MapSchema.current` (a missing `schemaVersion` means format 1) and
+    /// migrates it to the current one. A file written by a NEWER app is refused with a clear message instead of being half-understood.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let found = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        guard found >= MapSchema.oldestReadable else {
+            throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: c,
+                debugDescription: "Map format \(found) is not valid.")
+        }
+        guard found <= MapSchema.current else {
+            throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: c,
+                debugDescription: "This map uses format \(found), which is newer than this app understands (format \(MapSchema.current)). Update Waypoint.")
+        }
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        version = try c.decode(Int.self, forKey: .version)
+        nodes = try c.decode([MapNode].self, forKey: .nodes)
+        edges = try c.decode([MapEdge].self, forKey: .edges)
+        marker = try c.decodeIfPresent(MarkerRef.self, forKey: .marker)
+        meshAssets = try c.decodeIfPresent([MeshAsset].self, forKey: .meshAssets) ?? []
+        schemaVersion = MapSchema.migrate(from: found)
     }
 
     // MARK: Queries
@@ -76,6 +136,25 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         for e in other.edges where !result.edges.contains(where: { $0.connects(e.from, e.to) }) {
             result.edges.append(e)
         }
+        // Preserve existing geometry; allow filling previously absent extents only.
+        for i in result.nodes.indices where result.nodes[i].extent == nil {
+            if let incoming = other.nodes.first(where: { $0.id == result.nodes[i].id }),
+               incoming.position == result.nodes[i].position, incoming.kind == result.nodes[i].kind,
+               incoming.segmentId == result.nodes[i].segmentId,
+               incoming.createdBy == result.nodes[i].createdBy, incoming.label == result.nodes[i].label {
+                result.nodes[i].extent = incoming.extent
+            }
+        }
+        for asset in other.meshAssets {
+            if let index = result.meshAssets.firstIndex(where: { $0.id == asset.id }) {
+                var a = result.meshAssets[index], b = asset
+                a.storageOwner = nil; b.storageOwner = nil
+                if a == b, result.meshAssets[index].storageOwner == nil {
+                    result.meshAssets[index].storageOwner = asset.storageOwner
+                }
+            } else { result.meshAssets.append(asset) }
+        }
+        result.schemaVersion = MapSchema.current
         if result.marker == nil { result.marker = other.marker }
         result.version = max(version, other.version) + 1
         return result

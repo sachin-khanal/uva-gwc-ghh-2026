@@ -1,5 +1,47 @@
 # Testing — what is proven, and the device test plan
 
+## Update 2026-10-17 (Codex) — schema 3 and real mesh payloads
+
+Verified on Windows: 15 Python tests plus fixtures 1/2/3; browser 43/43
+logic/geometry and 16/16 interface checks (including 3D orbit, real in-memory OBJ
+bundle load, missing mesh failure, checksum rejection). Cloud checks are mocked.
+No claim that Python/browser proves native code compiled or AR buffers are valid.
+
+Pending before merge/deployment:
+
+1. Mac: make test, make typecheck, make check. New RichMapSchemaTests and CloudTests
+   cover migration, extent preservation, OBJ format/limits, bundle persistence,
+   cloud upload ordering, and corrupt downloaded geometry. Main's other work
+   (especially route memory) must be retained when integrating this older U3 base.
+2. Supabase: apply 0004_rich_map_schema.sql AFTER 0003; run rich_map_schema.sql,
+   canonical_maps.sql and extension_connections.sql. Confirm a schema-2 graph
+   can gain an extent and immutable mesh manifest, and stale publication retains both.
+3. LiDAR phone: scan a real enclosed room with classification on, tag the room,
+   save, inspect map.json schemaVersion=3/extent/meshAssets and mesh-UUID.obj.
+   Check actual floor/mesh alignment, bounds, checksum, rendering and export time.
+   Classification off or open/unmapped rooms must not invent extents; non-LiDAR
+   capture remains graph-only. Large scans must fail explicitly at the export cap.
+4. Publish, download to another phone, and connect the web library. Confirm every
+   contributor's OBJ loads from their own storage folder, aligns with the route,
+   and survives extension and stale upload. Reload/roundtrip a legacy map to verify
+   IDs/graph preserved and absent geometry stays absent. Also test offline bundles.
+
+All new native/AR capture and cross-phone mesh behavior: UNVERIFIED ON DEVICE.
+
+## Update 2026-10-17 (Codex) — restored web viewer
+
+Run `python -B web/serve.py`, then open http://127.0.0.1:8000/web/tests.html
+(33 routing/validation/cloud-mock checks) and `/web/ui-tests.html` (13 actual DOM
+checks). Both suites passed in headless Edge after restoring the viewer; the UI
+suite includes canvas clicks, file imports, empty/unreachable maps, mock cloud
+and a 390px responsive viewport. The 9 Python validator tests also pass.
+
+Optional Node 20+ runner: `node web/test-web.mjs` (not executed here).
+New `RouteVectorTests.swift` uses the same `Samples/route-vectors.json` expectations
+as JavaScript. Run `make test` on a Mac before claiming native/browser parity.
+Live Supabase sign-in/listing still requires the anon public key and a published
+building. No real cloud data was read or written during these mocked checks.
+
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
 
 First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
@@ -167,3 +209,5 @@ Limits: cannot move the phone, cannot judge audio/haptics/visual quality of the 
 
 Add to docs/WORKLOG.md: which check number, phone model + iOS version, pass/fail, console excerpt. A check
 is only "verified" once someone has done it on a device and written it down.
+
+**Update 2026-10-17 (Codex, U3):** executed rich_map_schema.sql, canonical_maps.sql and extension_connections.sql successfully on connected Supabase after applying 0005_mesh_read_policy.sql and 0006_geometry_validator_alias.sql. Fixtures roll back. Initial rich-map run exposed ambiguous n in geometry validation; 0006 fixes it. Mesh policy definition now uses objects.name. Actual cross-user mesh HTTP downloads and device capture remain unverified. make test/typecheck could not start on Windows (make missing).

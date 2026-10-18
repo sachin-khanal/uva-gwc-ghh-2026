@@ -1,5 +1,15 @@
 # Decisions log
 
+**Update 2026-10-17 (Codex, user-directed CONTRACT CHANGE):** personal U3 uses
+schema **3** for room extents and separately stored OBJ meshes, retaining main's
+serialized MapSchema migration framework (1/2 remain readable). This resolves
+navigation-overhaul's different static "schema 2" meaning. OBJ v1 is untextured,
+in map-frame meters with baked anchor transforms, SHA-256 and bounds; no third-
+party dependency. Mesh assets are immutable; missing extents may be enriched,
+while stale graph uploads preserve existing rich fields via migration 0004.
+Schema-3 deployment requires coordinated reader/server updates; see MAP_FORMAT.
+This records U3 implementation intent, not a main merge or device verification.
+
 **Update 2026-10-17 (Codex, user-directed):** D-015's contributor-copy approach is superseded for updated clients by one canonical shared map per building UUID. Migration 0002 adds canonical_buildings and an atomic additive extension RPC. Signed-in users can see and extend it; private publication is removed from the cloud UI. Existing records/data remain in place for old clients. See `supabase/CANONICAL_MAPS.md` for deployment, identity, and verification limits. This cloud change is UNVERIFIED on live Supabase and iOS; full scan-extension capture remains separate.
 
 Short ADRs. Add new ones at the bottom with the next id. Do not rewrite history; supersede instead.

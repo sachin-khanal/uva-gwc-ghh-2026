@@ -1,5 +1,16 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-17 (Codex, U3, CONTRACT CHANGE):** schema 3 adds optional room
+extents and OBJ mesh manifests/payloads; formats 1/2 migrate without invented
+geometry. New MeshAsset/OBJEncoder, RoomExtractor port, AR MeshExporter, local
+bundle storage and cloud upload/download wiring implemented; native execution
+and device capture remain SCAFFOLD / UNVERIFIED ON DEVICE. 0004 SQL migration
+preserves rich data during stale graph uploads (execution pending). Web now has
+3D orbit and verified OBJ loading: 43 logic/geometry + 16 UI checks PASS; Python
+validator 15 PASS. Full contract and deployment: `docs/MAP_FORMAT.md`.
+
+**Update 2026-10-17 (Codex, U3 redo):** Web viewer v1 restored under `web/`: sample/local/shared-map browser, top-down canvas and A* route preview. Status: implemented locally; 46 Edge checks PASS (cloud mocked), live Supabase and new native shared-vector test pending. Usage: `web/README.md`. Existing native router/model unchanged.
+
 **Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.
 
 **Update 2026-10-17 (Codex, U3):** cloud canonical-map extension implemented in migration 0002 plus Swift client/controller wiring, pending SQL and Mac verification. One building UUID has one shared record; contributors add to it. Previous mock-tested contributor-row status below applies to the old endpoint. See `supabase/CANONICAL_MAPS.md`; scan extension UI remains unfinished.
@@ -95,3 +106,5 @@ large single Start target and voice destination input (stretch).
 
 **Update 2026-10-17 — files added by D-022 (accessibility):** core `Guidance/PhonePosture.swift` (A/B), `Guidance/SpokenPhrases.swift` (B, wording reviewed by U4), `Vision/ObstacleKind.swift` (C); `Routing/RouteFollower.swift` gained look-ahead and landmarks; `Guidance/FeedbackPlanner.swift` was rewritten around them;
 app `Waypoint/Vision/ObstacleDetector.swift` (rewritten: world-space, floor/ceiling aware), `Waypoint/Vision/ObstacleIdentifier.swift` (new: mesh class + Vision), `Waypoint/Navigation/NavigationController.swift` (posture + report wiring, corrected camera axes). Tests: `AccessibilityGuidanceTests.swift` (24).
+
+**Update 2026-10-17 (Codex, U3):** rich-map backend SQL is now verified on connected Supabase by rich_map_schema, canonical_maps and extension_connections transactional regressions. Follow-up migrations 0005/0006 fix mesh policy path binding and a validator alias collision. Native/device verification remains pending; see WORKLOG.
