@@ -99,7 +99,9 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var confirmedPlaceCount = 0
     /// The volunteer located themselves by hand, so ARKit does not have to recognise the space.
     private var alignedByHand = false
-    private var isSaving = false
+    /// A save is in flight. Published and readable so `LiveScanService` can tell "still working" from
+    /// "stalled" instead of failing the save on a fixed timer.
+    @Published private(set) var isSaving = false
     private var exportProbeDone = false
     private var latestCameraTransform: simd_float4x4?
 
@@ -498,11 +500,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let exportBox = scanBox
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
-            DispatchQueue.main.async {
-                defer { self.isSaving = false }
-                guard self.isRunning else { return }
+            // The heavy part runs OFF the main thread. Archiving a tens-of-megabytes ARWorldMap and
+            // writing it to disk took many seconds on a big scan, and doing it on the main queue froze
+            // the whole UI meanwhile - which is also why the old fixed save deadline kept expiring: the
+            // timer could not even fire until the work it was timing had finished (device report
+            // 2026-10-18). Only the published results go back to the main queue.
+            DispatchQueue.global(qos: .userInitiated).async {
                 guard let worldMap else {
-                    self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
+                    }
                     return
                 }
                 do {
@@ -511,12 +520,20 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     // cannot be erased by saving this older starting snapshot.
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
                     let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
-                    self.savedMap = saved
-                    self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
-                    self.stop()
-                    Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.savedMap = saved
+                        self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
+                        self.stop()
+                        Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
+                    }
                 } catch {
-                    self.errorMessage = "Save failed: \(error.localizedDescription)"
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.errorMessage = "Save failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }

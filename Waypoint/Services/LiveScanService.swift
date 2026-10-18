@@ -100,6 +100,11 @@ final class LiveScanService: ScanService {
 
     func adjustBox(by delta: Float) { controller.adjustBoxMargin(by: delta) }
 
+    /// Absolute backstop for a save, in case something genuinely hangs. Deliberately generous: the cost of
+    /// waiting is a spinner, the cost of giving up early is telling somebody their scan was lost when it
+    /// was not.
+    private static let saveBackstopSeconds: TimeInterval = 180
+
     func finish(completion: @escaping (Result<BuildingMap, Error>) -> Void) {
         finishCompletion = completion
         finishCancellables = []
@@ -121,9 +126,26 @@ final class LiveScanService: ScanService {
             .sink { [weak self] message in self?.complete(.failure(ScanServiceError(message: message))) }
             .store(in: &finishCancellables)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.complete(.failure(ScanServiceError(message: "Saving took too long. Try again.")))
-        }
+        // A DEADLINE, not a stopwatch. The old version failed the save unconditionally after 15 s, while
+        // the save was still running - and on a big scan it always is: archiving a tens-of-megabytes
+        // ARWorldMap and writing it out takes longer than that. The user was told "Saving took too long.
+        // Try again." about a save that then succeeded, and `complete` takes only the FIRST outcome, so
+        // the real success was discarded (device report 2026-10-18; the scan was on disk the whole time).
+        // Now we only give up if the controller has STOPPED saving without producing either a map or an
+        // error - a genuine stall - with a long backstop for a hang.
+        let deadline = Date().addingTimeInterval(Self.saveBackstopSeconds)
+        Timer.publish(every: 1, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self, self.finishCompletion != nil else { return }
+                if self.controller.isSaving && Date() < deadline { return } // still working: say nothing
+                if self.controller.isSaving {
+                    self.complete(.failure(ScanServiceError(message: "Saving is taking much longer than expected. The scan may be very large.")))
+                } else {
+                    self.complete(.failure(ScanServiceError(message: "Saving stopped without finishing. Try again.")))
+                }
+            }
+            .store(in: &finishCancellables)
         controller.save()
     }
 

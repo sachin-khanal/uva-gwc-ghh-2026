@@ -1,5 +1,54 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Two timers that reported failure on work that had succeeded   [tags: BUG]
+Area: A (capture), U3 (scanner UI). Branch `stairs-multifloor`.
+Context: Anmol said the demo route "has not been used once" - everything so far has been tested in an apartment,
+and Rice Hall has never been scanned or walked. These two bugs both bite HARDER on a bigger scan, so they are the
+ones most likely to go wrong the first time anyone scans the actual venue.
+
+1. "Saving took too long. Try again." ON A SAVE THAT WORKED.
+`LiveScanService.finish` failed the save unconditionally 15 s after it started, regardless of what the save was
+doing, and `complete` takes only the FIRST outcome - so the real success that arrived moments later was thrown
+away. Anmol's 3.5 M-triangle scan was on disk the whole time it was being reported as lost.
+It was worse than a wrong number, because the save ALSO ran on the main thread: `NSKeyedArchiver.archivedData`
+on a tens-of-megabytes ARWorldMap plus the disk write, all on the main queue. While that ran the UI was frozen
+and the timer could not fire; it fired the instant the work it was timing finished, which is why it won the race
+so reliably.
+Fixed:
+* `CaptureController.save` does the archive and the write on a background queue; only the published results hop
+  back to main. `isSaving` is now `@Published private(set)` instead of `private`.
+* `LiveScanService.finish` replaces the fixed stopwatch with a DEADLINE that watches `controller.isSaving`: while
+  the controller is still saving it says nothing, and it only gives up if saving STOPPED without producing either
+  a map or an error (a genuine stall), with a 180 s backstop for a hang. The cost of waiting is a spinner; the
+  cost of giving up early is telling somebody their scan was lost when it was not.
+
+2. "No 3D model for this scan" AFTER 60 SECONDS, whatever the exporter was doing.
+`ScanReviewView.modelReady` was read ONCE in `.onAppear` and never re-checked, and `modelWaiting` was a pure
+stopwatch (`< 60 s`). So the card flipped to "No 3D model for this scan" whether the export had failed, was still
+running, or had already succeeded - and even once `model.usdz` existed it kept denying it until you left the
+screen and came back. A 3.5 M-triangle export takes minutes, so for a real scan the answer was always wrong.
+Fixed: a 1 s poll for the file while a model may still be coming, and the window widened to 600 s and used ONLY
+as the spinner's condition, never to claim the opposite. (`CaptureController.modelStatus` already carries the
+exporter's own verdict including its error text; wiring the card to that instead is the better fix and is NOT
+done here.)
+
+Both are the same mistake, and the third this session after the 2.0 s speech budget: a fixed timer presented to
+the user as a result.
+
+Verified: `make test` -> **382 tests, 0 failures** (unchanged; both fixes are in app-target code `make test`
+cannot reach). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Neither a large save nor a slow export has been re-run on the phone since.
+Open / handoff: the biggest risk on this project is NOT in this list - it is that Rice Hall has never been
+scanned and `Gate G2` (relocalization x5 in a real hallway, ROADMAP U1.6) has never been run. Every fix this
+session was validated in a flat, which is shorter, more cluttered and far more feature-rich than a university
+corridor. Remaining known bugs, all still open: the USDZ export is slow (per-vertex array allocation in
+`MeshExporter.writeUSDZ`), the export reads session-owned Metal buffers after `stop()` pauses the session,
+`CoverageTracker` uses an absolute 2 m grid (the 59 %-after-a-full-retrace report), and the loop-closure
+thresholds disagree (builder joins at 1.0 m in 3D, `MapHealth` flags at 1.5 m in 2D) so the "check before
+sharing" warning cannot be cleared.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Stairs going DOWN: the one hazard nothing in the app could see   [tags: FEATURE, SAFETY]
 Area: C (Vision) + B (guidance). NEW branch `stairs-multifloor` off `map-extension`. Step 1 of the stairs /
 multi-floor plan agreed with Anmol (see the handoff note at the bottom for the rest of that plan).

@@ -23,6 +23,10 @@ struct ScanReviewView: View {
     @State private var modelReady = false
     @State private var showModel = false
     private let openedAt = Date()
+    /// Polls for the model file while one may still be coming. `modelReady` used to be read ONCE in
+    /// `.onAppear`, so a model that landed a few seconds later was never noticed and the card went on
+    /// claiming there was none until you left the screen and came back (device report 2026-10-18).
+    private let modelPoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(map: BuildingMap, onShare: @escaping (BuildingMap) -> Void, onDone: @escaping () -> Void) {
         _map = State(initialValue: map)
@@ -105,6 +109,10 @@ struct ScanReviewView: View {
             ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { showModel = false })
         }
         .onAppear { modelReady = app.store.hasModel(mapId: map.id) }
+        .onReceive(modelPoll) { _ in
+            guard !modelReady else { return }
+            modelReady = app.store.hasModel(mapId: map.id)
+        }
         .alert("Rename place", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Label", text: $renameText)
                 .textInputAutocapitalization(.words)
@@ -207,7 +215,15 @@ struct ScanReviewView: View {
     }
 
     /// True while a model may still be coming (the review opened right after a save).
-    private var modelWaiting: Bool { !modelReady && Date().timeIntervalSince(openedAt) < 60 && savedRecently }
+    ///
+    /// This is a GUESS about timing, not a result, so it must never be used to claim the opposite. The
+    /// 60 s cut-off used to flip the card to "No 3D model for this scan" whether the export had failed,
+    /// was still running, or had already SUCCEEDED - a stopwatch presented as an outcome. The real
+    /// answer now arrives via `modelPoll` (the file appearing) or `controller.modelStatus` (the
+    /// exporter's own verdict, including its error text); a 3.5 M-triangle scan takes minutes, well past
+    /// any fixed window. Widened to match `MeshExporter`'s realistic worst case and kept only as the
+    /// spinner's condition.
+    private var modelWaiting: Bool { !modelReady && Date().timeIntervalSince(openedAt) < 600 && savedRecently }
 
     /// The map file was written in the last two minutes, i.e. this review follows a fresh scan whose model is still being built.
     private var savedRecently: Bool {
