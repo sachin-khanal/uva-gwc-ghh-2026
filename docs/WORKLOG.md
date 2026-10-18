@@ -1,6 +1,12 @@
 # Work log
 
 
+## 2026-10-18 - Codex for U3 - Remove unrequested viewer slogans
+Files edited: web/index.html and docs/WORKLOG.md in open workspace and personal U3 checkout, keeping preview/source aligned. Removed 'Small steps. More independence.' footer span and 'A LITTLE PLANNING GOES A LONG WAY' eyebrow. Plan your route heading retained. No other behavior changed; no commit/push.
+Verified: targeted source check confirms both exact slogans absent and route heading retained; git diff --check PASS. Commands: rg, targeted Python text edits, diff check. No runtime/native checks needed for static copy removal; no native code touched.
+
+
+
 ## 2026-10-18 - Codex for U3 - Publish all personal changes to origin/U3
 User explicitly requested pushing all their changes to personal U3. Fetched origin; U3 worktree clean before operation. Fast-forwarded U3 from 99f617b to resolved integration 4600cba, copied all 11 modified tracked docs/web files and new web/{building-model,walkthrough}.js from open workspace. Restored floor1-demo/ from its earlier U3 commit for personal preservation; it remains separate/unlinked and no main push occurs. No credentials or TEMP Floor 4 snapshot added; .codex worktrees excluded. .gitignore was open but had no changes.
 Verified: every copied web source byte-matches the previously tested workspace; latest browser suites 57 logic/GPU/mock + 22 UI PASS and actual Floor 4 fixed-tour validation documented above. Whitespace/docs-hook checks run before commit. Native make test/typecheck unavailable on Windows, as previously attempted; native capture integration remains UNVERIFIED ON DEVICE. No new live DB changes. Commands: git fetch/status/branch/worktree/merge --ff-only/restore, explicit file copies, SHA-256 copy comparison, git diff/check/add/commit/push to U3 only. No force push; GitHub main unchanged. Separate test demo restored only to personal branch.
