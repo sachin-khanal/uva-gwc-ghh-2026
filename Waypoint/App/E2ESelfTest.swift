@@ -160,6 +160,22 @@ enum E2ESelfTest {
                   "\(size) bytes, \(triangles) triangles read back (from \(idx.count / 3), cell \(fitted.cellSize.map { String(format: "%.2f", $0) } ?? "none"))")
         } catch { fail("export.usdz", "\(error)") }
 
+        // Size policy on THIS phone: a 51 MB scan file (over the 50 MB sharing limit) must save locally, be flagged local-only, and an INCOMING
+        // bundle with the same file must still be refused.
+        do {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("e2e-big-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let bigStore = MapStore(rootURL: root)
+            let a = MapNode(kind: .corridor, position: [0, 0, 0], segmentId: "seg1"), b = MapNode(kind: .room, label: "Big Room", position: [3, 0, 0], segmentId: "seg1")
+            let bigMap = BuildingMap(name: "E2E big scan", nodes: [a, b], edges: [MapEdge(from: a.id, to: b.id, distance: 3)])
+            let big = Data(count: 51_000_000)
+            try bigStore.saveLocalScan(map: bigMap, worldMap: big, segmentId: "seg1")
+            let stored = (try? bigStore.loadWorldMap(mapId: bigMap.id, segmentId: "seg1"))?.count ?? 0
+            check("share.overLimitSavesLocally", stored == 51_000_000 && bigStore.shareVerdict(mapId: bigMap.id).isLocalOnly,
+                  "stored \(stored) bytes, verdict \(bigStore.shareVerdict(mapId: bigMap.id))")
+            check("share.overLimitRefusedFromOutside", (try? MapBundle(map: bigMap, worldMaps: ["seg1": big]).validate()) == nil, "incoming bundle with a 51 MB scan is refused")
+        } catch { fail("share.overLimit", "\(error)") }
+
         // ---- D. RESOURCES
         if let url = Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json"),
            let sample = (try? Data(contentsOf: url)).flatMap({ try? BuildingMap.from(jsonData: $0) }) {

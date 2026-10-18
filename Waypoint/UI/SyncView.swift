@@ -30,15 +30,23 @@ struct SyncView: View {
                     ForEach(peers, id: \.self) { peer in
                         Menu(peer.displayName) {
                             ForEach(app.maps) { map in
-                                Button("Send \"\(map.name)\"") { holder.sync?.send(mapId: map.id, to: peer) }
+                                // Over the 50 MB sharing limit: stays on this phone (SharePolicy); the button is off and says why.
+                                let localOnly = app.store.shareVerdict(mapId: map.id).isLocalOnly
+                                Button("Send \"\(map.name)\"\(localOnly ? " (too large, stays on this phone)" : "")") { holder.sync?.send(mapId: map.id, to: peer) }
+                                    .disabled(localOnly)
                             }
                         }
                     }
                 }
-                CloudSection(cloud: app.cloud, maps: app.maps)
+                CloudSection(cloud: app.cloud, maps: app.maps, store: app.store)
                 Section("Export (AirDrop / Files)") {
                     ForEach(app.maps) { map in
-                        if let url = try? app.store.writeBundleFile(id: map.id) {
+                        let verdict = app.store.shareVerdict(mapId: map.id)
+                        if verdict.isLocalOnly {
+                            // do not even build the bundle file: it would be over the limit and the receiving phone would refuse it
+                            Label("\(map.name): too large to share, stays on this phone", systemImage: "iphone")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        } else if let url = try? app.store.writeBundleFile(id: map.id) {
                             ShareLink(item: url) { Label(map.name, systemImage: "square.and.arrow.up") }
                         }
                     }
@@ -78,13 +86,19 @@ struct SyncView: View {
 private struct CloudSection: View {
     @ObservedObject var cloud: CloudController
     let maps: [BuildingMap]
+    let store: MapStore
 
     var body: some View {
         Section("Cloud library (Supabase)") {
             Text(cloud.status).font(.footnote)
             if cloud.isConfigured {
                 ForEach(maps) { map in
+                    let verdict = store.shareVerdict(mapId: map.id)
                     Button("Upload \"\(map.name)\" (shared building map)") { cloud.push(mapId: map.id, name: map.name, share: true) }
+                        .disabled(verdict.isLocalOnly)
+                    if verdict.isLocalOnly, let why = SharePolicy.message(verdict) {
+                        Text(why).font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 Button("Refresh library") { cloud.refresh() }
                 ForEach(cloud.remote) { item in

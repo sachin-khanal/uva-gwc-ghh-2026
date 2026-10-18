@@ -120,6 +120,9 @@ final class MapSync: NSObject, ObservableObject {
 
     /// Sends one map (with its world maps) to a connected peer.
     func send(mapId: UUID, to peer: MCPeerID) {
+        // The receiving phone refuses a scan file over the limit, so do not even build the bundle (SharePolicy).
+        let verdict = store.shareVerdict(mapId: mapId)
+        if verdict.isLocalOnly { status = SharePolicy.message(verdict) ?? "Too large to share."; return }
         do {
             let fileURL = try store.writeBundleFile(id: mapId)
             session.sendResource(at: fileURL, withName: fileURL.lastPathComponent, toPeer: peer) { [weak self] error in

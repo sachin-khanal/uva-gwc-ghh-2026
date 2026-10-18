@@ -332,3 +332,23 @@ Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next 
 
 
 **Update 2026-10-18 (Claude, confirmed by Sachin): who is who.** U1 = Sachin Khanal · U2 = Anmol Thapa (branch `navigation-overhaul`) · U3 = Rishya (GitHub `rishyam1`; branch `U3`, `supabase/`, `tools/`, `web/`) · U4 = Neeha (GitHub `neehamikki`; branch `app-ui-workflows`, the new Scanner/Navigator UI). Git history uses the handles; the docs use U1-U4.
+
+
+## Update 2026-10-18 — snapshot 3: U1 status (Claude, for Sachin; evidence = branches fetched, WORKLOG, phone runs)
+
+| U1 task | State now |
+|---|---|
+| U1.1 signing + run on phone | DONE |
+| U1.2 branch hygiene | DONE (rule written in `docs/WORKFLOW.md`, 2026-10-18) |
+| U1.4 live scan, U1.5 save | DONE on the phone: 3 real scans saved with a 3D model each; one was a 27.5 MB scan file |
+| U1.6 relocalization x5 (**Gate G2**) | NOT RUN. Needs Sachin + the phone in a hallway; it is the biggest unknown |
+| U1.7 marker fallback | not started (only if G2 fails) |
+| U1.8 multi-segment relocalization | NOT STARTED. Needs U2's relocalization changes (branch `navigation-overhaul`, not yet in `main`) first |
+| U1.9 joint walk with U2 | blocked on U2's merge |
+| U1.10 extend an existing map | built, first screen verified on the phone; real recording/attach UNVERIFIED (needs a physical test) |
+| U1.11 merge captain | ongoing: `main` = `fix/format-alignment-security`; `fix/*` branches deleted after merge |
+| U1.12 / U1.14 mesh colouring, door suggestions | not started (cut first) |
+| U1.13 Rice Hall scan | blocked on U4's survey (U4.2) |
+| U1.15 freeze | later |
+| NEW: size policy | scans over the 50 MB cloud limit are saved on the phone only (`SharePolicy`, `MapStore.saveLocalScan`); see WORKLOG 2026-10-18 |
+| NEW: finish gating | Finish/Save still requires ARKit `mapped` plus one labelled place; no change yet (decision pending) |

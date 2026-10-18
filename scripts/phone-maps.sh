@@ -30,6 +30,8 @@ case "$cmd" in
     done < "$dest/.files"
     rm -f "$dest/.files"
     if [ "$count" -eq 0 ]; then rmdir "$dest" 2>/dev/null || true; echo "backup: no maps on the phone (or the app is not installed)"; else echo "backup: $count file(s) -> $dest"; fi
+    # Keep only the newest 5 backups (each can be 100 MB+); older ones are removed.
+    ls -1dt "$ROOT"/*/ 2>/dev/null | tail -n +6 | while read -r old; do rm -rf "$old"; done
     ;;
   restore)
     need_device

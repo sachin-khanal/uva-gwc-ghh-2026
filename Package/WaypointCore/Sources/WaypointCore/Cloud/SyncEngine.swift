@@ -36,6 +36,9 @@ public final class SyncEngine {
 
     /// Publishes an additive extension. All canonical maps are shared; share is retained for API compatibility.
     public func push(mapId: UUID, share: Bool) async throws {
+        // A scan file over the cloud limit never leaves the phone. Checked from file sizes BEFORE anything is loaded or sent.
+        let verdict = store.shareVerdict(mapId: mapId)
+        if verdict.isLocalOnly, let why = SharePolicy.message(verdict) { throw CloudError.localOnly(why) }
         let bundle = try store.makeBundle(id: mapId)
         try bundle.validate() // never upload something we would refuse to import
         let owner = try await client.currentUserId()

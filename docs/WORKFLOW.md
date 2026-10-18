@@ -35,7 +35,15 @@ and for mixing them (e.g. Live Share while pairing, git to move work between mac
 
 - Remote: the GitHub repo `uva-gwc-ghh-2026`. Branch `main` is always green (`make test`, `make typecheck`).
 - **Branch per area:** ~~`a/capture`, `b/guidance`, `c/vision`, `d/sync-ui`~~ (add `/<topic>` for more).
-  **Update 2026-10-17 (Claude):** ROADMAP Revision 3 §6 supersedes the letters with per-person prefixes `u1/`, `u2/`, `u3/`, `u4/`, and says only U1 merges to `main`. In practice branches are named `U3` and `app-ui-workflows`, and `main` has received a direct push from U3's side (e22e5cb). Agree and write down which rule actually applies.
+  **Update 2026-10-17 (Claude):** ROADMAP Revision 3 §6 supersedes the letters with per-person prefixes `u1/`, `u2/`, `u3/`, `u4/`, and says only U1 merges to `main`.
+  **Update 2026-10-18 (Claude, ROADMAP task U1.2):** what is actually done, and the rule. People name branches by TOPIC (`navigation-overhaul`, `app-ui-workflows`, `fix/...`, `feature/...`); that is fine. The rule:
+  1. Work on a branch, never directly on `main`.
+  2. Before asking for a merge: `git fetch && git merge origin/main` INTO YOUR BRANCH and resolve conflicts on your side (the owner of a file knows it best). Then run `make test && make typecheck && make check`, and `make uitest` + `make selftest-e2e` on an unlocked phone if you touched UI, guidance or scanning. Remember `make selftest-*` only launches the build already installed: run `make build install` first.
+  3. Add a WORKLOG entry with real `Verified:` / `NOT verified:` lines (AGENTS.md rule 12; the pre-commit hook and the GitHub Action enforce it).
+  4. Contract changes (`Model/*`, SQL migrations, JSON shape) are announced `CONTRACT CHANGE` and follow the checklist in `docs/MAP_FORMAT.md`. Applied SQL migrations are never edited: add a new numbered one.
+  5. U1 merges to `main` as a fast-forward (`git merge --ff-only`); everyone else asks. Anyone may merge `main` into their own branch at any time.
+  6. After a branch is merged, delete it (`git push origin --delete <branch>`); keep a branch only while work on it continues.
+  7. This repo lives on the iCloud-synced Desktop on some Macs: iCloud can create duplicate files named like `Foo 2.swift` that break the build ("ambiguous use of ..."). If a build suddenly complains about duplicate types, run `git status` and look for ` 2.` files; they are safe to delete when identical to the tracked file. Better: keep your clone outside iCloud Drive. In practice branches are named `U3` and `app-ui-workflows`, and `main` has received a direct push from U3's side (e22e5cb). Agree and write down which rule actually applies.
 - **Small commits, rebase onto main daily** (`git pull --rebase origin main`). Merge to `main`
   via PR or fast-forward; never force-push `main`.
 - **Merge-conflict hotspots** and how we avoid them:

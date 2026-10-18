@@ -144,6 +144,7 @@ final class CloudController: ObservableObject {
         case CloudError.http(let status, let message):
             if status == 401 || status == 403 { return "Cloud denied access (\(status)). Check Anonymous Sign-Ins and the SQL policies." }
             return "Cloud error \(status): \(message)"
+        case CloudError.localOnly(let message): return message
         case CloudError.rejected(let reason): return "Refused map: \(reason)"
         case MapStoreError.rejected(let reason): return "Refused map: \(reason)"
         case is URLError: return "No connection to the cloud (offline?)."

@@ -70,6 +70,9 @@ struct ScanReviewView: View {
                     }
                 }
                 if let saveError { Banner(text: saveError, kind: .error) }
+                // Scan file near or over the 50 MB sharing limit (SharePolicy): say so before the person tries to share it.
+                let shareVerdict = app.store.shareVerdict(mapId: map.id)
+                if let why = SharePolicy.message(shareVerdict) { Banner(text: why, kind: shareVerdict.isLocalOnly ? .warning : .info) }
 
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Text("Places").font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)

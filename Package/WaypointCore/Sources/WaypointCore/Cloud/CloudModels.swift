@@ -105,6 +105,8 @@ public enum CloudError: Error, Equatable {
     case http(status: Int, message: String)
     case decoding(String)
     case rejected(String)
+    /// The map's scan file is over the sharing limit; it stays on this phone (`SharePolicy`). The string is a sentence for the person.
+    case localOnly(String)
 }
 
 /// One canonical building map (migration 0002). Owner records the first publisher;

@@ -341,7 +341,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
                     // Merge against the latest local copy so a download arriving during capture
                     // cannot be erased by saving this older starting snapshot.
-                    let saved = try self.store.importBundle(MapBundle(map: map, worldMaps: [savedSegment: data]))
+                    // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
+                    let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
                     self.savedMap = saved
                     self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
                     self.stop()
