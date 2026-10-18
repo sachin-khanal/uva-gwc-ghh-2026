@@ -77,10 +77,10 @@ public enum NarrationText {
     }
 
     /// "right" the ADVERB ("right there", "right now", "right on your left") is not the direction. Live Gemini wrote "Room 206 is right there on
-    /// your left." and the instruction check above took it for an added turn. Only these fixed phrases are excused; a bare "right" still counts.
+    /// your left." and the instruction check above took it for an added turn. Only "right there / here / now" are excused (security review 2026-10-18: "right at/by/after/on ..." can start a real direction, e.g. "keep right after the door"); a bare "right" still counts.
     static func withoutAdverbRight(_ text: String) -> String {
         var t = " " + text.lowercased() + " "
-        for follower in ["there", "here", "now", "next", "away", "in", "at", "on", "by", "over", "up", "after", "before", "around"] {
+        for follower in ["there", "here", "now"] {
             t = t.replacingOccurrences(of: " right \(follower) ", with: " \(follower) ")
         }
         return t

@@ -1,5 +1,10 @@
 # Work log
 
+## 2026-10-18 15:25 — Claude (agent, for Sachin) — Narration guard: adverb excuse narrowed to "right there/here/now" (automated security review)   [tags: BUG]
+Area: B. Branch `feature/guidance-overhaul`. Finding (MEDIUM, valid): the 15:10 fix excused "right" before 14 words, including at/by/after/on/in/next, so "keep right after the door" passed a left-only landmark. Now only "right there / here / now" are excused (the three that cannot start a direction). Files edited: `Guidance/Narration.swift`, `GuidanceOverhaulTests.swift` (6 new rejects). Not done (suggested alternative): requiring the direction-word multiset to match exactly - stricter than needed; the added-word rule plus must-keep already covers it.
+Verified: `make test` -> 396 tests, 0 failures. NOT verified: on device; live Gemini beyond the two sentences of 15:10.
+Open problems / handoff: none new.
+
 ## 2026-10-18 15:10 — Claude (agent, for Sachin) — First LIVE Gemini call: works; guard falsely rejected "right there"; default model now gemini-3.5-flash-lite   [tags: BUG]
 Area: B. Branch `feature/guidance-overhaul`. With the key Sachin put in `Config/Local.xcconfig` (read inside a shell command, never printed or committed) I called the real API with the app's exact system prompt. `gemini-3.5-flash-lite`: HTTP 200 in 0.80 s and 0.64 s. "Room 206 on your left." -> "Room 206 is right there on your left."; "In 10 meters, turn right." -> "In 10 meters, please turn right." The key also lists gemini-3.5/3.6/3.7/3.8-flash, 3.1-flash-lite and 2.5 models.
 Bug found by the live reply: the 14:05 guard treated the adverb in "right there" as an ADDED direction and would have rejected the first reply (every landmark would have fallen back to plain). Fixed: `NarrationText.withoutAdverbRight` excuses only the fixed phrases "right there/here/now/next/away/in/at/on/by/over/up/after/before/around"; a bare "right" still counts. Default `GeminiConfig.defaultModel` -> `gemini-3.5-flash-lite` (was the 2.5 model Google has restricted). Files edited: `Guidance/Narration.swift`, `GuidanceOverhaulTests.swift` (+1 test with the real replies).

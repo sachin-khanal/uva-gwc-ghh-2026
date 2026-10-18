@@ -282,6 +282,10 @@ final class NarrationGuardTests: XCTestCase {
         // ...but the adverb excuse must not let a real extra turn through.
         XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, then turn right.", for: landmark))
         XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, go right.", for: landmark))
+        // Security review: "right" followed by a preposition can start a real direction. Only there/here/now are excused.
+        for tail in ["right at the corner", "right by the door", "right after the door", "right on the next turn", "right in the hallway", "right next to it"] {
+            XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, keep \(tail).", for: landmark), tail)
+        }
     }
 
     func testReassuranceAboutSafetyRejectsTheRewrite() {
