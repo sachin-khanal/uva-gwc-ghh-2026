@@ -1,5 +1,45 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — The arrow pointed left and nothing was said: an obstacle warning was destroying the turn   [tags: BUG, DEVICE]
+Area: B (guidance). Branch `stairs-multifloor`.
+Anmol: "it'll say theres something ahead, the arrow will say turn left but it doesnt speak it ... a bunch of
+times the arrow will have a direction and the speaker doesn't actually say it."
+
+Checked the arrow first, because the two could have diverged either way: `GuidingView` already follows
+`spokenKind ?? kind`, i.e. it prefers WHAT WAS SAID and only falls back to the raw instruction. So the arrow was
+behaving; the speech really was being lost.
+
+CAUSE: `Speaker` held ONE pending line, and at equal priority the newer one won. Cautions became `.high` earlier
+today - deliberately, so they would stop cutting sentences in half - which made them the SAME priority as turns.
+So an obstacle warning arriving a moment after a turn silently overwrote it. The user heard the obstacle, saw
+the arrow (which had fallen back to the raw instruction), and was never told to turn. Every piece of that was a
+consequence of a fix made earlier the same day.
+
+Fixed: a short QUEUE instead of a slot. Most important first, equal priorities in arrival order, capped at 3
+(beyond which the least important, oldest line goes - never the newest arrival). Every line still carries its own
+`maxAge`, so this cannot become the backlog of stale directions the single slot was guarding against: a line that
+waited too long is discarded and logged rather than spoken late.
+
+The rules now live in `Package/.../Guidance/SpeechQueue.swift`, NOT in `Speaker`. Same reasoning that put
+`SpeechGate` in core: AVSpeechSynthesizer cannot be unit-tested and never runs in `make test`, and this specific
+logic has now caused THREE device bugs - a turn destroyed by a warning (this one), a line dropped because waiting
+itself made it stale (the 2.0 s budget), and a direction spoken after arrival. `Speaker` keeps only the
+AVFoundation plumbing.
+
+Verified: `make test` -> **423 tests, 0 failures** (415 before; 8 new, one per rule: a caution no longer destroys
+a queued turn, safety jumps the queue, a stale line is dropped AND reported, a stale line does not block a fresh
+one behind it, the briefing's long budget survives, the queue is bounded and drops the ambient line, `clear`
+empties everything, and an empty queue returns nothing). `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE.
+Open: with turns no longer being destroyed, the arrow's `spokenKind` fallback should fire far less often - if
+Anmol still sees a direction on screen that was never spoken, the remaining suspects are the planner's own
+`directionCooldownSeconds` (1.5 s) and the repeat window, both of which suppress the SPEECH while the arrow keeps
+showing the instruction. Those are deliberate, so the fix there would be to make the arrow follow the spoken
+state strictly rather than falling back.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Pacing: the twelve-second door, and duplicates that slipped past the repeat check   [tags: BUG, DEVICE]
 Area: B (guidance). Branch `stairs-multifloor`. Both causes read straight off the Rice Hall walk-2 transcript.
 

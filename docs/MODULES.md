@@ -50,6 +50,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Graph building from scan** | A | `Model/MapBuilder.swift` | DONE (logic) | `RoutingTests.testMapBuilder…` |
 | **Geometry / frames** | A (shared with B) | `Geometry/Geometry.swift` | DONE | `RoutingTests.testSignedBearing…`, `testMarkerAlignment…` |
 | **Manual alignment (extend a map)** | A | `Model/ManualAlignment.swift` | DONE (logic); capture wiring UNVERIFIED ON DEVICE | `ManualAlignmentTests` (9) |
+| **Speech queue (what waits its turn)** | B | `Guidance/SpeechQueue.swift`; `Waypoint/Guidance/Speaker.swift` is only the AVFoundation plumbing | DONE (logic). UNVERIFIED ON DEVICE | `SpeechQueueTests` (8) |
 | **Stairs metadata + floor matching (format 4)** | A with U3 | `Model/MapTypes.swift` (`StairsInfo`), `Flows/MapHealth.swift`, `Waypoint/UI/Scanner/StairsSheet.swift` | Recorded; NOT yet read by guidance or routing. UNVERIFIED ON DEVICE | `StairsTests` (13) |
 | **Floor ahead / drop-offs (stairs DOWN, ledges)** | C with B | `Vision/FloorAhead.swift`, producer `Waypoint/Vision/ObstacleDetector.floorSamples` | DONE (logic); UNVERIFIED ON DEVICE, needs a real staircase | `FloorAheadTests` (12) + 7 planner tests |
 

@@ -47,9 +47,9 @@ final class Speaker: NSObject {
 
     private let synthesizer = AVSpeechSynthesizer()
     private var gate = SpeechGate()
-    /// At most ONE line waits its turn, and it is always the NEWEST one. A backlog is what produced
-    /// contradictory directions; the latest cue is the only one that still describes the world.
-    private var pending: (text: String, priority: SpeechPriority, queuedAt: TimeInterval, maxAge: TimeInterval)?
+    /// What waits its turn. The RULES live in `SpeechQueue` (WaypointCore) so they can be unit-tested;
+    /// this file is only the AVFoundation plumbing.
+    private var pending = SpeechQueue()
     /// Priority of the line being spoken right now, so `SpeechGate` can keep one safety cue from
     /// cutting off another. nil when nothing is being said.
     private var speakingPriority: SpeechPriority?
@@ -80,7 +80,7 @@ final class Speaker: NSObject {
     ///   survived the arrival. Safety interrupts deliberately KEEP what is waiting - that fix is what
     ///   lets a turn follow an obstacle warning - so a terminal line has to say so explicitly.
     func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, clearsPending: Bool = false) {
-        if clearsPending { pending = nil }
+        if clearsPending { pending.clear() }
         switch gate.decide(text: text, priority: priority, isSpeaking: synthesizer.isSpeaking, now: now,
                            speakingPriority: speakingPriority) {
         case .drop:
@@ -98,11 +98,8 @@ final class Speaker: NSObject {
         case .enqueue:
             // Hold it ourselves rather than handing it to AVSpeechSynthesizer, whose own queue cannot
             // be revised: by the time it would speak, the user has moved and the line may be wrong.
-            // Only ONE line waits, and it is the most important one offered - not simply the last,
-            // which would let an incidental landmark displace a turn.
-            // (a waiting opening briefing is only displaced by a safety interrupt, or by another line that also stays fresh)
-            if let current = pending, !staysFresh, current.priority > priority || current.maxAge > Self.maxQueuedAge { return }
-            pending = (text, priority, now, staysFresh ? Self.openingMaxQueuedAge : Self.maxQueuedAge)
+            pending.push(SpeechQueue.Line(text: text, priority: priority, queuedAt: now,
+                                          maxAge: staysFresh ? Self.openingMaxQueuedAge : Self.maxQueuedAge))
             return
         case .speak:
             break
@@ -122,20 +119,16 @@ final class Speaker: NSObject {
         Log.guidance.info("say: \(text)")
     }
 
-    /// Speaks whatever is waiting, if it is still worth saying.
+    /// Speaks the most important thing still worth saying, discarding anything that waited too long.
     private func speakPendingIfFresh() {
-        guard let next = pending else { return }
-        pending = nil
-        let age = now - next.queuedAt
-        guard age <= next.maxAge else {
-            Log.guidance.info("dropped stale line after \(String(format: "%.1f", age))s: \(next.text)")
-            return
-        }
+        let result = pending.popFresh(now: now)
+        for text in result.dropped { Log.guidance.info("dropped stale line: \(text)") }
+        guard let next = result.line else { return }
         speakNow(next.text, priority: next.priority)
     }
 
     func stop() {
-        pending = nil
+        pending.clear()
         speakingPriority = nil
         synthesizer.stopSpeaking(at: .immediate)
         gate.reset()
