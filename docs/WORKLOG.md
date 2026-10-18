@@ -1,5 +1,9 @@
 # Work log
 
+## 2026-10-18 - Codex for U3 - Include final concurrent team documentation update
+Final fetch found guidance branch commit 3730ae6 (documentation of redundant navigation branch removal only). Merged its WORKLOG entry preserving both histories; no source changes.
+Verified: final ancestry audit and clean U3/origin synchronization after push; git diff --check. NOT verified: native/device/SQL limits from prior entry unchanged; no tests rerun for docs-only change.
+
 ## 2026-10-18 - Codex for U3 - Complete synchronization with all fetched teammate branches
 Merged feature/web-viewer-integration after guidance/main, covering every fetched origin branch including latest navigation-overhaul. Preserved U3 Floor 4 opt-in preview and restored separate floor1-demo from eaed57e only on U3. Incoming verified-mesh caching/download progress, fast OBJ pipeline, shared-building scan badges and SQL regressions retained. Resolved web conflicts preserving existing routes/tour and startup readiness; SQL tests retain schema 4 and unpublished-manifest rejection with incoming null-safe/scoped assertions. Preserved both docs histories additively.
 
@@ -987,6 +991,13 @@ least 2 m away, tap that. Expect either "Extending this building..." (works) or 
 
 
 **Update 2026-10-18 (Codex, U3 team sync):** Retain incoming branch notes below.
+
+
+**Update 2026-10-18 (Codex, final U3 freshness check):** Retain concurrent branch-cleanup notes below.
+
+## 2026-10-18 — Codex for Sachin — Remove redundant navigation-overhaul branch   [tags: DOCS]
+User reiterated the request to delete redundant branches. Fetched origin, verified origin/navigation-overhaul a9f909e is an ancestor of origin/feature/guidance-overhaul, then deleted its remote ref with an exact-tip lease. No local navigation-overhaul branch existed. All navigation/Gemini commits remain in guidance; no code or main changes.
+Files edited: docs/WORKLOG.md only. Commands: git fetch origin --prune; git merge-base --is-ancestor; git rev-parse; git branch --list; git status; leased git push deletion; git diff --check. Verified: ancestry check PASS; remote deletion succeeded. NOT verified: no runtime tests rerun for reference/docs-only cleanup. Previous main-only cleanup was too conservative for this redundant source branch.
 
 ## 2026-10-18 — Codex for Sachin — Delete obsolete branches already merged into main   [tags: DOCS]
 User requested branch cleanup. Read docs/WORKFLOW.md rule 6 (delete merged branches), fetched origin and recomputed ancestry. Main advanced to 7e03f83 during the session, including stairs/map-extension integration; older branch-audit tables are historical snapshots.
