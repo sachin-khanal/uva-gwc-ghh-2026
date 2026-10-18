@@ -54,7 +54,12 @@ function selectMap(entry) {
 
   if(!(map.meshAssets??[]).length){
     try{state.building=buildEstimatedBuilding(map);if(state.building){surfaces.add(state.building.mesh);surfaces.add(state.building.ceiling);$("cutaway").value=45;$('show-overlay').checked=false;$('geometry-status').textContent=`Estimated 3D building | ${map.nodes.length} mapped points | ${state.building.features.length} named places | Room sizes and walls inferred`;}}
-    catch(error){status('Estimated building could not be rendered: '+error.message,true);}
+    catch(error){
+      state.building=null;surfaces.clearMeshes();
+      // Import/refresh replaces the page status afterward; keep the graphics failure next to the map.
+      $('geometry-status').textContent='3D surfaces unavailable · Route graph remains visible. '+error.message;
+      status('Estimated building could not be rendered: '+error.message,true);
+    }
   }
 
   $("map-title").textContent = entry.title || map.name;

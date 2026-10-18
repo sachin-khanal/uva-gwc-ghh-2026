@@ -43,3 +43,18 @@ CI wiring (INF-2) is a separate task; this change does not add a workflow.
 
 ## supabase_check.py (added 2026-10-17)
 `python3 tools/supabase_check.py` checks the real Supabase project the way the app uses it: keys (refuses a service_role key), anonymous sign-in, the shared map list, the `extend_building` function, and whether a brand-new user can download the scan files of the existing test building. Read-only. `--write` also runs the two-user publish / share / extend / stale-upload round trip and leaves one building named `ZZ CONNECTION TEST ...` (delete it in the SQL editor, see the script header). Reads `Config/Local.xcconfig` or `SUPABASE_URL` / `SUPABASE_ANON_KEY`; never prints keys.
+
+
+## Live viewer E2E — 2026-10-18 (Codex)
+
+`test_live_viewer.mjs` exercises the real Supabase client and an actual browser. Start `python3 -B web/serve.py --port 8041` first. It reads `SUPABASE_URL` / `SUPABASE_ANON_KEY` from the environment or a `--config` xcconfig file. It rejects secret/service-role keys through `CloudLibrary`. Credentials are never printed or persisted by this runner. Anonymous sign-in creates test identities, but it does not publish, update or delete maps.
+
+Use an **already installed** Playwright module/browser (no project dependency is added):
+
+```sh
+node tools/test_live_viewer.mjs --config /absolute/path/Config/Local.xcconfig --playwright /absolute/path/playwright-core/index.mjs --browser "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
+
+Omit `--playwright` if `playwright-core` already resolves in your environment; omit `--browser` to use its installed Chromium. `--base` defaults to `http://127.0.0.1:8041/web/`. `--artifacts` defaults to a directory under the OS temporary directory. Screenshots contain real floor plans; keep artifacts outside Git. The runner requires nonempty live maps and at least one published OBJ, checks all ordered node pairs, exact OBJ size/hash/bounds, public access denial, cross-user reads, identity refresh, real browser geometry pixels, route completion/arrival, offline recovery, mobile layout, persistent storage, preview path boundaries, and disabled-WebGL fallback. Browser animation time advances for arrival checks; it does not represent a physical walk.
+
+Current result: 23/23 live checks PASS against four shared maps. See `docs/VIEWER_QA_2026-10-18.md` for the separate database failures. Running the live browser suite successfully does **not** imply those SQL regressions pass.

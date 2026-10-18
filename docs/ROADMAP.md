@@ -1,5 +1,7 @@
 # Roadmap — what to work on now (revision 2, ~~PROPOSED~~ IN PROGRESS)
 
+**Update 2026-10-18 (Codex, live QA findings):** Viewer tested against all four real shared maps and its 26.2 MB published mesh. Next backend integration work: deploy a reviewed schema-4-compatible validator/merge chain aligned with U3, and close the `extend_building` update path that admits new mesh manifests without upload verification. Both have failing rollback-only reproductions in `supabase/tests/`. Do not blindly replay this branch's legacy migration numbering; compare deployed migration history and latest U3 first. No live migration or access-policy change made during QA.
+
 **Update 2026-10-18 (Codex, viewer completion):** Viewer-only handoff completed on `feature/web-viewer-integration`, cross-referenced against `origin/U3` eaed57e. No web router/walkthrough/building-model differences remain from U3; retained empty startup, local-only real maps and completed Claude's uncommitted large-mesh loading improvements. Automated browser/native checks pass (WORKLOG). Broader U3 native/schema/SQL merge and live-cloud validation are separate remaining integration work; no migrations applied or deployment performed.
 
 ~~Status: **proposed, needs team OK.**~~ **Update 2026-10-17:** the team asked to keep building, so this plan is in progress (build block 1 done, see below). Written 2026-10-17 after the direction change: native iPhone app

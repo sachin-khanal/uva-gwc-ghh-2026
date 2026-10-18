@@ -1,5 +1,7 @@
 # Testing — what is proven, and the device test plan
 
+**Update 2026-10-18 (Codex, comprehensive live QA):** Real cloud/browser verification is now recorded in `docs/VIEWER_QA_2026-10-18.md`, with reproducible `tools/test_live_viewer.mjs` (23 PASS). Five transactional SQL suites PASS; two saved deployment regressions FAIL: schema-4 compatibility and unpublished-mesh update bypass. Deterministic browser suites 74/74 + 24/24 PASS; Node 73 PASS / 2 browser skips; Swift 349 PASS; typecheck/full unsigned build PASS; Python 22 PASS; hooks 15 PASS. Hardware and Safari remain unverified. Do not infer an all-green backend from the passing viewer tests.
+
 **Update 2026-10-18 (Codex, viewer completion):** From `feature/web-viewer-integration`, run `node web/test-web.mjs` (73 PASS, 2 browser-only SKIP), then `python3 -B web/serve.py --port 8041` and open `/web/tests.html` (74/74 PASS) and `/web/ui-tests.html` (24/24 PASS). Verified in fresh headless Chrome profiles with software WebGL, including schema 4, hostile OBJ bounds/indices, truncated downloads, route/walkthrough controls, progress, re-opening cache and changed-manifest revalidation. Native `make test` 349/349 PASS; `make typecheck` PASS (64 app files, 1 UI file; existing concurrency warnings). Live Supabase and real LiDAR visual fidelity were not tested in this session; native features remain UNVERIFIED ON DEVICE.
 
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
