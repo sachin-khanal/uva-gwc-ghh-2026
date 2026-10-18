@@ -14,7 +14,7 @@
 --          is the user who contributed that asset's segment (segment_owners, set by extend_building from the real caller). The second
 --          condition matters because the FIRST publication of a building stores the incoming JSON as is, so a forged meshAssets entry
 --          could otherwise point the rule at someone else's folder (automated security review 2026-10-18).
--- First publication: a trigger strips `meshAssets` from a building's first-publication JSON, so entries exist only if
+-- First publication: a trigger strips `meshAssets` from a building's first-publication JSON, (only when no row exists yet) so entries exist only if
 --          publish_mesh_assets validated them (the review of 2026-10-18 found they could otherwise be forged and fill the quota).
 -- Quota:   limits are PER CONTRIBUTOR (25 files / 40 MB each) as well as per building (100 files / 80 MB), so one user cannot fill the
 --          building's list. A listed file must already exist in storage with exactly the claimed size (upload first, then list).
@@ -113,21 +113,44 @@ create policy canonical_meshes_read on storage.objects for select to authenticat
 
 -- Only publish_mesh_assets may ADD mesh entries. `extend_building` stores the incoming JSON as is on a building's FIRST publication, so
 -- strip any meshAssets there (they would be unvalidated, would count toward the shared quota, and could name another user's folder).
+-- IMPORTANT: extend_building upserts (`insert ... on conflict do update set map_json = excluded.map_json`), and a BEFORE INSERT trigger
+-- fires on that path too. The strip therefore applies ONLY when no row exists yet; otherwise it would wipe the stored mesh list every
+-- time anyone extends a building (found by the 2026-10-18 review; regression test in supabase/tests/mesh_publish_and_read.sql). For an
+-- existing building the list is already the stored, validated one (extend_building builds its result from the stored JSON).
 create or replace function public.strip_incoming_mesh_assets() returns trigger
 language plpgsql set search_path = '' as $$
 begin
-  new.map_json := new.map_json - 'meshAssets';
+  if not exists (select 1 from public.canonical_buildings b where b.map_id = new.map_id) then
+    new.map_json := new.map_json - 'meshAssets';
+  end if;
   return new;
 end $$;
 drop trigger if exists strip_incoming_mesh_assets on public.canonical_buildings;
 create trigger strip_incoming_mesh_assets before insert on public.canonical_buildings
   for each row execute function public.strip_incoming_mesh_assets();
 
--- One-time cleanup: drop entries that were not added through publish_mesh_assets (their storageOwner is not the segment's contributor).
+-- One-time cleanup of mesh lists that predate this migration: keep an entry only if it passes the checks publish_mesh_assets applies
+-- (storageOwner is the segment's contributor; the file exists in storage with exactly the listed size), then apply the limits, oldest
+-- entries first: 25 files / 40 MB per contributor and 100 files / 80 MB per building. Dropped entries can be listed again with
+-- publish_mesh_assets; their files are not deleted.
 update public.canonical_buildings c
-   set map_json = c.map_json || jsonb_build_object('meshAssets',
-         (select coalesce(jsonb_agg(m), '[]'::jsonb) from jsonb_array_elements(c.map_json->'meshAssets') m
-           where lower(coalesce(c.segment_owners->>(m->>'segmentId'), '')) = lower(m->>'storageOwner')))
+   set map_json = c.map_json || jsonb_build_object('meshAssets', coalesce((
+         select jsonb_agg(v.m order by v.ord)
+           from (
+             select t.m, t.ord,
+                    count(*) over (partition by lower(t.m->>'storageOwner') order by t.ord) as owner_files,
+                    sum((t.m->>'byteCount')::numeric) over (partition by lower(t.m->>'storageOwner') order by t.ord) as owner_bytes,
+                    count(*) over (order by t.ord) as all_files,
+                    sum((t.m->>'byteCount')::numeric) over (order by t.ord) as all_bytes
+               from jsonb_array_elements(c.map_json->'meshAssets') with ordinality as t(m, ord)
+              where lower(coalesce(c.segment_owners->>(t.m->>'segmentId'), '')) = lower(t.m->>'storageOwner')
+                and exists (select 1 from storage.objects o
+                             where o.bucket_id = 'meshes'
+                               and o.name = lower(t.m->>'storageOwner') || '/' || c.map_id::text || '/' || lower(t.m->>'id') || '.obj'
+                               and (o.metadata->>'size')::numeric = (t.m->>'byteCount')::numeric)
+           ) v
+          where v.owner_files <= 25 and v.owner_bytes <= 40000000 and v.all_files <= 100 and v.all_bytes <= 80000000
+       ), '[]'::jsonb))
  where jsonb_typeof(c.map_json->'meshAssets') = 'array';
 
 -- Delist your own mesh (the file stays in your folder; delete it with the Storage API if wanted).

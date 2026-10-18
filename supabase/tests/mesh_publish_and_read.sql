@@ -65,6 +65,19 @@ do $$ declare ok boolean; begin
   assert ok, 'another user must not list a mesh on a segment they did not contribute'; raise notice 'PASS other user refused';
 end $$;
 
+-- B EXTENDS A's building with a new segment: A's listed mesh must survive (regression: a first-publication strip trigger that also
+-- fired on the upsert's UPDATE path wiped the list on every extension)
+do $$ begin
+  perform public.extend_building('{"schemaVersion":3,"id":"11111111-1111-4111-8111-111111111111","name":"ZZ MESH TEST","version":1,
+    "nodes":[{"id":"33333333-3333-4333-8333-333333333333","segmentId":"seg1","kind":"corridor","createdBy":"x","position":[0,0,0]},
+             {"id":"33333333-3333-4333-8333-333333333334","segmentId":"segB","kind":"corridor","createdBy":"y","position":[1,0,0]}],
+    "edges":[{"from":"33333333-3333-4333-8333-333333333333","to":"33333333-3333-4333-8333-333333333334","distance":1}]}'::jsonb);
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 1,
+    'extending a building must not drop its listed meshes';
+  assert (select jsonb_array_length(map_json->'nodes') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 2, 'extension applied';
+  raise notice 'PASS extending a building keeps its listed meshes';
+end $$;
+
 -- file not uploaded / wrong size must be refused (as A again)
 select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true), set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
 do $$ declare ok boolean; begin
