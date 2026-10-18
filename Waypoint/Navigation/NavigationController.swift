@@ -307,10 +307,14 @@ final class NavigationController: ObservableObject {
         // ...and if there is not, the user still needs somewhere to go. Must be asked AFTER `advise`,
         // which is what knows whether a way round was found (F-5, 2026-10-18).
         let backUp = avoidance.isBoxedIn(clearance)
-        // Is the floor still there? Nothing else in the app can see a staircase going DOWN.
-        let floor = FloorAhead.verdict(samples: ObstacleDetector.floorSamples(in: frame),
-                                       standingFloorY: Geometry.translation(of: frame.camera.transform).y
-                                           - ObstacleBand.assumedPhoneHeight)
+        // Is the floor still there? OFF by default - the check measures against a fixed 1.3 m guess at
+        // how high the phone is held, so holding it higher makes a flat corridor read as a step down
+        // (device report 2026-10-18). Stairs come from the MAP, where the volunteer tagged them.
+        let floor: FloorAhead.Verdict = UIPrefs.floorDropDetectionEnabled
+            ? FloorAhead.verdict(samples: ObstacleDetector.floorSamples(in: frame),
+                                 standingFloorY: Geometry.translation(of: frame.camera.transform).y
+                                     - ObstacleBand.assumedPhoneHeight)
+            : .continuous
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
              nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards,
              backUp: backUp, floorAhead: floor)

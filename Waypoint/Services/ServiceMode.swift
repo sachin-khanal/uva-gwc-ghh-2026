@@ -33,6 +33,13 @@ enum UIPrefs {
     /// downstream - position, route, instructions - is computed through it. Until the distance
     /// threshold has been calibrated on real hardware, the safe default is the behaviour that has been
     /// walked successfully: ARKit's own relocalization only (D-042).
+    /// Warn about drops in the floor from the LIDAR (`FloorAhead`). OFF by default, and it is not a
+    /// tuning problem: the check compares what it sees against `cameraY - ObstacleBand.assumedPhoneHeight`,
+    /// a FIXED 1.3 m guess at how high the phone is held. Hold it at 1.5 m and the assumed floor sits
+    /// 0.2 m above the real one, so every ordinary floor sample reads as a step down and a flat corridor
+    /// announces "Careful. A step down about 3 steps ahead." (device report 2026-10-18, Rice Hall).
+    /// Stairs are announced from the MAP instead - the volunteer tags them, so we know where they are.
+    static let floorDropDetection = "ui.floorDropDetection"
     static let visualFingerprints = "ui.visualFingerprints"
 
     /// Show the sighted debug overlay (camera + computed route) during guidance. Default false.
@@ -41,6 +48,11 @@ enum UIPrefs {
 }
 
 extension UIPrefs {
+    /// Defaults to false: see `floorDropDetection`.
+    static var floorDropDetectionEnabled: Bool {
+        UserDefaults.standard.bool(forKey: UIPrefs.floorDropDetection)
+    }
+
     /// Defaults to false: see `visualFingerprints`.
     static var visualFingerprintsEnabled: Bool {
         UserDefaults.standard.bool(forKey: UIPrefs.visualFingerprints)

@@ -559,7 +559,16 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     return
                 }
                 do {
-                    let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    // A hand-aligned extension records its nodes in the MAP frame but ARKit captured this
+                    // world map in the SESSION frame, and an ARWorldMap cannot be transformed. Saving it
+                    // would give `Relocalizer` a scan file whose frame disagrees with the nodes beside it,
+                    // and it takes the first segment that has one - so navigation would start offset from
+                    // the route (device report 2026-10-18). The new area therefore has no scan file of its
+                    // own; relocalization uses the original segment, whose frame IS the map frame.
+                    let data = self.alignedByHand
+                        ? nil
+                        : try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    if data == nil { Log.capture.info("hand-aligned extension: no world map saved for \(savedSegment)") }
                     // Merge against the latest local copy so a download arriving during capture
                     // cannot be erased by saving this older starting snapshot.
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
@@ -568,9 +577,21 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                         self.isSaving = false
                         guard self.isRunning else { return }
                         self.savedMap = saved
-                        self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
+                        // Only a scan whose session frame IS the map frame may write the model: the
+                        // exporter writes vertices in the SESSION frame while `MeshAsset.coordinateFrame`
+                        // claims "map", and `modelURL(mapId:)` is ONE file per map - so a hand-aligned
+                        // extension both overwrote the whole building's model and put it in the wrong
+                        // place (device report 2026-10-18: the viewer showed only the new stairwell).
+                        // Keeping the existing model is the lesser wrong until the mesh is transformed
+                        // and stored per segment.
+                        if self.alignedByHand {
+                            self.modelStatus = "3D model kept from the original scan (the new part is not in it yet)."
+                            Log.capture.info("hand-aligned extension: model export skipped, existing model kept")
+                        } else {
+                            self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
+                        }
                         self.stop()
-                        Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
+                        Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data?.count ?? 0) bytes")
                     }
                 } catch {
                     DispatchQueue.main.async {

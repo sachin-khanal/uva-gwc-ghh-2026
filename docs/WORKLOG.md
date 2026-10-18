@@ -1,5 +1,52 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Three faults from the first real Rice Hall walk, all from ONE frame mistake   [tags: BUG, DEVICE]
+Area: A (capture/maps) + B (guidance). Branch `stairs-multifloor`. First time any of this ran in the demo
+building. Anmol reported: (1) an extension does not appear in the 3D viewer, (2) pathfinding is shifted off the
+real path, (3) it says "step down ahead" on flat corridor.
+
+(2) AND (1) ARE THE SAME BUG, and it is mine: a hand-aligned extension records its NODES in the map frame (via
+`mapPoint`), but everything ARKit hands us is in the SESSION frame, and those two differ by exactly the alignment
+transform. Two things were then saved in the wrong frame:
+  * THE WORLD MAP. `Relocalizer` loads the FIRST segment that has a scan file and localizes in ITS frame
+    (`Relocalizer.swift:90`, `break` with "TODO(A): multi-segment stitching"). After an extension there are two,
+    so navigation could localize into the extension's session frame while every node around it is in map
+    coordinates - the user's marker sits beside the breadcrumb trail instead of on it, and the route collapses
+    ("route: 1 waypoints, 0.0 m" in Anmol's screenshots, against a healthy "6 waypoints, 22.3 m" before).
+    An `ARWorldMap` cannot be transformed, so the fix is not to save one for a hand-aligned segment:
+    `saveLocalScan(worldMap:)` now takes an OPTIONAL, and relocalization uses the original segment, whose frame
+    IS the map frame. Cost: the newly scanned area has no scan file of its own, so you cannot relocalize while
+    standing in it. Correctness over coverage.
+  * THE 3D MODEL. `MeshExporter` writes vertices in the session frame while `MeshAsset.coordinateFrame` claims
+    "map", AND `modelURL(mapId:)` is one file per MAP - so an extension both overwrote the whole building's model
+    and placed it wrongly. That is why the viewer showed only the new stairwell (88.5 MB, 1.2 M triangles) rather
+    than the floor. A hand-aligned extension now SKIPS the export and keeps the original model, saying so.
+    Properly fixing it means transforming the mesh by `worldToMap` and storing a model PER SEGMENT; not done.
+
+(3) FALSE "step down ahead" - and it is not a tuning problem. `FloorAhead` compares what it sees against
+`cameraY - ObstacleBand.assumedPhoneHeight`, a FIXED 1.3 m guess at how high the phone is held. Hold it at 1.5 m
+and the assumed floor sits 0.2 m above the real one, so every ordinary floor sample clears the 0.12 m threshold
+and a flat corridor announces a step down. Per Anmol's direction - "it's not there to detect stairs; it'll only
+say there's stairs if the mapper states there are stairs" - LiDAR drop detection is now OFF by default behind
+`UIPrefs.floorDropDetection`. Stairs are announced from the MAP, where the volunteer tagged them, which already
+works through `Hazard.stairs`. The `FloorAhead` code and its 12 tests stay, unused, for when the phone height is
+measured rather than assumed.
+
+Verified: `make test` -> **402 tests, 0 failures**. `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE - the phone has been unavailable for the last three fixes, so none of this,
+the alignment dead-end fix, or the coverage-exemption fix has been flashed.
+Open / handoff:
+1. Anmol's design for stairs, NOT implemented: announce from the map, hand off to the user to climb or descend,
+   and resume guidance when they leave the stairs "room". Guidance currently just says "Stairs ahead." and keeps
+   steering. The stairs "room" needs `RoomExtent` on a stairs node, or the transition-space idea.
+2. The extension's area still cannot be relocalized into (no scan file). Per-segment frames would fix both that
+   and the model; that is the `segmentId`-on-everything work deferred in D-043.
+3. The map Anmol walked was saved by the OLD build, so its extension segment still has a session-frame world map
+   on disk. This fix prevents new ones; it does not repair that map. Re-record or delete that extension.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Extending a map asked the volunteer to re-walk ground it already had   [tags: BUG]
 Area: A (scan). Branch `stairs-multifloor`.
 Anmol: after calibrating by standing at labelled places, continuing the scan re-covered already-scanned corridor,
