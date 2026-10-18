@@ -15,3 +15,10 @@ WAYPOINT_DEV_SUFFIX = replacewithyourname
 // NEVER paste the service_role key here. Keep the odd "https:/$()/" - plain "https://" would be read as a comment.
 // SUPABASE_URL = https:/$()/YOUR-PROJECT-REF.supabase.co
 // SUPABASE_ANON_KEY = YOUR-ANON-PUBLIC-KEY
+
+// --- Gemini (optional): richer wording for the calm guidance lines (opening briefing, landmarks, far-off countdowns) ---
+// Without a key the app speaks its plain sentences. Warnings, turns and arrival are NEVER sent to Gemini.
+// Get a key at https://aistudio.google.com/apikey . It is baked into the app bundle on YOUR phone's build: use a restricted, low-quota key,
+// never one you use elsewhere, and do not ship it to a public build (the plan is a Supabase edge function in front of it).
+// GEMINI_API_KEY = YOUR-GEMINI-API-KEY
+// GEMINI_MODEL = gemini-2.5-flash

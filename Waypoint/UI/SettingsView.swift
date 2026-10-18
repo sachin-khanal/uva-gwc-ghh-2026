@@ -9,6 +9,7 @@
 // Status:   SCAFFOLD.
 //
 import SwiftUI
+import WaypointCore
 import UIKit
 
 struct SettingsView: View {
@@ -20,6 +21,9 @@ struct SettingsView: View {
     @AppStorage(UIPrefs.visualFingerprints) private var visualFingerprints = false
     @AppStorage(UIPrefs.spokenPrompts) private var spokenPrompts = true
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
+    @AppStorage(UIPrefs.speakViaVoiceOver) private var speakViaVoiceOver = true
+    @AppStorage(UIPrefs.richNarration) private var richNarration = true
+    @AppStorage(UIPrefs.guidanceVoice) private var guidanceVoice = VoiceSource.phone.rawValue
 
     private var serviceMode: ServiceMode { ServiceMode(rawValue: serviceModeRaw) ?? .mock }
 
@@ -71,6 +75,19 @@ struct SettingsView: View {
                     Text("Spoken prompts read each navigator screen aloud for people who do not use VoiceOver. Open in Navigate is for the blind user's own phone (new interface only).")
                 }
                 .disabled(!newInterface)
+
+                Section {
+                    Picker("Voice", selection: $guidanceVoice) {
+                        Text("This iPhone's voice").tag(VoiceSource.phone.rawValue)
+                        Text("Waypoint's Siri pick").tag(VoiceSource.app.rawValue)
+                    }
+                    Toggle("Speak through VoiceOver when it is on", isOn: $speakViaVoiceOver)
+                    Toggle("Richer wording (Gemini)", isOn: $richNarration)
+                } header: {
+                    Text("Voice and wording")
+                } footer: {
+                    Text("With VoiceOver on, guidance uses your VoiceOver voice and speed and never talks over it. Richer wording rewrites only the calm lines (the opening, landmarks, far-off countdowns) and sends just that one sentence to Google Gemini; warnings, turns and arrival are never sent. If it is slow, off or unavailable you hear the plain sentence.")
+                }
 
                 Section("This iPhone") {
                     LabeledContent("LiDAR", value: DeviceCapabilities.hasLiDAR ? "Yes" : "No")

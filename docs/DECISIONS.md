@@ -189,6 +189,9 @@ Related but separate: a single tick emitting several `.speak` lines used to clip
 coalescing them in `NavigationController.perform`.
 **Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
 
+**Update 2026-10-18 (Claude):** the VoiceOver trade-off above (the app speaks in its own voice while VoiceOver reads focused elements in its own) is
+superseded by D-046: with VoiceOver on, guidance is now spoken THROUGH VoiceOver. The one-synthesizer rule stands.
+
 ## D-027 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
 Six findings from walking Rice Hall. All of them came from the same root idea being wrong: the app treated the
 breadcrumb chain as the path to follow, rather than as a description of where it is possible to walk.
@@ -587,3 +590,30 @@ way clears, so the cue cannot flutter side to side while the user walks. The STO
 A door we were routed through is excluded - that is the way IN and the "you will need to open it" line still wins.
 **Status:** accepted; 253 tests pass. UNVERIFIED ON DEVICE. The three thresholds and the 0.35 m ahead/side split are
 guesses that want a real corridor.
+
+## D-046 — Guidance voice overhaul: one VoiceOver-aware voice, no silently lost lines, optional Gemini wording (2026-10-18)
+Asked for by the team: richer, more natural guidance; no overlap with Apple's VoiceOver (issue #10); the phone's own voice first; obstacle
+warnings keep priority over the voice; Gemini must fall back to the hand-written wording. Branch `feature/guidance-overhaul`, off `navigation-overhaul` d8afcf1.
+
+1. **VoiceOver cannot be paused** (no iOS API), so the app speaks THROUGH it. VoiceOver running -> every line is a VoiceOver announcement
+   (`AccessibilityNotification.Announcement`): `.critical` at VoiceOver's `.high` priority (interrupts, uninterruptible), everything else `.low` (queued).
+   One voice, the person's own voice and speed, and VoiceOver does the queuing. Setting: "Speak through VoiceOver when it is on" (default on); off ->
+   AVSpeechSynthesizer with `prefersAssistiveTechnologySettings`. A second, separate cause of overlap was removed: `GuidingView` marked its main button
+   `.updatesFrequently`, which makes VoiceOver re-read the label whenever the instruction changes - in its own voice, while `Speaker` said it too.
+2. **Voice order** (`VoiceSelection`): VoiceOver on -> its settings; else the voice the iPhone already uses (no voice set on the utterance); else, as FALLBACK
+   only, the app's Siri pick (`VoicePicker`). Setting "Voice" can force the app's pick. Whether "no voice set" is really the person's Spoken Content voice is iOS
+   behaviour we could not test: UNVERIFIED ON DEVICE.
+3. **No line is lost quietly.** `SpeechQueue` (pure, tested) returns every line it displaces or expires; `Speaker.onLineLost` forwards it (also lines cut
+   off by a safety interrupt, or VoiceOver announcements that did not finish) to `FeedbackPlanner.lineLost`, which forgets that the cue was announced so the next
+   tick says it again if it still applies. This is the root cause behind F-1/F-5/F-7: the planner latches a cue when it MAKES it, the speaker could still drop it.
+4. **Obstacle vs voice** is unchanged in intent and now pinned by tests: a STOP (`.critical`) cuts off route guidance mid-sentence but never another safety line;
+   route lines queue behind a warning; cautions are `.high` (queue), never `.critical`; the way round follows the stop. `Announcer.say(interrupt: true)` used to
+   map to `.high` (queue), so "repeat"/"stop"/"distance" waited behind guidance; it is now `.critical` and skips the 3 s duplicate filter (the person asked).
+5. **Gemini** (`Narration.swift`, URLSession through the existing `HTTPTransport`; no new dependency, D-003 stands): rewords ONLY the opening briefing, the route
+   briefing, landmarks and countdowns beyond 5 m. Never obstacles, turns, posture, lost position, arrival. Sent: one sentence + its kind (scrubbed of markup/quotes).
+   Not sent: images, depth, coordinates, map or user ids. Reply must keep every direction word and number, invent no number, claim nothing is safe/clear, contain no
+   markup/emoji, and be short - else the plain sentence is spoken. 1.5 s deadline; two failures in a row switch it off for 60 s (`NarrationBreaker`).
+   Key: `GEMINI_API_KEY` in git-ignored `Config/Local.xcconfig` -> Info.plist. **A key in an app bundle can be extracted**: fine for our own phones, not for a public
+   build - the follow-up is a Supabase edge function holding the key (TODO(B)/U3). Model defaults to `gemini-2.5-flash` (`GEMINI_MODEL`); the model id was NOT checked
+   against the live API.
+**Status:** accepted; `make test` 394 pass (40 new), `make typecheck`, `make check` OK. Everything audible and the live Gemini call are UNVERIFIED ON DEVICE.

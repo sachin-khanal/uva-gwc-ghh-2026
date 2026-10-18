@@ -93,6 +93,13 @@ final class NavigationController: ObservableObject {
     private var openingQueued = false
     /// The text of the opening briefing, so the speaker can be told it must not be dropped as stale (see Speaker.openingMaxQueuedAge).
     private var openingBriefingText: String?
+    /// Gemini rewording for the calm lines; nil when no key is configured, the setting is off, or the app is not navigating. Every failure
+    /// falls back to the plain sentence (see Narration.swift). Never used for obstacles, turns, posture, lost position or arrival.
+    private var narration: NarrationCoordinator?
+    /// Bumped on every `begin`/`stop`, so a rewrite that comes back after navigation ended or restarted is not spoken.
+    private var navigationGeneration = 0
+    /// Rewritten text -> the plain sentence the planner knows it by (for `FeedbackPlanner.lineLost`). Small: only recent lines matter.
+    private var spokenAliases: [String: String] = [:]
     /// Where to save remembered routes (real mode only; simulation does not persist).
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
@@ -218,7 +225,11 @@ final class NavigationController: ObservableObject {
         isPreparing = false
         relocalizer.stop()
         audio.stop()
+        speech.onLineLost(nil)
         speech.stop()
+        navigationGeneration += 1
+        narration = nil
+        spokenAliases = [:]
         statusText = "Stopped"
     }
 
@@ -257,6 +268,13 @@ final class NavigationController: ObservableObject {
         postureText = ""
 
         do { try audio.start() } catch { Log.guidance.error("audio start failed: \(error.localizedDescription)") }
+        narration = Self.makeNarration()
+        // A line the speaker threw away (displaced, expired, cut off by a warning) was already recorded by the planner as announced: tell it,
+        // so it is said again if it still applies.
+        speech.onLineLost { [weak self] text in
+            guard let self else { return }
+            self.planner.lineLost(self.spokenAliases[text] ?? text)
+        }
         openingQueued = false
         openingBriefingText = nil
         sceneContext = nil
@@ -572,7 +590,31 @@ final class NavigationController: ObservableObject {
             // still being said is out of date. It interrupts, like a safety cue (found on the phone 2026-10-18: "You have arrived" was dropped after
             // 2.7 s queued behind the briefing in the simulated walk).
             let isArrival = line.text.hasPrefix("You have arrived")
-            speech.say(line.text, priority: isArrival ? .critical : line.priority, staysFresh: line.text == openingBriefingText)
+            let priority: SpeechPriority = isArrival ? .critical : line.priority
+            let staysFresh = line.text == openingBriefingText
+            // Only calm lines carry a `narration` fact (the planner decides; see FeedbackPlanner.note) - never an obstacle, turn, posture or arrival.
+            if !isArrival, let fact = planner.info(for: line.text)?.narration, let narration {
+                let generation = navigationGeneration
+                let plain = line.text
+                Task { [weak self] in
+                    let rich = await narration.narrate(fact) // nil on ANY failure -> the plain sentence
+                    DispatchQueue.main.async {
+                        guard let self, self.navigationGeneration == generation else { return }
+                        var text = plain
+                        if let rich {
+                            text = rich
+                            self.spokenAliases[rich] = plain
+                            if self.spokenAliases.count > 12 { self.spokenAliases = [rich: plain] }
+                            self.setIfChanged(\.lastSpoken, rich)
+                            if let i = self.recentSpeech.lastIndex(of: plain) { self.recentSpeech[i] = rich }
+                            Log.guidance.info("narrated: \(plain) -> \(rich)")
+                        }
+                        self.speech.say(text, priority: priority, staysFresh: staysFresh)
+                    }
+                }
+            } else {
+                speech.say(line.text, priority: priority, staysFresh: staysFresh)
+            }
         }
 
         for action in actions {
@@ -599,6 +641,16 @@ final class NavigationController: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Gemini wording, if a key is configured (Config/Local.xcconfig -> Info.plist) and the setting is on.
+    private static func makeNarration() -> NarrationCoordinator? {
+        guard UIPrefs.richNarrationEnabled,
+              let config = GeminiConfig.validated(apiKey: Bundle.main.object(forInfoDictionaryKey: "GeminiApiKey") as? String,
+                                                  model: Bundle.main.object(forInfoDictionaryKey: "GeminiModel") as? String)
+        else { return nil }
+        Log.guidance.info("narration: Gemini \(config.model)")
+        return NarrationCoordinator(narrator: GeminiNarrator(config: config))
     }
 
     private func describe(trackingOK: Bool) -> String {

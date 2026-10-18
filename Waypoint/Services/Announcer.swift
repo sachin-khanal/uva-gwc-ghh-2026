@@ -54,8 +54,10 @@ enum Announcer {
         Speaker.shared.stop()
     }
 
+    /// `interrupt` really interrupts now. It used to map to `.high`, which QUEUES - so "repeat", "distance remaining" and "stop" waited behind
+    /// whatever guidance was being said. These are things the PERSON asked for, so they also skip the duplicate filter (asking twice is normal).
     private static func speak(_ text: String, interrupt: Bool) {
-        Speaker.shared.say(text, priority: interrupt ? .high : .normal)
+        Speaker.shared.say(text, priority: interrupt ? .critical : .normal, userRequested: interrupt)
     }
 }
 

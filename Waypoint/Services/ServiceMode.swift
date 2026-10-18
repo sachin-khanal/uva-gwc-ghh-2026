@@ -38,9 +38,27 @@ enum UIPrefs {
     /// Show the sighted debug overlay (camera + computed route) during guidance. Default false.
     static let debugOverlay = "ui.debugOverlay"
     static func recentsKey(mapId: UUID) -> String { "ui.recents.\(mapId.uuidString)" }
+
+    // MARK: Voice and wording of the guidance (2026-10-18)
+    /// While VoiceOver is running, say guidance THROUGH VoiceOver (one voice, its queue, its rate) instead of beside it. Default true.
+    static let speakViaVoiceOver = "guidance.viaVoiceOver"
+    /// Let Gemini reword the non-urgent lines (briefing, landmarks, far countdowns). Default true; only does anything when a key is configured
+    /// (`Config/Local.xcconfig`), and every failure falls back to the plain sentence.
+    static let richNarration = "guidance.richNarration"
+    /// "phone" = the voice this iPhone already uses (default); "app" = the app's own Siri pick. See `VoiceSelection`.
+    static let guidanceVoice = "guidance.voice"
 }
 
 extension UIPrefs {
+    static var speakViaVoiceOverEnabled: Bool {
+        UserDefaults.standard.object(forKey: UIPrefs.speakViaVoiceOver) as? Bool ?? true
+    }
+    static var richNarrationEnabled: Bool {
+        UserDefaults.standard.object(forKey: UIPrefs.richNarration) as? Bool ?? true
+    }
+    static var guidanceVoiceSource: VoiceSource {
+        VoiceSource(rawValue: UserDefaults.standard.string(forKey: UIPrefs.guidanceVoice) ?? "") ?? .phone
+    }
     /// Defaults to false: see `visualFingerprints`.
     static var visualFingerprintsEnabled: Bool {
         UserDefaults.standard.bool(forKey: UIPrefs.visualFingerprints)

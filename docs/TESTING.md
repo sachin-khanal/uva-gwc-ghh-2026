@@ -188,3 +188,18 @@ is only "verified" once someone has done it on a device and written it down.
 | 4.8 | Settings → Larger Text (AX5), Bold Text, Increase Contrast, Reduce Motion | any | no clipped instructions; no pulsing/animation with Reduce Motion |
 | 4.9 | Escort panel during a demo walk: inject obstacle, position lost, fail, skip | any | STOP / lost screens take over; closing the panel clears injected states |
 
+## Guidance voice overhaul — added 2026-10-18 (branch `feature/guidance-overhaul`; needs a phone, headphones, and VoiceOver ON then OFF)
+`make test` covers the logic (`GuidanceOverhaulTests`, 40 tests). None of the rows below has been run by anyone yet.
+
+| # | Do this | Expect |
+|---|---|---|
+| G1 | VoiceOver ON, Simulate walk, listen to the whole route | ONE voice (yours, at your VoiceOver speed); VoiceOver never reads an instruction on top of the app; arrival is heard once |
+| G2 | VoiceOver ON, rest focus on the big guiding button during the walk | VoiceOver does NOT re-read the label each time the instruction changes (the old `.updatesFrequently` bug) |
+| G3 | VoiceOver ON, touch the screen mid-instruction | the cut-off instruction is said again a moment later (lost-line re-arm) |
+| G4 | VoiceOver OFF | the voice is the one this iPhone is set up with (Settings > Accessibility > Spoken Content). If it is a stiff generic voice instead, record that in the WORKLOG - the assumption in D-046 §2 is wrong |
+| G5 | Settings > Voice > "Waypoint's Siri pick" | the app's Siri voice is used instead |
+| G6 | Simulate + "Inject obstacle" while a long line is being said | the STOP cuts it off mid-word; the turn that was cut off is repeated after it; two stops never cut each other |
+| G7 | Tap the guiding button twice quickly | the instruction is repeated both times |
+| G8 | Add `GEMINI_API_KEY` to `Config/Local.xcconfig`, `make gen`, run Simulate; watch the log for `narrated: <plain> -> <rich>` | opening/landmark/far countdown sound more natural; turns, warnings and arrival are word-for-word the plain text |
+| G9 | Same, but airplane mode | at most one short wait on the first calm line, then the plain sentences; log shows no `narrated:` lines; still works |
+

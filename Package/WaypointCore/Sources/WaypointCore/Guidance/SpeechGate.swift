@@ -48,9 +48,12 @@ public struct SpeechGate {
     ///   safety cue avoid cutting off ANOTHER safety cue (see `.critical` below).
     public mutating func decide(text: String, priority: SpeechPriority,
                                 isSpeaking: Bool, now: TimeInterval,
-                                speakingPriority: SpeechPriority? = nil) -> Decision {
+                                speakingPriority: SpeechPriority? = nil,
+                                allowRepeat: Bool = false) -> Decision {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .drop }
-        if text == lastText, now - lastTime < repeatWindow { return .drop }
+        // `allowRepeat`: the PERSON asked (tapped "repeat", asked for the distance). Asking twice means they did not catch it; swallowing
+        // the second request as a duplicate would look like the app ignoring them. The window exists to stop a stuck STATE from nagging.
+        if !allowRepeat, text == lastText, now - lastTime < repeatWindow { return .drop }
 
         switch priority {
         case .critical:
