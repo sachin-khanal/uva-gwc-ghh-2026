@@ -40,7 +40,8 @@ final class RouteVectorTests: XCTestCase {
             try MapBundle(map: map).validate()
             for item in fixture.cases {
                 let result = Router.route(in: WaypointGraph(map: map), from: item.start,
-                                          to: item.goal, allowStairs: item.allowStairs)
+                                          to: item.goal, allowStairs: item.allowStairs,
+                                          simplify: false) // the browser router returns the raw graph path; the native default thins collinear nodes (RouteSimplifier)
                 XCTAssertEqual(result?.map(\.id), item.expected, "\(fixture.name): \(item.name)")
             }
         }

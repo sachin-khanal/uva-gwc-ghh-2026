@@ -1,5 +1,14 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Sachin) — Integrate U3's web viewer + rich-map work into main; apply the no-sample policy   [tags: BUILD]
+Area: web viewer (U3 files), integration. Branch `feature/web-viewer-integration` cut from `origin/main` (6269746).
+What: merged `origin/U3` (f63206a; a clean, strictly-ahead merge) and cherry-picked e44a288 ("No sample/placeholder maps") from `feature/web-mesh-obj`. NOT merged: the rest of `feature/web-mesh-obj` (OBJ export/`markMeshPending`, migrations 0007/0008) because it conflicts in `SyncEngine.swift` and `CaptureController.swift` with U3's parallel implementation of the same mesh upload (`exportWebMesh`, `meshFiles`); that needs a decision by the owners. `floor1-demo/` is removed from the tree (U3 kept it only as a personal preview; it stays on `origin/U3`).
+Conflicts resolved by hand: `web/app.js`, `web/index.html`, `web/ui-tests.js` (kept U3's expand-map + route tests, the empty-start behaviour and wording from e44a288, no slogan footer), docs (both sides kept; the 20:00 WORKLOG entry that came with e44a288 is dropped because the code it describes is not in this tree).
+Fixed on the way: `RouteVectorTests` failed 4 cases after the merge (the native `Router` now simplifies collinear nodes, the shared browser vectors are the raw graph path), so the test calls `Router.route(..., simplify: false)`.
+Verified: `make test` -> 349 tests, 0 failures; `make typecheck` OK; `node web/test-web.mjs` 56/57 (the 1 failure needs a browser DOM); `web/tests.html` PASS and `web/ui-tests.html` 23/23 PASS in a browser (Playwright).
+NOT verified: any of it on a phone; the viewer against the live DB after the merge (next entries).
+Open problems / handoff: decide which mesh-upload implementation wins (U3's vs `feature/web-mesh-obj`).
+
 ## 2026-10-18 21:00 — Claude (agent, for Sachin) — No more sample/placeholder maps: app, tests and web viewer use only scanned maps; schema versioning checked; older LiDAR scans restored   [tags: BUILD, BUG]
 Area: D (app/tests), web viewer (U3's files, at U1's request)
 Contract: NOT a CONTRACT CHANGE (no map JSON shape change).
