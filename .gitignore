@@ -4,6 +4,8 @@
 
 # Per-developer signing config
 Config/Local.xcconfig
+.env.local
+.mcp.json
 
 # Build output. NOTE: our Makefile builds into ~/Library/Caches/Waypoint (outside the repo) because
 # codesign fails on files inside iCloud-synced ~/Desktop. These entries catch accidental local builds.
@@ -12,6 +14,7 @@ DerivedData/
 .build/
 .swiftpm/
 *.xcuserdatad
+.playwright-mcp
 
 # macOS
 .DS_Store
