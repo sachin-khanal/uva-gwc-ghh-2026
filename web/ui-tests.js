@@ -12,7 +12,7 @@ async function check(name, operation) {
   catch (error) { results.push({ name, pass: false, error: error.message }); }
 }
 try {
-  await waitFor(() => iframe.contentDocument?.getElementById("map-file") && iframe.contentWindow.document.getElementById("status")?.textContent);
+  await waitFor(() => iframe.contentDocument?.getElementById("map-file") && iframe.contentWindow.document.getElementById("map-title")?.textContent === "No building open");
   const doc = iframe.contentDocument, win = iframe.contentWindow, $ = (id) => doc.getElementById(id);
   const sample = await (await fetch("./fixtures/rice-hall-sample.json")).json(); // a TEST FIXTURE only: the viewer ships no sample building
   const change = (element) => element.dispatchEvent(new win.Event("change", { bubbles: true }));

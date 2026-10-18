@@ -1,5 +1,13 @@
 # Work log
 
+## 2026-10-18 - Codex for U3 - Publish resolved U3 work to main
+User explicitly requested pushing everything to main. Fetched origin, backed up older open-workspace web/docs changes in a named git stash, confirmed local main is an ancestor of resolved U3, and fast-forwarded main to U3 eaed57e. Preserved newer resolved schema/mesh/viewer changes instead of restoring stale duplicate workspace files. Removed floor1-demo from main only per earlier request to keep that experiment separate; all eight demo files remain saved on U3. Newer unrelated remote feature-branch commits were not merged in this publication.
+
+Files: integrated U3 changes (documented in prior entries), removed floor1-demo/{checks.html,floor1-model.js,floor1.css,floor1.html,floor1.js,movement-checks.html,preview.png,serve.py}; edited web/ui-tests.js to wait for completed empty-viewer initialization before importing its fixture, avoiding a DOM-before-module startup race; added this WORKLOG entry. No dependencies or live SQL changes.
+
+Verified: Python unittest discovery 22/22 PASS; headless Edge browser logic 58/58 PASS and UI 23/23 PASS on root workspace preview port 8023 after readiness fix; git diff --check. Commands: git fetch/stash/merge, Python unittest, headless Edge, git diff; commit/push main follows this record. NOT verified: make test and make typecheck attempted but make/Swift/Xcode unavailable on Windows; SQL migrations/regressions not executed. Native/device behavior UNVERIFIED ON DEVICE. Existing local stash retained as backup.
+
+
 ## 2026-10-18 - Codex for U3 - Resolve all remote branch conflicts
 User authorized all reported conflict fixes. Integrated audit, stairs-multifloor (including map-extension/navigation-overhaul), and feature/web-mesh-obj into personal U3 ancestry. Preserved U3 viewer route/tour, doors, labels, zoom/expand and slogan removals, plus separate Floor 1 experiment. Kept incoming empty viewer startup; real/local maps load explicitly. Reconciled MAP-frame OBJ and per-segment USDZ export, pending markers, integrity-checked downloads and immutable local bundle attachment with secure separate mesh publication RPC.
 
