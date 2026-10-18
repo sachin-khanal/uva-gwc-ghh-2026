@@ -44,7 +44,7 @@ end $$;
 select 'files stored by this account (must be exactly 300)' as test, count(*)::text as got, '300' as expect from stubstorage.objects;
 reset role;
 
--- buildings: 25 per account, 500 total
+-- buildings: 25 per account, and NO global cap (security review: a global cap would let a few throw-away accounts lock everyone out)
 set role authenticated;
 do $$ declare i int; ok int := 0; begin
   for i in 1..30 loop
@@ -54,13 +54,6 @@ do $$ declare i int; ok int := 0; begin
   raise notice 'buildings one account could create: % (expect 25)', ok;
 end $$;
 reset role;
--- global cap: fill to 499 with other owners, then 2 more
-insert into public.canonical_buildings(owner) select gen_random_uuid() from generate_series(1, 474);
-set role authenticated;
-do $$ declare ok int := 0; begin
-  begin insert into public.canonical_buildings(owner) values ('33333333-3333-4333-8333-333333333333'); ok := ok + 1; exception when others then null; end;
-  begin insert into public.canonical_buildings(owner) values ('44444444-4444-4444-8444-444444444444'); ok := ok + 1; exception when others then null; end;
-  raise notice 'inserted after the table already holds 499: % (expect 1: the 500th, then full)', ok;
-end $$;
-reset role;
-select 'total buildings (must be exactly 500)' as test, count(*)::text as got, '500' as expect from public.canonical_buildings;
+-- 40 other accounts x 25 buildings = 1000 more: all must be accepted (no global cap)
+insert into public.canonical_buildings(owner) select ('00000000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid from generate_series(1, 40) g, generate_series(1, 25);
+select 'total buildings with no global cap (must be 1025)' as test, count(*)::text as got, '1025' as expect from public.canonical_buildings;
