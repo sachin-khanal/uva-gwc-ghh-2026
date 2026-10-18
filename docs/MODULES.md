@@ -50,6 +50,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Graph building from scan** | A | `Model/MapBuilder.swift` | DONE (logic) | `RoutingTests.testMapBuilder…` |
 | **Geometry / frames** | A (shared with B) | `Geometry/Geometry.swift` | DONE | `RoutingTests.testSignedBearing…`, `testMarkerAlignment…` |
 | **Manual alignment (extend a map)** | A | `Model/ManualAlignment.swift` | DONE (logic); capture wiring UNVERIFIED ON DEVICE | `ManualAlignmentTests` (9) |
+| **Floor ahead / drop-offs (stairs DOWN, ledges)** | C with B | `Vision/FloorAhead.swift`, producer `Waypoint/Vision/ObstacleDetector.floorSamples` | DONE (logic); UNVERIFIED ON DEVICE, needs a real staircase | `FloorAheadTests` (12) + 7 planner tests |
 
 **Update 2026-10-18 (Claude):** `ManualAlignment` locates the phone inside a SAVED map from two places the volunteer confirms standing at, so extending a map no longer waits on ARKit relocalization. Added on branch `map-extension`; see the WORKLOG entry of the same date.
 | **AR capture (volunteer)** | A | `Waypoint/Capture/CaptureController.swift` | SCAFFOLD | – (device) |
