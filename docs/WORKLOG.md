@@ -1,5 +1,41 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Why ARKit relocalizes in Navigate but never in Extend   [tags: BUG, DEVICE]
+Area: U3 (scanner UI) + A (maps). Branch `stairs-multifloor`.
+Anmol: "the arkit localization just doesn't work, unlike navigate where it works." Same building, same world
+map, opposite result - so it was never ARKit being flaky; the two paths do different things.
+
+FOUND, by reading the maps off the phone backup rather than guessing:
+  Rice                 segment 1: 44 nodes   segment 2: 51 nodes    (both have a world map)
+  Rice Hall . Floor 4  segment 1: 32 nodes   segment 2: 22 nodes    (both have a world map)
+`Relocalizer` (Navigate) iterates `map.segmentIds` and takes the FIRST segment that has a world map - in
+practice the original scan - and ignores the rest (`break`, "TODO(A): multi-segment stitching"). The Extend
+picker instead loads the segment the VOLUNTEER CHOSE, from a list labelled only "Scan area 1 of 2" /
+"Scan area 2 of 2" with no indication of where those areas are. Pick the wrong one and ARKit is being asked to
+recognise a part of the building the volunteer is not standing in, which never succeeds however long they wait.
+Navigate "worked" because it never offers that choice.
+
+Fixed: `ExtendOption` now carries `pointCount` and `placeNames` (the labelled places recorded in that segment),
+plus `isOriginal` and a `whereItIs` summary. The picker shows "Rice . Scan area 1 of 2 / Original scan . Rear
+Stairwell, Start" instead of a bare number, and the instruction now says to pick the area you are STANDING IN
+and that choosing one you are not in will never work.
+
+Verified: `make test` -> **404 tests, 0 failures** (402 before; 2 new: an area names the places inside it and
+marks whether it is the original, and an unlabelled area falls back to its size). `make typecheck` OK (65 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. The hypothesis is strongly supported by the segment data but has not been
+confirmed by actually extending from area 1 and watching it relocalize.
+Open / handoff:
+1. This is presentation only. The deeper issue is that ARKit takes ONE `initialWorldMap`, so a multi-segment map
+   can only ever be recognised from one of its areas at a time. Navigate has the same limitation and hides it by
+   always choosing segment 1 - which means navigating a map whose user starts in area 2 would fail the same way.
+   Proper multi-segment relocalization is still the open `TODO(A)`.
+2. Both of Anmol's two-segment maps have a segment 2 created by the OLD build, whose world map is in the session
+   frame (fixed earlier today for new scans, not repaired for existing ones). Extending from area 2 on those maps
+   would be wrong even if it did relocalize.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — ARKit first, and the two extension paths stop racing each other   [tags: BUG]
 Area: A (capture). Branch `stairs-multifloor`. Closes the risk flagged when manual alignment first landed.
 

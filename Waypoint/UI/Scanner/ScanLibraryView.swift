@@ -126,7 +126,7 @@ struct ScanLibraryView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("Stand near a place you already scanned, then pick that scan. The phone finds its position in the old scan first; after that, walk into the new area and tag its rooms.")
+                    Text("Pick the area you are STANDING IN, then stand where you first started scanning it and hold still. The phone has to recognise that area before you can add to it - choosing one you are not in will never work, however long you wait.")
                         .foregroundStyle(.secondary)
                     if !canExtendHere {
                         Banner(text: "Extending needs Live mode (Settings) on an iPhone with LiDAR.", kind: .warning)
@@ -136,7 +136,11 @@ struct ScanLibraryView: View {
                     if canExtendHere {
                         ForEach(extendOptions) { option in
                             if let map = app.maps.first(where: { $0.id == option.mapId }) {
-                                CardRow(title: option.mapName, detail: "\(option.areaTitle) · \(detail(for: map))",
+                                // Say WHERE the area is, not just its number: "Scan area 2 of 2" gave the
+                                // volunteer nothing to choose on, and picking the wrong one asks ARKit to
+                                // recognise a part of the building they are not in (device report 2026-10-18).
+                                CardRow(title: "\(option.mapName) · \(option.areaTitle)",
+                                        detail: "\(option.isOriginal ? "Original scan" : "Added later") · \(option.whereItIs)",
                                         systemImage: "plus.square.on.square",
                                         hint: "Starts extending this map. Stand near a place you already scanned.") {
                                     showExtend = false
