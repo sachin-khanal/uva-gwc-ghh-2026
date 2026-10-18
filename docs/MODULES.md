@@ -28,6 +28,8 @@ Package/WaypointCore/            pure logic, tested by `make test` (no Apple UI/
     Guidance/     FeedbackPlanner
     Vision/       ObstacleClassifier, RoomNumberParser (+ConsensusFilter)
     Scan/         OrientedBox (scan bounding box), ExportBudget (40 MB export cap)
+                  **Update 2026-10-17:** + RoomExtractor (room floor area from wall faces),
+                  CoverageTracker (has the space been walked BOTH ways? see D-043)
     Simulation/   PoseSimulator (virtual walker)
     Cloud/        HTTPTransport, CloudModels, SupabaseClient, SyncEngine
   Tests/WaypointCoreTests/   ModelTests, RoutingTests, FeedbackAndVisionTests, ScanAndSimulationTests, CloudTests
@@ -49,6 +51,7 @@ docs/  AGENTS.md  Architecture.md           documentation
 | **Geometry / frames** | A (shared with B) | `Geometry/Geometry.swift` | DONE | `RoutingTests.testSignedBearing…`, `testMarkerAlignment…` |
 | **AR capture (volunteer)** | A | `Waypoint/Capture/CaptureController.swift` | SCAFFOLD | – (device) |
 | **Live LiDAR scan view + bounding box** | A | `Waypoint/Scan/LiveScanView.swift`, `MeshSampler.swift`, `Capture/CaptureController.swift` (stats, box) · core `Scan/OrientedBox.swift` | box math DONE · view SCAFFOLD | `ScanAndSimulationTests` (box) |
+| **Both-directions scan coverage** (added 2026-10-17) | A | core `Scan/CoverageTracker.swift` · `Capture/CaptureController.swift` (sampling + published values) · `UI/VolunteerView.swift`, `UI/Scanner/LiveScanScreen.swift` (HUD + prompt) | logic DONE · UNVERIFIED ON DEVICE | `CoverageTrackerTests` (11) |
 | **Mesh export (USDZ) + 3D viewer** | C | core `Scan/ExportBudget.swift` (budget math) | budget DONE · exporter/viewer TODO | budget tested |
 | **Simulated walker / Simulate mode** | B | core `Simulation/PoseSimulator.swift`, `Navigation/NavigationController.swift` (`startSimulation`), `UI/NavigatorView.swift` | logic DONE (end-to-end test) · UI SCAFFOLD | `testEndToEndWalkProducesExpectedCues` |
 | **Supabase client + sync engine** | D | core `Cloud/*`, `supabase/migrations/0001_init.sql` | client DONE vs mock · ~~SQL + live server UNVERIFIED~~ **Update 2026-10-17 (Claude):** SQL 0001-0003 + tests PASS locally and reported OK in U3's Supabase; live-server concurrency + phone use UNVERIFIED | `CloudTests` |

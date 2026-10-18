@@ -1,5 +1,48 @@
 # Work log
 
+## 2026-10-17 — Claude (agent, for Anmol) — Scan-both-directions coverage; keyframe recorder off the hot path   [tags: BUILD, BUG]
+Area: A (capture/relocalization) + shared core. Branch `bidirectional-coverage` off `navigation-overhaul`. See D-043.
+
+Trigger: "I scan one direction, but when walking back from that direction, it struggles."
+Finding that reframed it: the keyframe matcher requires `!usingWorldMap` and every saved scan has a world map, so the
+matcher has almost certainly NEVER run on a real map. ARKit's own relocalization is viewpoint-dependent, so the
+directional problem is ARKit's, not the fingerprints'.
+Files created (WaypointCore): `Scan/CoverageTracker.swift` - floor-plane cells x heading octants; a cell is covered
+once two of its headings are roughly reciprocal; `returnCoverage` and `shouldPromptReturnWalk`.
+Files edited (WaypointCore): `Model/BuildingMap.swift` (`merged(with:)` now unions keyframes by id - it silently
+dropped them before), `Model/MapStore.swift` (`validate()` now checks keyframe count, descriptor size and finiteness;
++`maxKeyframes`, +`maxKeyframeDescriptorBytes`).
+Files edited (app): `Waypoint/Capture/CaptureController.swift` (samples `CoverageTracker` ~4 Hz, publishes
+`returnCoverage` / `shouldWalkBack`; keyframe recording now gated on `UIPrefs.visualFingerprintsEnabled` AND throttled
+to 0.5 s - it used to run on every frame at 60 Hz), `Waypoint/Services/ScanService.swift` + `LiveScanService.swift`
+(coverage through the snapshot seam), `Waypoint/UI/VolunteerView.swift` and `Waypoint/UI/Scanner/LiveScanScreen.swift`
+(percentage in the HUD + a warning banner; WARNS, never blocks).
+Tests added: `CoverageTrackerTests` (11) - one-direction scores 0 and prompts, there-and-back scores 1, half a return
+is in between, approximately-opposite headings count, sweeping left/right does NOT count, wrap-around at 350/170
+degrees, negative yaw, a short walk is not judged, empty is safe, non-finite poses ignored, reset.
+`KeyframeMergeAndValidationTests` (6) - both sides' keyframes survive a merge, no duplicates, NaN position and
+infinite yaw refused, oversized descriptor refused, too many refused, a reasonable one passes.
+One test of mine failed first and the TEST was wrong, not the code: my `walkBack` helper stopped a stride short of the
+start, leaving the first cell seen one way, so coverage read 10/11. A volunteer walks all the way back.
+Model/* was touched (`BuildingMap.merged`, `MapStore.validate`) but the JSON SHAPE is unchanged: no field added or
+renamed, `schemaVersion` stays 3, `Samples/rice-hall-sample.json` untouched. Behaviour only - a merge that used to
+lose keyframes now keeps them, and invalid keyframes are now refused. Hence no CONTRACT CHANGE tag.
+Verified: `make test` -> **233 tests, 0 failures** (was 216); `make typecheck` OK (61 app files, 1 UI test file);
+`make check` -> BUILD SUCCEEDED (run on its own, not chained).
+NOT verified: **UNVERIFIED ON DEVICE.** No map format change - `schemaVersion` stays 3 and existing recordings load
+unchanged. Coverage thresholds (2 m cells, 8 octants, 60-degree tolerance, prompt under 60%) are guesses.
+Open / handoff - the A/B that tests the hypothesis:
+1. Scan a corridor ONE way. HUD coverage should stay low and the prompt appear. Save, kill the app, relaunch, stand at
+   the FAR end facing back, Navigate. This is the control; expect the reported difficulty.
+2. Scan the same corridor BOTH ways until coverage is high. Save as a second map. Repeat step 1's walk against it.
+   Success = it relocalizes from the far end where the one-direction map did not.
+3. Console: "using world map for segment X" confirms ARKit's path is in use and keyframes are not involved.
+4. `DEVICE=<id> make selftest-scan` shows tracking quality per second - useful for comparing a scan with fingerprints
+   on (old behaviour) against off, since per-frame Vision work is the suspect for the degraded maps.
+5. Known gap, documented not fixed: `Keyframe` has no `segmentId` (D-043).
+
+---
+
 ## 2026-10-17 16:20 — Claude (agent, for Sachin) — Docs-on-every-commit hook for agents and humans (AGENTS.md rule 12)   [tags: BUILD, DOCS]
 Area: D (build system/docs), shared; also touches `.github/` (U3's lane per ROADMAP, did not exist yet) at U1's request that every dev follows this.
 Files created: `scripts/docs-sync.sh` (check | stub | install | status | session), `scripts/githooks/pre-commit`, `scripts/test-docs-sync.sh`, `.claude/settings.json` (SessionStart auto-installs the hook for Claude Code users), `.gitattributes` (LF for scripts so Git Bash on Windows works), `.github/workflows/docs-check.yml` (PR + push-to-main backstop).

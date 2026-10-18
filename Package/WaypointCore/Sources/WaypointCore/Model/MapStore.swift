@@ -35,6 +35,12 @@ extension MapBundle {
     public static let maxNodes = 5_000
     public static let maxEdges = 20_000
     public static let maxWorldMapBytes = 50_000_000
+    /// One visual fingerprint every ~2.5 m walked; 5000 is far more than any building we will scan,
+    /// while still bounding a hostile or runaway map.
+    public static let maxKeyframes = 5_000
+    /// An Apple Vision feature print archives to a few KB; 64 KB leaves generous headroom and still
+    /// stops one fingerprint bloating the map JSON.
+    public static let maxKeyframeDescriptorBytes = 64 * 1024
 
     /// Structural sanity check for a bundle that came from ANOTHER device (sync / AirDrop).
     /// Does not prove the map is truthful - a human still approves imports - but it rejects data
@@ -49,6 +55,20 @@ extension MapBundle {
         }
         if worldMaps.values.contains(where: { $0.count > Self.maxWorldMapBytes }) {
             throw MapStoreError.rejected("A world map in this bundle is too large.")
+        }
+        // Keyframes were not checked at all until 2026-10-17. They come from other people like the
+        // rest of the map, they inflate the JSON, and a non-finite pose would flow straight into
+        // `mapToWorld` and put the user somewhere impossible.
+        if map.keyframes.count > Self.maxKeyframes {
+            throw MapStoreError.rejected("Map has too many visual fingerprints (\(map.keyframes.count)).")
+        }
+        for k in map.keyframes {
+            guard k.position.x.isFinite, k.position.y.isFinite, k.position.z.isFinite, k.yaw.isFinite else {
+                throw MapStoreError.rejected("A visual fingerprint has an invalid position.")
+            }
+            guard k.descriptor.count <= Self.maxKeyframeDescriptorBytes else {
+                throw MapStoreError.rejected("A visual fingerprint is too large.")
+            }
         }
         // Segment ids become file names and storage paths: reject anything outside the safe alphabet.
         for n in map.nodes where !SegmentID.isValid(n.segmentId) {

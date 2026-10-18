@@ -113,6 +113,11 @@ struct LiveScanScreen: View {
             .buttonStyle(.plain)
             .accessibilityLabel(panelExpanded ? "Collapse controls" : "Expand controls")
 
+            if s.shouldWalkBack {
+                Banner(text: "Walk back the way you came so the map works in both directions.",
+                       kind: .warning)
+                    .accessibilityIdentifier("scan.walkBack")
+            }
             HStack {
                 QualityRing(quality: s.quality)
                 Spacer()
@@ -121,6 +126,9 @@ struct LiveScanScreen: View {
                     if let size = s.boxSize {
                         Text(String(format: "%.1f × %.1f m area", size.x, size.z)).font(.footnote.monospacedDigit())
                     }
+                    // Both-directions coverage: a map walked one way only relocalizes badly when the
+                    // user returns the other way (D-043).
+                    Text("\(Int(s.returnCoverage * 100))% both ways").font(.footnote.monospacedDigit())
                 }
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)

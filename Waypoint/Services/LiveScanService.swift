@@ -120,6 +120,8 @@ final class LiveScanService: ScanService {
         s.triangleCount = controller.triangleCount
         s.boxSize = controller.scanBox?.size
         s.boxMargin = controller.boxMargin
+        s.returnCoverage = controller.returnCoverage
+        s.shouldWalkBack = controller.shouldWalkBack
         s.tags = tags
         s.errorMessage = controller.errorMessage
         snapshot = s

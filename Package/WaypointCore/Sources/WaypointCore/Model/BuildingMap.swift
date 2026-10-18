@@ -74,6 +74,7 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     ///  * Nodes are matched by `id`. If both have the same id, `self`'s copy wins.
     ///  * Edges are matched as an unordered pair of node ids. `self`'s copy wins.
     ///  * `marker` prefers `self`'s.
+    ///  * Keyframes are unioned by `id`, like nodes.
     ///  * `version` becomes max(self, other) + 1 so peers can tell the merged map is newer.
     ///  * No position reconciliation and no duplicate-label detection (documented limitation).
     public func merged(with other: BuildingMap) -> BuildingMap {
@@ -85,6 +86,13 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         }
         for e in other.edges where !result.edges.contains(where: { $0.connects(e.from, e.to) }) {
             result.edges.append(e)
+        }
+        // Keyframes union by id, like nodes. Without this an extension scan - or ANY import into a
+        // map we already hold - silently threw the incoming ones away, because `MapStore.importBundle`
+        // routes through here (found 2026-10-17).
+        let knownKeyframeIds = Set(keyframes.map(\.id))
+        for k in other.keyframes where !knownKeyframeIds.contains(k.id) {
+            result.keyframes.append(k)
         }
         if result.marker == nil { result.marker = other.marker }
         result.version = max(version, other.version) + 1

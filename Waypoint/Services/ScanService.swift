@@ -29,6 +29,10 @@ struct ScanSnapshot: Equatable {
     /// Size of the scan bounding box in metres (x, y, z), once there is a mesh.
     var boxSize: SIMD3<Float>?
     var boxMargin: Float = 0.1
+    /// 0...1: how much of the walk has been seen from BOTH directions (D-043).
+    var returnCoverage: Float = 0
+    /// Ask the volunteer to walk back the way they came.
+    var shouldWalkBack = false
     var tags: [ScanTag] = []
     /// A label read from a sign, offered as a one-tap tag (slot for SignReader, ROADMAP U2.7).
     var suggestion: String?

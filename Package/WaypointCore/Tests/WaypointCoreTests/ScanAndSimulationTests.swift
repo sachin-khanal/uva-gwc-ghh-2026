@@ -357,3 +357,112 @@ final class RoomExtractorTests: XCTestCase {
         XCTAssertEqual(map.nodes.first?.label, "Room 204")
     }
 }
+
+// MARK: - Coverage: has the space been seen from both directions? (device report, 2026-10-17)
+
+final class CoverageTrackerTests: XCTestCase {
+
+    /// Walk down -z facing -z, which is yaw 0 in this convention.
+    private func walkOneWay(_ tracker: inout CoverageTracker, metres: Float = 20, step: Float = 0.5) {
+        var z: Float = 0
+        while z > -metres {
+            tracker.observe(position: SIMD3(0, 0, z), yaw: 0)
+            z -= step
+        }
+    }
+
+    /// Walk back up +z facing +z, which is yaw pi. Ends AT the start, as a volunteer would - stopping
+    /// a stride short leaves the first cell seen only one way.
+    private func walkBack(_ tracker: inout CoverageTracker, metres: Float = 20, step: Float = 0.5) {
+        var z: Float = -metres
+        while z <= 0 {
+            tracker.observe(position: SIMD3(0, 0, z), yaw: .pi)
+            z += step
+        }
+    }
+
+    /// The reported situation: a corridor scanned once, in one direction.
+    func testOneDirectionWalkScoresZeroAndPrompts() {
+        var tracker = CoverageTracker()
+        walkOneWay(&tracker)
+        XCTAssertGreaterThan(tracker.visitedCellCount, 4, "a 20 m corridor is several cells")
+        XCTAssertEqual(tracker.returnCoverage, 0, accuracy: 1e-6, "nothing was seen from the other way")
+        XCTAssertTrue(tracker.shouldPromptReturnWalk)
+    }
+
+    func testWalkingBackCoversItAndStopsPrompting() {
+        var tracker = CoverageTracker()
+        walkOneWay(&tracker)
+        walkBack(&tracker)
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6, "every cell seen both ways")
+        XCTAssertFalse(tracker.shouldPromptReturnWalk)
+    }
+
+    func testHalfAReturnWalkScoresInBetween() {
+        var tracker = CoverageTracker()
+        walkOneWay(&tracker, metres: 20)
+        walkBack(&tracker, metres: 10) // only the far half is retraced
+        XCTAssertGreaterThan(tracker.returnCoverage, 0.2)
+        XCTAssertLessThan(tracker.returnCoverage, 0.8)
+    }
+
+    /// Nobody retraces a corridor on the exact reciprocal heading.
+    func testApproximatelyOppositeHeadingsCount() {
+        var tracker = CoverageTracker()
+        tracker.observe(position: .zero, yaw: 0)
+        tracker.observe(position: .zero, yaw: 150 * .pi / 180) // 30 degrees off reciprocal
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6)
+    }
+
+    /// Looking slightly left and right while walking one way is NOT coverage.
+    func testSmallHeadingChangesDoNotCount() {
+        var tracker = CoverageTracker()
+        for degrees in [-40, -20, 0, 20, 40] {
+            tracker.observe(position: .zero, yaw: Float(degrees) * .pi / 180)
+        }
+        XCTAssertEqual(tracker.returnCoverage, 0, accuracy: 1e-6, "sweeping is not walking back")
+    }
+
+    /// Yaw wraps: 350 degrees and 170 degrees are opposite, across the seam.
+    func testOppositeAcrossTheWrapPoint() {
+        var tracker = CoverageTracker()
+        tracker.observe(position: .zero, yaw: 350 * .pi / 180)
+        tracker.observe(position: .zero, yaw: 170 * .pi / 180)
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6)
+    }
+
+    func testNegativeYawIsHandled() {
+        var tracker = CoverageTracker()
+        tracker.observe(position: .zero, yaw: -.pi / 2)
+        tracker.observe(position: .zero, yaw: .pi / 2)
+        XCTAssertEqual(tracker.returnCoverage, 1, accuracy: 1e-6)
+    }
+
+    /// A short scan of one room must not be nagged at.
+    func testAShortWalkIsNotJudged() {
+        var tracker = CoverageTracker()
+        tracker.observe(position: .zero, yaw: 0)
+        XCTAssertFalse(tracker.shouldPromptReturnWalk, "too little walked to say anything")
+    }
+
+    func testEmptyTrackerIsSafe() {
+        let tracker = CoverageTracker()
+        XCTAssertEqual(tracker.visitedCellCount, 0)
+        XCTAssertEqual(tracker.returnCoverage, 0)
+        XCTAssertFalse(tracker.shouldPromptReturnWalk)
+    }
+
+    func testNonFinitePosesAreIgnored() {
+        var tracker = CoverageTracker()
+        tracker.observe(position: SIMD3(.nan, 0, 0), yaw: 0)
+        tracker.observe(position: .zero, yaw: .nan)
+        XCTAssertEqual(tracker.visitedCellCount, 0)
+    }
+
+    func testResetClearsIt() {
+        var tracker = CoverageTracker()
+        walkOneWay(&tracker)
+        tracker.reset()
+        XCTAssertEqual(tracker.visitedCellCount, 0)
+    }
+}

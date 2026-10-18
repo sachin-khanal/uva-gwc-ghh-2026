@@ -525,3 +525,30 @@ successfully. This also makes the A/B deliberate instead of accidental.
 deliberately rate limited - so the screen could show a left arrow a second after the voice said "Right."
 `GuidanceSnapshot.spokenKind` reads the direction back out of the spoken line and the arrow uses that.
 **Status:** accepted; 216 tests pass. UNVERIFIED ON DEVICE.
+
+## D-043 — Scan both directions; the keyframe matcher had never run (2026-10-17)
+Report: a corridor scanned walking one way relocalizes badly when the user walks BACK the other way. The assumption
+was that the visual fingerprints only covered one direction.
+**What was actually true.** The keyframe matcher requires `!usingWorldMap` (`Relocalizer.swift:168`), and
+`usingWorldMap` becomes true as soon as any `.arworldmap` loads (`:125`) - which is always, because every saved scan
+produces one. So **the matcher has almost certainly never run on a real map**. The fast relocalization seen on device
+was ARKit; the teleporting that followed the keyframe commit came from something else in it, most likely the RECORDING
+side, which ran Vision work plus a linear scan on every frame at 60 Hz inside the capture loop and can degrade
+tracking and thermals - producing a worse ARWorldMap, which then relocalizes worse.
+**The real cause of the directional problem.** ARKit's own world-map relocalization is viewpoint-dependent too. A
+corridor walked once contains almost no reverse-facing views, so a returning user gives ARKit little to match. No
+amount of tuning the fingerprints addresses this; walking the route BOTH WAYS does, and costs the volunteer a minute.
+Changes: `CoverageTracker` (WaypointCore, pure, unit-tested) buckets the floor plane and records which heading octants
+each cell has been seen from; a cell counts once two of its headings are roughly reciprocal. `CaptureController`
+samples it a few times a second and publishes `returnCoverage` / `shouldWalkBack`; both scanner HUDs show the
+percentage and prompt "Walk back the way you came...". It WARNS, never blocks - consistent with the existing finish
+gate. Keyframe recording is now behind the same preference as matching (off by default) and throttled to 0.5 s, so the
+capture loop no longer pays for a feature that cannot fire.
+Also fixed, both found by exploration rather than by failure: `BuildingMap.merged(with:)` never merged `keyframes`, so
+an extension scan or any import into a map already held silently discarded them; and `MapBundle.validate()` never
+inspected keyframes, so a NaN pose would have flowed into `mapToWorld` - now capped by count and descriptor size and
+checked for finiteness.
+**Deliberately NOT changed:** `Keyframe` has no `segmentId` while `MapNode` does. Adding it is a contract change
+(`schemaVersion` 3 -> 4) to a disabled feature, and multi-segment is itself unimplemented
+(`Relocalizer.swift:95` `TODO(A)`). Recorded here so it is not rediscovered as a surprise.
+**Status:** accepted; 233 tests pass. UNVERIFIED ON DEVICE - the A/B that tests the hypothesis is in the WORKLOG entry.

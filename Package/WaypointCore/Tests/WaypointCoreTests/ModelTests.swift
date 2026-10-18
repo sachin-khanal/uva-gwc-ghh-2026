@@ -330,3 +330,60 @@ final class KeyframeTests: XCTestCase {
         XCTAssertEqual(decoded.keyframes, map.keyframes)
     }
 }
+
+// MARK: - Keyframes survive a merge, and hostile ones are refused (found 2026-10-17)
+
+final class KeyframeMergeAndValidationTests: XCTestCase {
+
+    private func keyframe(_ byte: UInt8, at x: Float = 0) -> Keyframe {
+        Keyframe(position: SIMD3(x, 0, 0), yaw: 0, descriptor: Data([byte]))
+    }
+
+    /// The bug: `merged(with:)` handled nodes, edges and marker but not keyframes, so an extension
+    /// scan - or any import into a map already on disk - silently discarded the incoming ones.
+    func testMergingKeepsKeyframesFromBothSides() {
+        let mine = BuildingMap(name: "m", nodes: [], edges: [], keyframes: [keyframe(1, at: 0)])
+        let theirs = BuildingMap(id: mine.id, name: "m", nodes: [], edges: [],
+                                 keyframes: [keyframe(2, at: 5)])
+        let merged = mine.merged(with: theirs)
+        XCTAssertEqual(merged.keyframes.count, 2, "both sides' fingerprints survive")
+    }
+
+    func testMergingDoesNotDuplicateTheSameKeyframe() {
+        let shared = keyframe(1)
+        let mine = BuildingMap(name: "m", nodes: [], edges: [], keyframes: [shared])
+        let theirs = BuildingMap(id: mine.id, name: "m", nodes: [], edges: [], keyframes: [shared])
+        XCTAssertEqual(mine.merged(with: theirs).keyframes.count, 1)
+    }
+
+    // MARK: Validation
+
+    private func bundle(_ keyframes: [Keyframe]) -> MapBundle {
+        MapBundle(map: BuildingMap(name: "m",
+                                   nodes: [MapNode(kind: .corridor, position: .zero)],
+                                   edges: [], keyframes: keyframes))
+    }
+
+    /// A non-finite pose would flow straight into `mapToWorld` and put the user nowhere.
+    func testAKeyframeWithANonFinitePoseIsRefused() {
+        XCTAssertThrowsError(try bundle([Keyframe(position: SIMD3(.nan, 0, 0), yaw: 0,
+                                                  descriptor: Data([1]))]).validate())
+        XCTAssertThrowsError(try bundle([Keyframe(position: .zero, yaw: .infinity,
+                                                  descriptor: Data([1]))]).validate())
+    }
+
+    func testAnOversizedDescriptorIsRefused() {
+        let huge = Data(repeating: 0, count: MapBundle.maxKeyframeDescriptorBytes + 1)
+        XCTAssertThrowsError(try bundle([Keyframe(position: .zero, yaw: 0, descriptor: huge)]).validate())
+    }
+
+    func testTooManyKeyframesAreRefused() {
+        let many = (0...MapBundle.maxKeyframes).map { _ in keyframe(1) }
+        XCTAssertThrowsError(try bundle(many).validate())
+    }
+
+    func testAReasonableKeyframePasses() {
+        XCTAssertNoThrow(try bundle([keyframe(1)]).validate())
+        XCTAssertNoThrow(try bundle([]).validate())
+    }
+}
