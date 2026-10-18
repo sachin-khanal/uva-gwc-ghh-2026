@@ -72,6 +72,9 @@ final class MockScanService: ScanService {
     /// The mock has no saved map to stand in, so there is nowhere to confirm standing at.
     func confirmPlace(id: UUID) {}
 
+    /// The mock keeps no stairs metadata; it records the tag like any other.
+    func tagStairs(kind: NodeKind, label: String?, info: StairsInfo) { tag(kind: kind, label: label) }
+
     func tag(kind: NodeKind, label: String?) {
         guard snapshot.isRunning else { return }
         let right = SIMD3<Float>(-walkerForward.z, 0, walkerForward.x)

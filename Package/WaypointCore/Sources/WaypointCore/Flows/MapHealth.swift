@@ -18,6 +18,13 @@ public enum MapWarning: Equatable, Sendable {
     case unlabeled(count: Int)
     /// The graph falls apart into several pieces; some places are unreachable.
     case disconnected(parts: Int)
+    /// A staircase or lift was tagged without saying which way it goes. Without that, the two ends of
+    /// the same stairwell cannot be told apart when the floors are matched up by name, so it can never
+    /// be used to change floor.
+    case stairsWithoutDirection([String])
+    /// Two ends of the same stairwell that cannot be opposite ends of one staircase - both say "up",
+    /// say. Caught here, where a sighted volunteer can fix it, rather than mid-route by a blind user.
+    case stairsDirectionsDisagree([String])
     /// The same label is used more than once (the user can't tell them apart).
     case duplicateLabels([String])
     /// The walk passes back through a place it has already been, but the two visits were never joined.
@@ -37,6 +44,10 @@ public enum MapWarning: Equatable, Sendable {
             return "The map is split into \(parts) parts. Some places can't be reached."
         case .unclosedLoop(let count):
             return "The scan passes back through \(count == 1 ? "a place" : "\(count) places") it has already been without joining up, so routes may take the long way round. Rescan that stretch walking slowly over your own path."
+        case .stairsWithoutDirection(let names):
+            return "Say which way these go (up or down), or they can't be used to change floor: \(names.joined(separator: ", "))."
+        case .stairsDirectionsDisagree(let names):
+            return "These can't be two ends of one staircase - check which way each one goes: \(names.joined(separator: ", "))."
         case .duplicateLabels(let labels):
             return "Used more than once: \(labels.joined(separator: ", "))."
         }
@@ -87,6 +98,34 @@ public enum MapHealth {
 
         let unclosed = unclosedRevisits(map)
         if unclosed > 0 { warnings.append(.unclosedLoop(count: unclosed)) }
+
+        // Stairs and lifts are how a route changes floor, and the two ends of one stairwell are matched
+        // across floors BY NAME - so an unnamed or undirected one is a dead end, and two ends that both
+        // claim to go up cannot be the same staircase. Both are things a sighted volunteer can still fix.
+        let vertical = map.nodes.filter { $0.kind == .stairs || $0.kind == .elevator }
+        let undirected = vertical
+            .filter { $0.stairs?.direction == nil }
+            .compactMap { $0.label?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if !undirected.isEmpty { warnings.append(.stairsWithoutDirection(undirected.sorted())) }
+
+        var byName: [String: [StairsDirection]] = [:]
+        for node in vertical {
+            guard let name = node.label?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let direction = node.stairs?.direction else { continue }
+            byName[name, default: []].append(direction)
+        }
+        let disagreeing = byName.filter { _, directions in
+            guard directions.count > 1 else { return false }
+            // Every pair recorded under one name must be able to be opposite ends of one staircase.
+            for i in directions.indices {
+                for j in directions.indices where j > i && !directions[i].pairs(with: directions[j]) {
+                    return true
+                }
+            }
+            return false
+        }.keys
+        if !disagreeing.isEmpty { warnings.append(.stairsDirectionsDisagree(disagreeing.sorted())) }
 
         var firstSpelling: [String: String] = [:]
         var counts: [String: Int] = [:]

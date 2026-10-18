@@ -1,5 +1,58 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — CONTRACT CHANGE: format 4, stairs metadata and the checks that keep a stairwell usable   [tags: CONTRACT CHANGE, FEATURE]
+Area: A (maps) + U3 (scanner UI). Branch `stairs-multifloor`.
+Design agreed with Anmol first: the two ends of one staircase live in SEPARATE maps (one per floor) and are
+matched across them BY NAME, computed at routing time. There is NO link step and no scan-order constraint -
+scan floors in any order, on any phone, and a stairwell with no counterpart yet is simply a tagged staircase.
+Derived links also cannot go stale or conflict when maps are merged, which stored ones would.
+
+FIRST, A CORRECTION to the previous entry's claim that nothing tags stairs edges: `MapBuilder.addPOI:114`
+already does (`let hazard: Hazard? = (kind == .stairs) ? .stairs : nil`). My grep missed it because `Hazard?`
+and `.stairs` are written separately. The router's stairs penalty and the advance "Stairs ahead." warning were
+working all along; no fix was needed and none was made.
+
+CONTRACT CHANGE - format 3 -> 4. Adds the OPTIONAL `MapNode.stairs` (`StairsInfo`: direction up/down/both,
+railing side, step count) for `.stairs` and `.elevator`. Optional, so every older map decodes unchanged with
+none, and a map without it does not grow the key. Full checklist done per `docs/MAP_FORMAT.md`:
+`MapSchema.current` 3 -> 4 with the version documented, `migrate` already steps to current via its `default`,
+NEW fixture `docs/map-format/map-v4.json` (validated: `tools/validate_map.py` PASS), `CURRENT_SCHEMA` 3 -> 4 in
+the validator, `Samples/rice-hall-sample.json` updated (its "Stairs up" node now carries a direction), and tests.
+
+Also new:
+* `MapHealth` gains two warnings, in the same family as the existing "check before sharing" advice:
+  `stairsWithoutDirection` (tagged but never said which way it goes, so the floors can never be matched) and
+  `stairsDirectionsDisagree` (two ends under one name that cannot be opposite ends of one staircase). Caught
+  where a SIGHTED volunteer can still fix it, rather than mid-route by a blind user.
+* `Waypoint/UI/Scanner/StairsSheet.swift` - tagging stairs or a lift now opens a sheet (name, direction,
+  handrail, optional step count) instead of dropping a bare node. Names already used in this map are offered as
+  buttons, because mistyping the name on the second floor is exactly how a building fails to link up.
+  `ScanSessionModel.beginTag` routes only stairs/lifts through it; everything else tags as before.
+* `CaptureController.knownStairwellNames`, `tagPOI(..., stairs:)`, `MapBuilder.addPOI(..., stairs:)`, and
+  `ScanService.tagStairs` (no default implementation, for the reason `confirmPlace` has none).
+
+TWO THINGS WORTH KNOWING, both found by tests rather than by reading:
+1. `RailingSide` originally had a case called `none`. `railings: .none` on an optional parameter then means
+   `Optional.none` - "NOT RECORDED" - rather than "no handrail", silently and with no warning. Renamed to
+   `neither`. Any other optional enum here should avoid a `none` case for the same reason.
+2. `make test` reported 3 failures that a clean build did not: the test module saw `MapSchema.current == 4`
+   while linking a cached `WaypointCore` whose `BuildingMap.init` default argument was still 3, so one binary
+   held both answers. `rm -rf ~/Library/Caches/Waypoint/spm` fixed it. After editing a `static let` constant,
+   do not trust an incremental `make test`.
+
+Verified: `make test` -> **395 tests, 0 failures** (382 before; 13 new covering the direction pairing rule,
+both health warnings and their negatives, a JSON round trip of `StairsInfo`, the absent key, the v4 fixture, and
+every older fixture still decoding). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+`python3 tools/validate_map.py docs/map-format/map-v4.json` -> PASS.
+NOT verified: UNVERIFIED ON DEVICE. Nobody has tagged a staircase with this sheet, and no map has been saved in
+format 4 from a phone.
+Open / handoff: the metadata is recorded but NOTHING READS IT YET - guidance does not speak the handrail or the
+step count, and nothing matches stairwells across floors, because `BuildingMap` still has no `building`/`floor`
+field. That is the next contract change and it is still gated on whether the demo route changes floor. Also
+unchanged: `tools/validate_map.py` and `web/` do not inspect the new `stairs` object beyond accepting it.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Two timers that reported failure on work that had succeeded   [tags: BUG]
 Area: A (capture), U3 (scanner UI). Branch `stairs-multifloor`.
 Context: Anmol said the demo route "has not been used once" - everything so far has been tested in an apartment,

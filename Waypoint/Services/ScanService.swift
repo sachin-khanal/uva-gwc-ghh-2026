@@ -53,6 +53,9 @@ struct ScanSnapshot: Equatable {
     var extensionStatus: String?
     /// False while an extension is still finding its place in the saved area (recording and tagging are paused).
     var canRecord = true
+    /// Stairwell / lift names already used in this map, offered when tagging another one so the two ends
+    /// of one staircase end up with the SAME name (that is how floors are matched).
+    var knownStairwellNames: [String] = []
     /// Extending a saved map: the labelled places the volunteer can confirm standing at, so they can locate
     /// themselves BY HAND instead of waiting for ARKit to recognise the space. Empty for a new scan.
     var placesToStandAt: [StandPlace] = []
@@ -86,6 +89,10 @@ protocol ScanService: AnyObject {
     var coverageOverlay: CoverageSnapshot? { get }
     func setShowCoverage(_ on: Bool)
     func tag(kind: NodeKind, label: String?)
+    /// Tag a staircase or lift, with what the volunteer could see: which way it goes, where the handrail
+    /// is, roughly how many steps. ARKit's mesh classification has no railing class, so this is the only
+    /// source for any of it. No default implementation on purpose - see `confirmPlace`.
+    func tagStairs(kind: NodeKind, label: String?, info: StairsInfo)
     /// "I am standing at this labelled place" while extending a map. Two of them, a few metres apart, locate
     /// the phone in the saved map without ARKit having to recognise the space. Only the live engine can act
     /// on it; the mock implements it as a no-op EXPLICITLY.

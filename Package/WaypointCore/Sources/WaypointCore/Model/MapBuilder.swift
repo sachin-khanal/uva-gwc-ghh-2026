@@ -105,10 +105,10 @@ public final class MapBuilder {
     ///   nil keeps the old behaviour: guidance falls back to an arrival radius around the point.
     @discardableResult
     public func addPOI(kind: NodeKind, label: String?, position: SIMD3<Float>,
-                       extent: RoomExtent? = nil) -> MapNode {
+                       extent: RoomExtent? = nil, stairs: StairsInfo? = nil) -> MapNode {
         let node = MapNode(
             kind: kind, label: label, position: position,
-            segmentId: segmentId, createdBy: deviceName, extent: extent)
+            segmentId: segmentId, createdBy: deviceName, extent: extent, stairs: stairs)
         map.nodes.append(node)
         if let anchor = lastBreadcrumb {
             let hazard: Hazard? = (kind == .stairs) ? .stairs : nil

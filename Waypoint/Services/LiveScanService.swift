@@ -85,6 +85,16 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
+    func tagStairs(kind: NodeKind, label: String?, info: StairsInfo) {
+        guard controller.isRunning, !isPaused else { return }
+        let before = controller.nodeCount
+        controller.tagPOI(kind: kind, label: label, stairs: info)
+        if controller.nodeCount > before {
+            tags.append(ScanTag(id: UUID(), kind: kind, label: label))
+        }
+        refresh()
+    }
+
     func tag(kind: NodeKind, label: String?) {
         guard controller.isRunning, !isPaused else { return }
         let before = controller.nodeCount
@@ -187,6 +197,7 @@ final class LiveScanService: ScanService {
             (node.label?.trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : StandPlace(id: node.id, label: $0) }
         }
         s.confirmedPlaceCount = controller.confirmedPlaceCount
+        s.knownStairwellNames = controller.knownStairwellNames
         snapshot = s
     }
 

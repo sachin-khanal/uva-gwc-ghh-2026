@@ -14,6 +14,13 @@
 import SwiftUI
 import WaypointCore
 
+/// `.sheet(item:)` needs something Identifiable; `NodeKind` is a plain enum used all over the model,
+/// so the conformance is kept local to this screen rather than bolted onto the shared type.
+private struct TaggingKind: Identifiable {
+    let kind: NodeKind
+    var id: String { kind.rawValue }
+}
+
 struct LiveScanScreen: View {
     @ObservedObject var model: ScanSessionModel
     let onSaved: (BuildingMap) -> Void
@@ -50,6 +57,17 @@ struct LiveScanScreen: View {
         .sensoryFeedback(.success, trigger: model.tagEvents)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.toast)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: panelExpanded)
+        // Stairs and lifts open a sheet instead of tagging straight away: which way they go and where
+        // the handrail is cannot be measured, and nothing else will ever supply them.
+        .sheet(item: Binding(get: { model.taggingStairs.map { TaggingKind(kind: $0) } },
+                             set: { if $0 == nil { model.taggingStairs = nil } })) { pending in
+            StairsSheet(kind: pending.kind,
+                        knownNames: model.snapshot.knownStairwellNames,
+                        onCancel: { model.taggingStairs = nil },
+                        onSave: { name, info in
+                            model.finishStairsTag(kind: pending.kind, name: name, info: info)
+                        })
+        }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .confirmationDialog("Discard this scan?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -251,7 +269,7 @@ struct LiveScanScreen: View {
 
         TagPalette(isEnabled: s.isRunning && !model.isPaused) { kind in
             labelFocused = false
-            model.tag(kind)
+            model.beginTag(kind)
         }
 
         if !s.tags.isEmpty {

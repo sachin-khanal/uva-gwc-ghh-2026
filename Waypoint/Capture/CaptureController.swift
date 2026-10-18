@@ -349,6 +349,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// A direction from the live session, in MAP coordinates (rotation only, no translation).
     private func mapDirection(_ world: SIMD3<Float>) -> SIMD3<Float> { Geometry.transformDirection(worldToMap, world) }
 
+    /// Stairwell / lift names already used in this map, offered when tagging another one. The two ends
+    /// of a staircase live in SEPARATE maps (one per floor) and are matched by NAME, so picking from a
+    /// list instead of typing is what stops "North Stairs" and "Stairwell A" never linking up.
+    var knownStairwellNames: [String] {
+        guard let builder else { return [] }
+        let names = builder.map.nodes
+            .filter { $0.kind == .stairs || $0.kind == .elevator }
+            .compactMap { $0.label?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
     /// The labelled places in the map being extended, for the volunteer to pick from. Empty when this
     /// is not an extension.
     var placesToStandAt: [MapNode] {
@@ -432,7 +444,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     /// Drops a tagged node ~1 m in front of the camera (on the floor plane of the camera height).
-    func tagPOI(kind: NodeKind, label: String?) {
+    func tagPOI(kind: NodeKind, label: String?, stairs: StairsInfo? = nil) {
         guard canRecord, let builder, let t = latestCameraTransform else { return }
         let pos = Geometry.translation(of: t)
         var fwd = Geometry.cameraForward(of: t)
@@ -442,7 +454,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         // result carried into the map frame afterwards; everything stored on the node is map frame.
         let extent = kind == .room ? roomExtent(standingAt: pos)?.transformed(by: worldToMap) : nil
         let node = builder.addPOI(kind: kind, label: label, position: mapPoint(pos + ahead),
-                                  extent: extent)
+                                  extent: extent, stairs: stairs?.isEmpty == true ? nil : stairs)
         nodeCount = builder.map.nodes.count
         let area = node.extent.map { String(format: " (%.0f m2)", $0.areaSquareMeters) } ?? ""
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")\(area)")

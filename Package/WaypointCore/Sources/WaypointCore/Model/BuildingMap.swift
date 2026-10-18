@@ -15,10 +15,12 @@ import Foundation
 ///  * 2 - identical shape, plus `schemaVersion` written explicitly (CONTRACT CHANGE 2026-10-17).
 ///  * 3 - adds the OPTIONAL `MapNode.extent` (room floor area), `extent.heightMeters`, `meshAssets` (3D surface files, shared with the web viewer) and
 ///        `keyframes` (visual fingerprints for faster relocalization, from navigation-overhaul). All optional: older maps simply have none.
+///  * 4 - adds the OPTIONAL `MapNode.stairs` (direction up/down/both, railing side, step count) for `.stairs` and `.elevator` nodes
+///        (CONTRACT CHANGE 2026-10-18). Optional, so every older map decodes unchanged with none; nothing else moved.
 /// To add version N+1: bump `current`, add a spec + fixture (docs/map-format/), extend `migrate`, add a test in MapSchemaTests,
 /// update tools/validate_map.py (`CURRENT_SCHEMA`), and announce CONTRACT CHANGE in the WORKLOG.
 public enum MapSchema {
-    public static let current = 3
+    public static let current = 4
     public static let oldestReadable = 1
 
     /// Upgrades a decoded map's format number step by step. Shapes 1 and 2 are identical, so this only advances the number;
