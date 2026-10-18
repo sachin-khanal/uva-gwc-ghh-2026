@@ -34,7 +34,7 @@ export async function runGeometryChecks(sample) {
     assert((await verifyMesh(asset,bytes)).vertices.length===3);
     let failed=false;try{await verifyMesh({...asset,sha256:"0".repeat(64)},bytes);}catch{failed=true;}assert(failed);
   });
-  for(const schemaVersion of [0,4,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
+  for(const schemaVersion of [0,5,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
     let failed=false;try{validateMap({...sample,schemaVersion});}catch{failed=true;}assert(failed);
   });
   await check("Schema 3 rejects malformed room and mesh fields",()=>{

@@ -159,7 +159,7 @@ def round_trip(a, b, url, key):
         return n
 
     n1, n2, n3 = node(0, "seg1"), node(-1.5, "seg1", "Test Room 1"), node(-3, "seg1")
-    m = {"id": mid, "name": f"ZZ CONNECTION TEST {stamp} (safe to delete)", "version": 1, "schemaVersion": 3,
+    m = {"id": mid, "name": f"ZZ CONNECTION TEST {stamp} (safe to delete)", "version": 1, "schemaVersion": 4,
          "nodes": [n1, n2, n3],
          "edges": [{"from": n1["id"], "to": n2["id"], "distance": 1.5}, {"from": n2["id"], "to": n3["id"], "distance": 1.5}]}
     scan_a = os.urandom(4096)

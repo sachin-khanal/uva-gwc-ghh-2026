@@ -1,5 +1,59 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Merged `stairs-multifloor` into `main`, and found four things a green build could not see   [tags: BUILD, CONTRACT CHANGE, DOCS]
+Area: shared, plus U3's `web/` and `tools/` (see the note below - I edited another owner's files).
+`main` + `stairs-multifloor` (21 commits). `origin/main` had NOT moved since the branch point, so there were no
+textual conflicts and nothing of U1/U3's to reconcile. `make gen` run; a CLEAN `make test` (spm scratch deleted
+first, after this morning's stale-build incident) -> **427 tests, 0 failures**; `make typecheck` OK (65 app
+files); `make check` -> BUILD SUCCEEDED.
+
+THEN LOOKED FOR WHAT A PASSING BUILD CANNOT SEE, because the branch contains a CONTRACT CHANGE (format 3 -> 4)
+and the format is shared with code `make test` never compiles. Four problems, all mine, all real:
+1. **`web/router.js:64` refused `schemaVersion > 3`** - so U3's web viewer would have REJECTED EVERY MAP the app
+   now writes, with "unsupported schemaVersion; update the viewer." Fixed to accept 4. The viewer ignores the
+   `stairs` object, so accepting it costs nothing.
+2. **`web/geometry-tests.js` asserted that format 4 is INVALID** (`for(const schemaVersion of [0,4,...])`). It
+   passed, while encoding the opposite of the truth. Now asserts it for 5.
+3. **`tools/test_validate_map.py` asserted the same thing** and FAILED once `CURRENT_SCHEMA` became 4. I bumped
+   the validator on the branch and never ran its own tests. Now checks `map-v4.json` decodes and uses 5 as the
+   "newer than this tool" case.
+4. **`docs/MAP_FORMAT.md` had no format 4 section**, although the checklist inside `BuildingMap.swift` says to
+   add one. Written, with format 3 struck through as "readable; was current until format 4" per rule 11.
+   (`tools/supabase_check.py` also still wrote `schemaVersion: 3` in its connection probe; bumped. Harmless,
+   since 3 stays readable, but it would have misled the next person.)
+
+THE UNDERLYING PROBLEM, which is worth more than the four fixes: **nothing runs the non-Swift tests.** `make
+test` only builds WaypointCore, and the single GitHub workflow (`docs-check.yml`) checks documentation. So the
+map validator's tests and the web viewer's tests are run only when somebody remembers to. That is precisely how
+four separate places came to pin "format 4 is invalid" while the app was busy writing format 4.
+Added `make test-tools` (python validator + node web tests, each SKIPPED with a message when the tool is not
+installed, because U3 and U4 are on Windows) and `make test-all` = `test` + `test-tools`. `make test` itself is
+UNCHANGED: it is named in AGENTS.md section 5 and in the pre-commit hook's messaging, and changing what a
+contract command does mid-hackathon for four people is its own kind of bug.
+Current state of `make test-tools`: validator 16/16 OK; web 45/46, the one failure being
+"WebGL renders captured surfaces: document is not defined" - PRE-EXISTING and unrelated, that test needs a DOM
+and plain `node` has none.
+
+AGENTS.md rule 2 (stay in your lane): `web/router.js`, `web/geometry-tests.js`, `tools/test_validate_map.py` and
+`tools/supabase_check.py` are U3's. I edited them because MY contract change broke them, which is the "fix a
+compile error" case - a viewer that rejects every map is the web equivalent. Flagged here and in `MAP_FORMAT.md`
+so U3 can review rather than discover it.
+Verified: `make gen`; a CLEAN `make test` (spm scratch deleted first) -> **427 tests, 0 failures**;
+`make typecheck` OK (65 app files); `make check` -> BUILD SUCCEEDED; `make test-tools` -> map validator 16/16 OK,
+web viewer 45/46 (the one failure pre-existing and unrelated: "WebGL renders captured surfaces: document is not
+defined", which needs a DOM that plain `node` has not); `python3 tools/validate_map.py docs/map-format/map-v4.json
+Samples/rice-hall-sample.json` -> PASS, PASS.
+NOT verified: nothing from this merge has been run on a phone since the merge. The web viewer was not opened
+against a real format-4 map; only its validator path was exercised.
+Open / handoff:
+1. U1/U3 decision: should `test-tools` go into CI? There is no workflow that runs any test today.
+2. The `stairs` object is accepted but INSPECTED by nobody outside the app - same position `keyframes` has been
+   in since format 3. If a hostile map matters, the limits belong in `validate_map.py`, `router.js` and SQL.
+3. Still unbuilt from this branch's own plan: the stairs hand-off (announce entering, guide through, announce
+   leaving) and any notion of "up" in guidance.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — You could arrive at a room upstairs by standing underneath it   [tags: BUG]
 Area: B (routing/guidance). Branch `stairs-multifloor`. Anmol: "cut it to within 1.5 up or down from the
 altitude of where it was recorded because we can reach a room upstairs by being directly below it."

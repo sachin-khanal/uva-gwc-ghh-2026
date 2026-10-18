@@ -22,9 +22,10 @@ class MapValidationTests(unittest.TestCase):
 
     def test_schema_versions(self):
         formats = Path(__file__).resolve().parents[1] / "docs/map-format"
-        for name in ("map-v1.json", "map-v2.json", "map-v3.json"):
+        for name in ("map-v1.json", "map-v2.json", "map-v3.json", "map-v4.json"):
             validate(json.loads((formats / name).read_text(encoding="utf-8")))
-        for bad in (0, -1, 4, 2.0, "2", True, None):
+        # 5 stands in for "newer than this tool"; 4 is the current format (stairs metadata, 2026-10-18).
+        for bad in (0, -1, 5, 2.0, "2", True, None):
             data = copy.deepcopy(self.data)
             data["schemaVersion"] = bad
             with self.assertRaises(ValueError, msg=repr(bad)):

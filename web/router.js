@@ -61,7 +61,9 @@ export function validateMap(input) {
   if (!map || !uuid(map.id) || typeof map.name !== "string" || !Number.isSafeInteger(map.version)
       || !Array.isArray(map.nodes) || !Array.isArray(map.edges)) fail("missing map fields.");
   const schema = map.schemaVersion ?? 1;
-  if (!Number.isInteger(schema) || schema < 1 || schema > 3) fail("unsupported schemaVersion; update the viewer.");
+  // Format 4 adds the optional per-node `stairs` object (direction / railings / stepCount). The viewer
+  // ignores it, so accepting 4 costs nothing; refusing it rejected every map the app writes.
+  if (!Number.isInteger(schema) || schema < 1 || schema > 4) fail("unsupported schemaVersion; update the viewer.");
   const finite = (v) => typeof v === "number" && Number.isFinite(f(v));
   const vector = (v, count) => Array.isArray(v) && v.length === count && v.every(finite);
   if (map.nodes.length > 5000 || map.edges.length > 20000) fail("too many nodes or connections.");
