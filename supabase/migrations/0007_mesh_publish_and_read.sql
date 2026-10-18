@@ -14,6 +14,8 @@
 --          is the user who contributed that asset's segment (segment_owners, set by extend_building from the real caller). The second
 --          condition matters because the FIRST publication of a building stores the incoming JSON as is, so a forged meshAssets entry
 --          could otherwise point the rule at someone else's folder (automated security review 2026-10-18).
+-- First publication: a trigger strips `meshAssets` from a building's first-publication JSON, so entries exist only if
+--          publish_mesh_assets validated them (the review of 2026-10-18 found they could otherwise be forged and fill the quota).
 -- Quota:   limits are PER CONTRIBUTOR (25 files / 40 MB each) as well as per building (100 files / 80 MB), so one user cannot fill the
 --          building's list. A listed file must already exist in storage with exactly the claimed size (upload first, then list).
 --          `remove_mesh_asset(building, id)` lets the contributor delist their own entry.
@@ -103,8 +105,30 @@ create policy canonical_meshes_read on storage.objects for select to authenticat
          jsonb_array_elements(case when jsonb_typeof(c.map_json->'meshAssets') = 'array' then c.map_json->'meshAssets' else '[]'::jsonb end) a
     where objects.name = lower(a->>'storageOwner') || '/' || c.map_id::text || '/' || lower(a->>'id') || '.obj'
       and lower(coalesce(c.segment_owners->>(a->>'segmentId'), '')) = lower(a->>'storageOwner')
+      -- the file must STILL have the size that was listed: a file swapped for a different size after listing is not served
+      -- (same-size swaps are caught by the viewer, which checks the listed SHA-256 before drawing anything)
+      and (objects.metadata->>'size')::numeric = (a->>'byteCount')::numeric
   )
 );
+
+-- Only publish_mesh_assets may ADD mesh entries. `extend_building` stores the incoming JSON as is on a building's FIRST publication, so
+-- strip any meshAssets there (they would be unvalidated, would count toward the shared quota, and could name another user's folder).
+create or replace function public.strip_incoming_mesh_assets() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.map_json := new.map_json - 'meshAssets';
+  return new;
+end $$;
+drop trigger if exists strip_incoming_mesh_assets on public.canonical_buildings;
+create trigger strip_incoming_mesh_assets before insert on public.canonical_buildings
+  for each row execute function public.strip_incoming_mesh_assets();
+
+-- One-time cleanup: drop entries that were not added through publish_mesh_assets (their storageOwner is not the segment's contributor).
+update public.canonical_buildings c
+   set map_json = c.map_json || jsonb_build_object('meshAssets',
+         (select coalesce(jsonb_agg(m), '[]'::jsonb) from jsonb_array_elements(c.map_json->'meshAssets') m
+           where lower(coalesce(c.segment_owners->>(m->>'segmentId'), '')) = lower(m->>'storageOwner')))
+ where jsonb_typeof(c.map_json->'meshAssets') = 'array';
 
 -- Delist your own mesh (the file stays in your folder; delete it with the Storage API if wanted).
 create or replace function public.remove_mesh_asset(building uuid, asset_id uuid)

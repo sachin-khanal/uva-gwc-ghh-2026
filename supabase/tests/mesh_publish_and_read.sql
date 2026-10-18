@@ -88,27 +88,47 @@ end $$;
 
 -- storage read rule: B can read exactly the listed path
 reset role;
-insert into storage.objects(bucket_id, name) values
-  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/66666666-6666-4666-8666-666666666666.obj'),
-  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj.evil'),
-  ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj');
--- FORGED entry: building 2 is B's, but its first publication named A as the storageOwner of B's segment. B must not be able to
+insert into storage.objects(bucket_id, name, metadata) values
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/66666666-6666-4666-8666-666666666666.obj', '{"size": 1000}'),
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj.evil', '{"size": 1000}'),
+  ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj', '{"size": 1000}');
+-- A first publication carrying meshAssets has them stripped by the trigger.
+insert into public.canonical_buildings(map_id, owner, name, version, map_json, segment_owners) values
+  ('77777777-0000-4000-8000-000000000007', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ZZ STRIP', 1,
+   '{"schemaVersion":3,"id":"77777777-0000-4000-8000-000000000007","name":"ZZ STRIP","version":1,"nodes":[],"edges":[],"meshAssets":[]}', '{}');
+do $$ begin
+  assert not (select map_json ? 'meshAssets' from public.canonical_buildings where map_id = '77777777-0000-4000-8000-000000000007'), 'meshAssets stripped on first publication';
+  raise notice 'PASS meshAssets stripped on first publication';
+end $$;
+
+-- FORGED entry (legacy row that predates the trigger): building 2 is B's, but its first publication named A as the storageOwner of B's segment. B must not be able to
 -- read A's file through it.
 insert into public.canonical_buildings(map_id, owner, name, version, map_json, segment_owners) values
   ('99999999-9999-4999-8999-999999999999', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ZZ FORGED', 1,
    '{"schemaVersion":3,"id":"99999999-9999-4999-8999-999999999999","name":"ZZ FORGED","version":1,
-     "nodes":[{"id":"88888888-8888-4888-8888-888888888888","segmentId":"segX","kind":"corridor","createdBy":"x","position":[0,0,0]}],"edges":[],
-     "meshAssets":[{"id":"aaaaaaaa-0000-4000-8000-000000000001","segmentId":"segX","format":"obj","coordinateFrame":"map","byteCount":10,
-       "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","boundsMin":[0,0,0],"boundsMax":[1,1,1],
-       "storageOwner":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}]}',
+     "nodes":[{"id":"88888888-8888-4888-8888-888888888888","segmentId":"segX","kind":"corridor","createdBy":"x","position":[0,0,0]}],"edges":[]}',
    '{"segX":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}');
-insert into storage.objects(bucket_id, name) values
-  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/99999999-9999-4999-8999-999999999999/aaaaaaaa-0000-4000-8000-000000000001.obj');
+update public.canonical_buildings set map_json = map_json || '{"meshAssets":[{"id":"aaaaaaaa-0000-4000-8000-000000000001","segmentId":"segX","format":"obj","coordinateFrame":"map","byteCount":10,
+       "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","boundsMin":[0,0,0],"boundsMax":[1,1,1],
+       "storageOwner":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}]}'::jsonb
+ where map_id = '99999999-9999-4999-8999-999999999999';
+insert into storage.objects(bucket_id, name, metadata) values
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/99999999-9999-4999-8999-999999999999/aaaaaaaa-0000-4000-8000-000000000001.obj', '{"size": 10}');
 set local role authenticated;
 do $$ declare n int; begin
   select count(*) into n from storage.objects where bucket_id = 'meshes';
   assert n = 1, 'B should read exactly the listed mesh, got ' || n;
   raise notice 'PASS other user reads only the listed mesh path, forged owner entry unreadable (% readable)', n;
+end $$;
+
+-- a listed file whose stored size no longer matches the listing is not served (swapped after listing)
+reset role;
+update storage.objects set metadata = '{"size": 999}' where name like '%/22222222-2222-4222-8222-222222222222.obj' and bucket_id = 'meshes';
+set local role authenticated;
+do $$ declare n int; begin
+  select count(*) into n from storage.objects where bucket_id = 'meshes';
+  assert n = 0, 'a swapped (different size) file must not be readable, got ' || n;
+  raise notice 'PASS swapped file not served';
 end $$;
 
 rollback;
