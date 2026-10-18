@@ -69,6 +69,9 @@ final class MockScanService: ScanService {
     func pause() { isPaused = true }
     func resume() { isPaused = false }
 
+    /// The mock has no saved map to stand in, so there is nowhere to confirm standing at.
+    func confirmPlace(id: UUID) {}
+
     func tag(kind: NodeKind, label: String?) {
         guard snapshot.isRunning else { return }
         let right = SIMD3<Float>(-walkerForward.z, 0, walkerForward.x)

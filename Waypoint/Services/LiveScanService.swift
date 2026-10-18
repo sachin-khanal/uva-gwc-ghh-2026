@@ -76,14 +76,17 @@ final class LiveScanService: ScanService {
         refresh()
     }
 
-    func tag(kind: NodeKind, label: String?) {
-        guard controller.isRunning, !isPaused else { return }
-
     /// Locating the phone in the saved map by hand; see `CaptureController.confirmPlace`.
+    /// NOT gated on `isPaused` or `canRecord`: recording being blocked is the whole reason the volunteer
+    /// is being asked to confirm where they are standing.
     func confirmPlace(id: UUID) {
         guard let node = controller.placesToStandAt.first(where: { $0.id == id }) else { return }
         controller.confirmPlace(node)
+        refresh()
     }
+
+    func tag(kind: NodeKind, label: String?) {
+        guard controller.isRunning, !isPaused else { return }
         let before = controller.nodeCount
         controller.tagPOI(kind: kind, label: label)
         // tagPOI updates nodeCount synchronously when the tag was accepted.

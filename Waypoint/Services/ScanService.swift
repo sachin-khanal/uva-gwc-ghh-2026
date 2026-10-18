@@ -87,7 +87,14 @@ protocol ScanService: AnyObject {
     func setShowCoverage(_ on: Bool)
     func tag(kind: NodeKind, label: String?)
     /// "I am standing at this labelled place" while extending a map. Two of them, a few metres apart, locate
-    /// the phone in the saved map without ARKit having to recognise the space. Only the live engine can.
+    /// the phone in the saved map without ARKit having to recognise the space. Only the live engine can act
+    /// on it; the mock implements it as a no-op EXPLICITLY.
+    ///
+    /// Deliberately has NO default implementation in the extension below. A no-op default here silently
+    /// swallowed a real bug: `LiveScanService`'s version was accidentally nested inside another method, so
+    /// it was not the protocol witness, the default ran instead, and tapping a place did nothing at all -
+    /// with no compiler complaint (device report 2026-10-18). Requiring every conformer to say what it does
+    /// turns that class of mistake back into a build error.
     func confirmPlace(id: UUID)
     func dismissSuggestion()
     func adjustBox(by delta: Float)
@@ -103,6 +110,4 @@ struct ScanServiceError: LocalizedError {
 
 extension ScanService {
     func start(mapName: String, extending map: BuildingMap?, initialSegment: String?) { start(mapName: mapName) }
-    /// The mock has no saved map to stand in, so confirming a place does nothing.
-    func confirmPlace(id: UUID) {}
 }

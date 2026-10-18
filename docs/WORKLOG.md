@@ -1,5 +1,35 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Tapping a place did nothing: the method was nested inside another one   [tags: BUG]
+Area: U3 (scanner services). Branch `map-extension`. Anmol: "pressing an option doesnt do anything."
+
+CAUSE, and it is entirely self-inflicted: in the previous block I inserted `LiveScanService.confirmPlace(id:)`
+with a Python regex whose body pattern (`\{[^}]*\}`) stopped at the FIRST closing brace - the one ending
+`guard controller.isRunning, !isPaused else { return }`. So the new method was spliced INTO the middle of
+`tag(kind:label:)` and became a NESTED (local) function. That is perfectly legal Swift, so `make typecheck` and
+`make check` both passed and nothing looked wrong. But a local function is not a protocol witness: calls through
+`ScanService` resolved to the no-op default in the protocol extension, and the tap did exactly nothing.
+`tag(...)` itself was unaffected - a local `func` declaration does not alter control flow - so tagging kept
+working and there was no other symptom to notice.
+
+Fixed:
+* `Waypoint/Services/LiveScanService.swift`: `confirmPlace(id:)` moved out to be a real method, and it now calls
+  `refresh()` like every other mutating method on this adapter (the version I wrote did not, so even once
+  dispatched it would have waited a run-loop turn for the screen to catch up).
+* `Waypoint/Services/ScanService.swift`: the no-op DEFAULT for `confirmPlace(id:)` is REMOVED. It is what turned a
+  missing implementation into silence instead of a build error. Every conformer must now say what it does.
+* `Waypoint/Services/MockScanService.swift`: explicit no-op, with the reason (it has no saved map to stand in).
+
+Verified: `make test` -> **363 tests, 0 failures**. `make typecheck` OK (64 app files). `make check` ->
+BUILD SUCCEEDED. Note that typecheck and check ALSO passed with the bug present, which is the point of the
+protocol change above - the build can no longer tell us this particular lie.
+NOT verified: UNVERIFIED ON DEVICE. Whether tapping a place now aligns and attaches has still not been seen
+working by anyone.
+Lesson for other agents: do not insert Swift methods with a brace-counting regex. `[^}]*` stops at the first
+inner brace, and the result is a nested function that compiles silently. Use an exact anchored string edit.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — The "stand at a labelled place" picker was wired into the wrong screen, and was unreachable anyway   [tags: BUG]
 Area: U3 (scanner UI) + A (capture). Branch `map-extension`.
 Anmol, trying it on the phone: "when i click extend a map ... i can scan around but i dont see how to see if im at a
