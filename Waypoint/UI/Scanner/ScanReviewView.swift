@@ -106,12 +106,12 @@ struct ScanReviewView: View {
         }
         .background(Theme.screenBackground)
         .fullScreenCover(isPresented: $showModel) {
-            ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { showModel = false })
+            ModelViewerView(map: map, urls: app.store.modelURLs(mapId: map.id, segmentIds: map.segmentIds), onClose: { showModel = false })
         }
-        .onAppear { modelReady = app.store.hasModel(mapId: map.id) }
+        .onAppear { modelReady = app.store.hasModel(mapId: map.id, segmentIds: map.segmentIds) }
         .onReceive(modelPoll) { _ in
             guard !modelReady else { return }
-            modelReady = app.store.hasModel(mapId: map.id)
+            modelReady = app.store.hasModel(mapId: map.id, segmentIds: map.segmentIds)
         }
         .alert("Rename place", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Label", text: $renameText)
@@ -207,7 +207,7 @@ struct ScanReviewView: View {
         .task {
             // A scan that was just saved is still being exported: look for the file for up to a minute.
             for _ in 0..<60 {
-                if app.store.hasModel(mapId: map.id) { modelReady = true; break }
+                if app.store.hasModel(mapId: map.id, segmentIds: map.segmentIds) { modelReady = true; break }
                 if !savedRecently { break } // an older scan: nothing is coming
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }

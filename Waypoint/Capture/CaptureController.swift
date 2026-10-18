@@ -630,12 +630,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                         // place (device report 2026-10-18: the viewer showed only the new stairwell).
                         // Keeping the existing model is the lesser wrong until the mesh is transformed
                         // and stored per segment.
-                        if self.alignedByHand {
-                            self.modelStatus = "3D model kept from the original scan (the new part is not in it yet)."
-                            Log.capture.info("hand-aligned extension: model export skipped, existing model kept")
-                        } else {
-                            self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
-                        }
+                        self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id,
+                                         segmentId: savedSegment, worldToMap: self.worldToMap)
                         self.stop()
                         Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data?.count ?? 0) bytes")
                     }
@@ -651,14 +647,25 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     /// Builds the 3D model (USDZ) next to the saved map on a background queue. A failure never affects the saved map.
-    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID) {
+    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID,
+                            segmentId: String, worldToMap: simd_float4x4) {
         guard !anchors.isEmpty else { modelStatus = nil; return }
         modelStatus = "Building 3D model…"
-        let url = store.modelURL(mapId: mapId)
+        // This segment's OWN file, in the MAP frame. Writing one file per map meant an extension
+        // replaced the whole building with just the new part, and writing session-frame vertices put
+        // that part in the wrong place (device report 2026-10-18).
+        let url = store.modelURL(mapId: mapId, segmentId: segmentId)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let message: String
             do {
-                let report = try MeshExporter.export(anchors: anchors, box: box, to: url)
+                // The crop box is measured in the SESSION frame. Once the mesh is carried into the map
+                // frame the two no longer agree, and cropping with it would delete the whole mesh. A
+                // hand-aligned extension therefore exports UNCROPPED - a bigger file, but the geometry
+                // is there and in the right place. (Transforming the box is the better fix; it needs
+                // `OrientedBox` to gain a transform and is not worth doing mid-testing.)
+                let aligned = worldToMap != matrix_identity_float4x4
+                let report = try MeshExporter.export(anchors: anchors, box: aligned ? nil : box,
+                                                     to: url, worldToMap: worldToMap)
                 let size = ByteCountFormatter.string(fromByteCount: Int64(report.fileBytes), countStyle: .file)
                 message = "3D model saved (\(size), \(report.triangles.formatted()) triangles)"
                 Log.capture.info("model exported: \(report.fileBytes) bytes, \(report.triangles) triangles, cell=\(report.clusterCellSize.map { String($0) } ?? "none"), fits=\(report.fitsBudget)")

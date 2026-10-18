@@ -106,7 +106,7 @@ private struct ScanningView: View {
             .background(.regularMaterial)
         }
         .fullScreenCover(item: $viewingModel) { map in
-            ModelViewerView(map: map, url: app.store.modelURL(mapId: map.id), onClose: { viewingModel = nil })
+            ModelViewerView(map: map, urls: app.store.modelURLs(mapId: map.id, segmentIds: map.segmentIds), onClose: { viewingModel = nil })
         }
     }
 
@@ -222,7 +222,7 @@ private struct ScanningView: View {
                         if let status = controller.modelStatus {
                             Text(status).font(.footnote).accessibilityIdentifier("scan.modelStatus")
                         }
-                        if app.store.hasModel(mapId: saved.id) {
+                        if app.store.hasModel(mapId: saved.id, segmentIds: saved.segmentIds) {
                             Button("View 3D model") { viewingModel = saved }.font(.footnote).accessibilityIdentifier("scan.viewModel")
                         }
                     }

@@ -34,14 +34,18 @@ enum MeshExporter {
     }
 
     /// World-space triangles of all anchors, concatenated.
-    static func extract(anchors: [ARMeshAnchor]) -> IndexedMesh {
+    /// - Parameter worldToMap: carries the vertices into the MAP frame. Identity when the session frame
+    ///   already IS the map frame (ARKit relocalized, or a fresh scan); a hand-aligned extension needs
+    ///   the real transform, because `MeshAsset.coordinateFrame` claims "map" and the pins drawn on the
+    ///   model come from map-frame nodes (device report 2026-10-18).
+    static func extract(anchors: [ARMeshAnchor], worldToMap: simd_float4x4 = matrix_identity_float4x4) -> IndexedMesh {
         var mesh = IndexedMesh()
         for anchor in anchors {
             let geometry = anchor.geometry
             let vertices = geometry.vertices, faces = geometry.faces
             guard vertices.count > 0, faces.count > 0, faces.indexCountPerPrimitive == 3, faces.bytesPerIndex == 4 else { continue }
             let base = UInt32(mesh.vertices.count)
-            let m = anchor.transform
+            let m = worldToMap * anchor.transform
             let vbase = vertices.buffer.contents().advanced(by: vertices.offset)
             for i in 0..<vertices.count {
                 let f = vbase.advanced(by: i * vertices.stride).assumingMemoryBound(to: Float.self)
@@ -57,8 +61,10 @@ enum MeshExporter {
     }
 
     /// Full export. `box` crops stray geometry; nil keeps everything.
-    static func export(anchors: [ARMeshAnchor], box: OrientedBox?, to url: URL, budgetBytes: Int = ExportBudget.defaultBudgetBytes) throws -> Report {
-        var mesh = extract(anchors: anchors)
+    static func export(anchors: [ARMeshAnchor], box: OrientedBox?, to url: URL,
+                       worldToMap: simd_float4x4 = matrix_identity_float4x4,
+                       budgetBytes: Int = ExportBudget.defaultBudgetBytes) throws -> Report {
+        var mesh = extract(anchors: anchors, worldToMap: worldToMap)
         if let box { mesh = MeshCrop.crop(mesh, to: box) }
         guard !mesh.isEmpty else { throw ExportError(message: "There was no mesh to export.") }
         let fitted = MeshDecimator.fit(mesh, budgetBytes: budgetBytes)

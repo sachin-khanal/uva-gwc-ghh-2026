@@ -1,5 +1,48 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — The route went STRAIGHT UP the stairwell, and extensions still missing from the 3D viewer   [tags: BUG, DEVICE]
+Area: B (routing) + A (export). Branch `stairs-multifloor`. Extending and navigating both work now; these are
+the two faults left from that walk.
+
+1. "IT TELLS ME TO GO STRAIGHT UP INSTEAD OF MAPPING THRU STAIRS."
+`RouteSimplifier.perpendicularDistance` measures HORIZONTALLY - it drops `y` entirely (`SIMD2(point.x,
+point.z)`). That is right for a corridor: you are not off-route for holding the phone higher. It is
+catastrophic for a staircase, and worst for a SWITCHBACK like Rice Hall's rear stairs, which climbs three
+metres while returning to almost the same x,z. In plan view the whole flight is one small cluster, so both
+simplifier passes (detour removal at 1.2 m, thinning at 0.6 m) deleted it, and the route became a single
+segment from the bottom step to the top - a straight line through the floor.
+Fixed: `simplify` now protects any node whose height differs from a neighbour by `verticalKeepMeters` (0.1 m -
+well above the wobble of a phone carried along a flat corridor, well below one stair tread at ~0.17 m), using
+the `keep` mechanism that already protects tagged, labelled and hazard-endpoint nodes. Flat corridors thin
+exactly as before.
+NOT fixed, and the next thing for stairs: guidance still has no idea what "up" means. `TurnSpeech` works from a
+horizontal bearing, and a vertical stretch has almost none, so the user is told "Continue straight" while they
+are meant to climb. That is Anmol's design - announce the stairs from the map, hand off, resume at the top -
+and it is still unbuilt.
+
+2. EXTENSIONS STILL MISSING FROM THE 3D VIEWER. Earlier today a hand-aligned extension was made to SKIP the
+export, because it would have overwritten the building's model with the new part alone, in the wrong frame.
+That stopped the damage but left the new area invisible. Properly fixed now:
+  * `MeshExporter.extract/export` take a `worldToMap` and bake it into the vertex transform, so the mesh is
+    written in the MAP frame that `MeshAsset.coordinateFrame` has always claimed.
+  * `MapStore.modelURL(mapId:segmentId:)` - ONE FILE PER SEGMENT. The old one-per-map name is still read, so
+    models already on phones keep working, and `modelURLs`/`hasModel(mapId:segmentIds:)` collect them all.
+  * `ModelViewerView` loads EVERY segment's file into one scene; they share the map frame, so adding them lines
+    them up. The size readout now totals all parts, and a part that fails to open is logged and skipped rather
+    than failing the whole view.
+  * The crop box is measured in the SESSION frame, so a hand-aligned export runs UNCROPPED - cropping a
+    map-frame mesh with a session-frame box would delete all of it. Bigger file, correct geometry.
+
+Verified: `make test` -> **407 tests, 0 failures** (404 before; 3 new: a switchback staircase keeps its steps,
+a flat corridor still thins, and phone-height wobble does not protect every node). `make typecheck` OK (65 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. In particular nobody has yet seen an extension appear in the viewer, and
+the 0.1 m vertical threshold has not met a real staircase.
+Open: transforming `OrientedBox` would let a hand-aligned export be cropped again (smaller files). Existing maps
+keep their old single model file; their extensions will only appear after the next save.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — The ARKit extension path was unobservable, so it also could not be debugged   [tags: BUG, DEVICE]
 Area: A (capture). Branch `stairs-multifloor`.
 Anmol: "the arkit start relocalization just doesn't work, or if it does i just cant tell cuz nothing is said so
