@@ -1,6 +1,12 @@
 # Work log
 
 
+## 2026-10-18 - Codex for U3 - Integrate audit branch without losing viewer work
+User explicitly requested resolving every reported branch conflict on U3. Isolated integrate-all-u3 checkout from origin/U3 f63206a. Merged origin/chore/audit-2026-10-18; documentation conflicts resolved by retaining both histories with dated notes. Audit code/security changes retained. Files: incoming audit changes plus docs/{MODULES,ROADMAP,TESTING,WORKLOG}. Other branches still to integrate.
+Verified: conflict marker scan and whitespace check before commit. NOT verified: native tests/typecheck require Mac, SQL not applied/live database unchanged, phone behavior UNVERIFIED ON DEVICE. Migration 0006 numbering collision will be resolved after mesh publication integration. No push/main update in this intermediate merge.
+
+
+
 ## 2026-10-18 - Codex for U3 - Remove unrequested viewer slogans
 Files edited: web/index.html and docs/WORKLOG.md in open workspace and personal U3 checkout, keeping preview/source aligned. Removed 'Small steps. More independence.' footer span and 'A LITTLE PLANNING GOES A LONG WAY' eyebrow. Plan your route heading retained. No other behavior changed; no commit/push.
 Verified: targeted source check confirms both exact slogans absent and route heading retained; git diff --check PASS. Commands: rg, targeted Python text edits, diff check. No runtime/native checks needed for static copy removal; no native code touched.
@@ -95,6 +101,26 @@ Commands: git fetch/merge-tree/worktree/merge, source comparisons, Python unitte
 Verified: Python 22/22 PASS; integrated browser logic/GPU/mock checks 46/46 PASS and UI 16/16 PASS. No conflict markers remain. First-floor files absent. Whitespace check PASS after formatting-only trailing-space cleanup.
 NOT verified: make test and make typecheck both attempted and FAILED TO START (make/Swift/Xcode unavailable on Windows). New Swift integration tests and updated iOS capture have NOT compiled/run here. New SQL keyframe-union integration not executed; no live DB changes. All physical AR/OBJ/USDZ/mesh roundtrip behavior UNVERIFIED ON DEVICE. Main push withheld pending required Mac checks. Integration is a conflict-resolution candidate, not a release verification claim.
 
+
+
+**Update 2026-10-18 (Codex, audit integration):** Also retain the incoming audit notes below.
+
+## 2026-10-18 08:10 — Claude (agent, for Sachin) — Two security-review findings on 0006: global cap removed, per-account caps made race-proof   [tags: SECURITY]
+Area: D / U3 (SQL). Branch `chore/audit-2026-10-18`.
+Finding 1 (design flaw in my own 0006): a hard global cap of 500 buildings would let ~20 throw-away anonymous accounts (25 each) fill the library and lock EVERY real user out: it turned a cost-abuse problem into an availability one. Removed. Total growth is now bounded only by account creation speed, so captcha / rate limits on anonymous sign-ins and a size watch are required companions (documented in SECURITY.md S-1 with the monitoring query).
+Finding 2 (race): the 300-file and 25-building checks were count-then-insert, so two simultaneous requests could both pass. Fixed with a per-account `pg_advisory_xact_lock` (new `public.storage_quota_ok()` security-definer function used by the upload policy; the buildings trigger takes the same kind of lock before counting).
+Tests: `supabase/tests/abuse_limits.sql` updated (no global cap: 1025 buildings across accounts accepted; name-shape 7/7, 300-file cap exact, 25 per account) and NEW `supabase/tests/abuse_limits_race.sh` (two real database sessions at once on an account holding 299 files and 24 buildings): WITH the locks the result is 300 files / 25 buildings (cap held); with the lock lines removed (`--without-locks`) it is 301 / 26, so the test detects the race.
+Verified: the above, run in a local Postgres (supabase image, stand-in tables). `docs-sync` self-test still passes.
+NOT verified: 0006 on the LIVE project (not applied; the real `storage.objects` insert policy and `auth.uid()` behave as the stand-in only as far as the image's `auth` schema is faithful); the upload path of the real app after 0006 (names the app sends match the pattern: `<uid>/<map uuid lowercase>/<segment>.arworldmap`, checked by reading `SyncEngine.worldMapPath`, not by a live upload).
+Open problems / handoff: when the Supabase person applies 0006, run `python3 tools/supabase_check.py --write` afterwards (leaves one ZZ test building) or `-e2eCloudWrite YES` on a phone to prove uploads still work, then delete the test rows.
+
+## 2026-10-18 07:30 — Claude (agent, for Sachin) — Full re-audit of docs/config + security and privacy scan   [tags: DOCS, BUILD, SECURITY]
+Area: shared (docs, CI config, SQL). Branch `chore/audit-2026-10-18` (off main 6269746). New doc `docs/SECURITY.md` (data inventory, protections, 11 findings S-1..S-11, rules).
+Docs re-audit (mechanical + reading): no broken markdown links, no duplicate decision ids, every `make X` in the docs exists except the planned `make ipa`; STALE and fixed with strike + Update (rule 11): README / SETUP / TESTING test counts (45/57/85 -> 337, UI 5 -> 11, E2E), README repo map + docs index, AGENTS.md (new backup targets, the "selftest does not rebuild" warning, `schemaVersion` -> `MapSchema.current`), MODULES (3D export row, format row, OCR row, cloud UI row, new directories), Architecture.md (`BoundingBox.swift` -> `OrientedBox`/`CoverageGrid`), SETUP/CANONICAL_MAPS (0004-0006), ROADMAP pointer, new decisions D-046..D-050. NOT re-read line by line: Architecture.md sections 1-9, UI_PLAN.md, the 1400-line WORKLOG.
+Security/privacy scan: no keys or tokens in tracked files or in ANY commit (checked every branch); `Local.xcconfig` ignored; no plain-HTTP URLs, no ATS exceptions; Multipeer encrypted + manual accept; Keychain device-only; no token/identity logging, no `print`; camera frames never saved or sent. FINDINGS: S-1 cloud abuse (anonymous accounts can create unlimited buildings/files): `supabase/migrations/0006_abuse_limits.sql` written and tested in a local Postgres (name shape 7/7, 300-file cap exact, 25 buildings/account, 500 total), NOT applied; S-2 the repo is PUBLIC and its history contains the device id (x2), Apple ID email (x3), team id and contributors' personal emails: redacted from the current WORKLOG (a justified exception to rule 11, visible here), history untouched; S-3 `UIFileSharingEnabled` exposes all maps in the Files app in every build; S-4 default file protection; S-5/S-6 `web/index.html` hardcodes the real project URL and has no CSP (U3's files, not edited); S-7 workflow token permissions + shell interpolation: fixed (`permissions: contents: read`, env vars); S-8..S-11 accepted/open, see SECURITY.md.
+Verified: the scans above (commands in this session); local Postgres run of 0006; docs link/target/path checks; `make test`/typecheck/Python run after the edits (see below).
+NOT verified: 0006 on the live Supabase project; the workflow change on GitHub until pushed (YAML not parsed locally); whether an ARWorldMap contains recognisable imagery (not inspected); history rewrite impact (not done).
+Open problems / handoff: Sachin decides S-2 (history rewrite vs private repo), S-3 (Files-app exposure off for demo builds); Supabase person: apply 0006 and enable captcha/rate limits/spend alert; U3: S-5, S-6, keyframes limits; U2: keyframes validation.
 
 ## 2026-10-18 06:20 — Claude (agent, for Sachin) — Integrated U2's navigation-overhaul (12 commits) with main; conflicts resolved; two fixes   [tags: CONTRACT CHANGE, BUILD]
 Area: shared integration (U1 merge captain). Branch `integrate/navigation-overhaul` = main f912ef5 + origin/navigation-overhaul a107f85 (Anmol, 12 commits: keyframe relocalization with visual fingerprints OFF by default, "one move at a time" speech, sooner re-routing, route continuously, scan both directions (`CoverageTracker`), suggest a way round a blockage (`AvoidanceAdvisor`)). Cross-referenced first: main = origin/main; U3 and app-ui-workflows unchanged; Anmol pushed 3 more commits while this was being prepared (latest a107f85, minutes old).
@@ -1167,7 +1193,7 @@ Verified ON DEVICE (iPhone 16 Pro Max): `make uitest` -> 5 of 5 passed. Along th
 Scan-screen evidence (phone lying on a desk): Tracking OK, Mapping not available, Nodes 1, Mesh 0 triangles, no box; screenshot shows live (blurry) camera + HUD + controls rendered. Conclusion: our AR delegate receives frames, so the "AR view steals the session" risk is ruled out; mesh/box on a real scene is STILL UNVERIFIED (needs the phone held up in a room).
 Observed: `devicectl list devices` also lists "Neeha's iPhone" (iPhone 17, unavailable) - a teammate's phone was connected to this Mac before; a non-LiDAR iPhone 17 can be used for the no-LiDAR QA (U4 tasks) once connected.
 NOT verified: LiDAR mesh/box in a real room; audio quality; haptic feel; cloud (not configured); relocalization.
-Open for U1: hold the phone in a room and run `DEVICE=00008140-000914590E01801C make selftest-scan` (or the Scan screen by hand) -> U1.4, then U1.5/U1.6.
+Open for U1: hold the phone in a room and run `DEVICE=<device-id redacted> make selftest-scan` (or the Scan screen by hand) -> U1.4, then U1.5/U1.6.
 
 ---
 
@@ -1194,16 +1220,16 @@ Open: U1 to run `make selftest-scan` while walking (U1.4). U2 owns tuning audio 
 
 ## 2026-10-17 16:20 — Claude (agent, for Sachin) — U1.1 signing: certificate found, Team ID set, app built + installed on iPhone 16 Pro Max   [tags: BUILD]
 Area: U1 (setup)
-What happened: Sachin created the Apple Development certificate in Xcode (Personal Team, certificate under khanalsachin@icloud.com). Read the real team id from the certificate OU
-  (5S33HP2CPC) and wrote `DEVELOPMENT_TEAM` and `WAYPOINT_DEV_SUFFIX = sachin` into the git-ignored `Config/Local.xcconfig`.
+What happened: Sachin created the Apple Development certificate in Xcode (Personal Team, certificate under <apple-id redacted>). Read the real team id from the certificate OU
+  (<team-id redacted>) and wrote `DEVELOPMENT_TEAM` and `WAYPOINT_DEV_SUFFIX = sachin` into the git-ignored `Config/Local.xcconfig`.
 Doc bug found and fixed: our instructions said the team id is the "(XXXXXXXXXX)" in `security find-identity`; that value is a certificate/person id (here YN84BMTT4S) and is NOT the team id.
   Added `scripts/team-id.sh` + `make team-id`; corrected `Config/Local.xcconfig.example` (comment) and `docs/SETUP.md` (old text struck through, labelled Update).
 Verified (real device, not simulated):
 - `make doctor` all PASS, phone `connected`, Developer Mode Enabled (queried via devicectl).
-- `DEVICE=00008140-000914590E01801C make build` -> BUILD SUCCEEDED, signed with "Apple Development: khanalsachin@icloud.com", profile "iOS Team Provisioning Profile: io.github.sachin-khanal.waypoint.sachin".
+- `DEVICE=<device-id redacted> make build` -> BUILD SUCCEEDED, signed with "Apple Development: <apple-id redacted>", profile "iOS Team Provisioning Profile: io.github.sachin-khanal.waypoint.sachin".
 - `make install` -> "App installed", bundleID io.github.sachin-khanal.waypoint.sachin.
 NOT yet verified: launching. `make launch` was denied by iOS (error: "profile has not been explicitly trusted by the user"). Expected for free profiles: the developer must be trusted once on the phone
-  (Settings > General > VPN & Device Management > Apple Development: khanalsachin@icloud.com > Trust). After that U1.1 is done when the app opens and camera + local network prompts are accepted.
+  (Settings > General > VPN & Device Management > Apple Development: <apple-id redacted> > Trust). After that U1.1 is done when the app opens and camera + local network prompts are accepted.
 Note for U2-U4: use `make team-id` for your own team id; each person's Apple ID gets its own id.
 
 ---

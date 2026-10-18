@@ -33,6 +33,7 @@ make setup        # installs xcodegen (Homebrew), creates Config/Local.xcconfig,
 make test         # should print "Executed 45 tests, with 0 failures"
 make typecheck    # should print "typecheck OK"
 ```
+**Update 2026-10-18 (Claude, audit):** `make test` now prints `Executed 337 tests, with 0 failures` (the block above is fenced and cannot be struck). The Supabase steps in section 5 now go up to migration `0005` (and the optional hardening `0006_abuse_limits.sql`, see docs/SECURITY.md); `python3 tools/supabase_check.py` verifies the project.
 **Update 2026-10-17 (Claude):** in the block above, ~~"Executed 45 tests"~~ is now `Executed 85 tests, with 0 failures` (Swift) plus 9 Python tests (`python3 -B -m unittest discover -s tools -p "test_*.py"`).
 
 ## 3. Signing with a free Apple ID (one time, GUI)

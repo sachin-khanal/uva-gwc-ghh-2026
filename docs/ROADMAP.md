@@ -363,3 +363,8 @@ Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next 
 | NEW: finish gating | Finish/Save still requires ARKit `mapped` plus one labelled place; no change yet (decision pending) |
 
 **Update 2026-10-18 (Codex, U3 integration):** integrate-u3 resolves U3/main conflicts while retaining main keyframes, optional manifests, USDZ and local-save policy, and adding OBJ payload storage/cloud. Python 22 + browser 62 checks pass. Native make test/typecheck unavailable on Windows: Mac validation required before main push. First-floor demo excluded. Incoming migrations are 0006/0007/0008; earlier U3 numbering in historical notes is superseded.
+
+
+**Update 2026-10-18 (Codex, audit integration):** Also retain the incoming audit notes below.
+
+**Update 2026-10-18 (Claude, audit):** a security/privacy audit was done; findings and open items are in `docs/SECURITY.md` (cloud abuse limits S-1, personal data in the public repo S-2, Files-app exposure S-3 are the ones to act on before a demo).

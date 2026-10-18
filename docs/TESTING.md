@@ -115,11 +115,11 @@ Record the results in docs/WORKLOG.md (phone, iOS, pass/fail, the console lines)
 
 | Layer | Command | Proves | Does NOT prove |
 |---|---|---|---|
-| Unit (macOS, no phone) | `make test` (57) | all pure logic: model, validation, routing, planner rules, box math, cloud client vs a MOCK server | anything on a device |
+| Unit (macOS, no phone) | `make test` (~~57~~ **Update 2026-10-18:** 337) | all pure logic: model, validation, routing, planner rules, box math, cloud client vs a MOCK server | anything on a device |
 | Type-check / build | `make typecheck`, `make check` | the app and the UI tests compile against the iOS SDK | runtime behaviour |
 | **On-device E2E** | `make selftest-e2e` | the data path and the platform services on a REAL phone (storage, Keychain, audio engine, capabilities) | LiDAR geometry, relocalization, sound/haptic quality |
 | Simulated navigation | `make selftest-sim` | the guidance loop speaks the right cues and arrives (on the sample map) | that it sounds right |
-| UI tests on the phone | `make uitest` (5) | every main screen renders, the buttons work, HUD/status text, screenshots | motion through space |
+| UI tests on the phone | `make uitest` (~~5~~ **Update 2026-10-18:** 11) | every main screen renders, the buttons work, HUD/status text, screenshots | motion through space |
 | Scan monitor | `make selftest-scan` (needs a person to walk) | live ARKit numbers: tracking, mesh, box, fps | correctness of the mesh |
 | **Not yet automated** | - | real Supabase (SQL + RLS + anonymous auth), two-phone Multipeer, real-room relocalization, audio/haptic feel | needs: a Supabase project or local Postgres (see below), a 2nd phone, a person |
 
@@ -417,3 +417,20 @@ is only "verified" once someone has done it on a device and written it down.
 **Update 2026-10-18 (Codex, route interaction):** selecting a destination reveals its route; in walk mode it retargets travel immediately. Start route follows the selection and reports arrival. Expand map enlarges the canvas while retaining route controls. Browser checks now 51 logic/GPU + 22 UI PASS, including a complete synthetic trip to arrival; actual building geometry/physical routing remains unverified.
 
 **Update 2026-10-18 (Codex, clarified close-up):** layout retained; walking uses a wider perspective, gentler bounded zoom, and arrival just inside the doorway. Inferred rooms have full 2.8 m walls and ceilings during walking, with cutaway overview. Selected path sits on floor; unrelated graph/leader lines removed and wall-hidden labels suppressed only from the current view. All saved names remain in the complete list. 53 logic/GPU + 22 UI checks PASS. Dimensions remain estimates.
+
+
+**Update 2026-10-18 (Codex, audit integration):** Also retain the incoming audit notes below.
+
+## **Update 2026-10-18 (Claude, audit):** Current reference runs (all on an iPhone 16 Pro Max, simulated or headless unless noted)
+
+| Check | Result | What it proves / does not prove |
+|---|---|---|
+| `make test` | 337 pass | all pure logic incl. map format 1-3, extents/meshAssets validation, share-size policy, contextual guidance, coverage grid, mesh decimator, route memory, U2's keyframes + avoidance |
+| `python3 -m unittest discover -s tools` | 16 pass | validator rules (extents, meshAssets, missing keys, fixtures) |
+| `make selftest-e2e` | 25 passed, 0 failed, 1 skipped (cloud write is opt-in) | storage, Keychain, audio, voice choice (Siri), 3D USDZ export, share-size policy, live cloud sign-in + list. Opt-in `-e2eCloudWrite YES`: two-user publish/share/extend/stale/5x download, 33/33 on 2026-10-18 |
+| `make uitest` | 11 pass | both interfaces' screens, extend picker on a real saved scan, Pause/Resume, coverage toggle, simulated walk |
+| `make selftest-sim` | PASS | opening briefing, arrival, no warnings at arrival (planner level; the sample map's route is now one straight leg) |
+| `python3 tools/supabase_check.py` | ALL PASS after 0004 | keys, anonymous sign-in, shared map list, cross-user scan download |
+| Local Postgres (Docker) `supabase/tests/*.sql` | 0004 exact path, 0005 (32 cases), 0006 (caps) | the SQL rules; they do NOT run on the live project |
+| `web/tests.html`, `web/ui-tests.html` in Chrome | 46/46 and 16/16 | U3's viewer (needs a browser; Node fails the WebGL test) |
+| NOT automated / NOT done | | relocalization on a real hallway (Gate G2), a real scan over 50 MB, the yellow overlay's look, U2's keyframe relocalization, a fresh-install first launch, multi-phone behaviour |
