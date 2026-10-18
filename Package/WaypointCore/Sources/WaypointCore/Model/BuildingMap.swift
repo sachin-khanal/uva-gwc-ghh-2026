@@ -50,6 +50,8 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
     public var edges: [MapEdge]
     /// Optional fallback relocalization marker (see MarkerRef).
     public var marker: MarkerRef?
+    /// Optional 3D surface files (format 3). nil = none, and then the key is absent from the JSON (maps without any are byte-for-byte unchanged).
+    public var meshAssets: [MeshAsset]?
 
     public init(
         id: UUID = UUID(),
@@ -58,8 +60,10 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         nodes: [MapNode] = [],
         edges: [MapEdge] = [],
         marker: MarkerRef? = nil,
-        schemaVersion: Int = MapSchema.current
+        schemaVersion: Int = MapSchema.current,
+        meshAssets: [MeshAsset]? = nil
     ) {
+        self.meshAssets = meshAssets
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -71,7 +75,7 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
 
     // MARK: Decoding (format versioning)
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, id, name, version, nodes, edges, marker, meshAssets }
 
     /// Accepts every format from `MapSchema.oldestReadable` to `MapSchema.current` (a missing `schemaVersion` means format 1) and
     /// migrates it to the current one. A file written by a NEWER app is refused with a clear message instead of being half-understood.
@@ -92,6 +96,7 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
         nodes = try c.decode([MapNode].self, forKey: .nodes)
         edges = try c.decode([MapEdge].self, forKey: .edges)
         marker = try c.decodeIfPresent(MarkerRef.self, forKey: .marker)
+        meshAssets = try c.decodeIfPresent([MeshAsset].self, forKey: .meshAssets)
         schemaVersion = MapSchema.migrate(from: found)
     }
 
@@ -131,6 +136,11 @@ public struct BuildingMap: Codable, Identifiable, Equatable, Sendable {
             result.edges.append(e)
         }
         if result.marker == nil { result.marker = other.marker }
+        // 3D surface files: keep ours, add any of theirs we do not have (matched by id).
+        if let theirs = other.meshAssets, !theirs.isEmpty {
+            let known = Set((result.meshAssets ?? []).map(\.id))
+            result.meshAssets = (result.meshAssets ?? []) + theirs.filter { !known.contains($0.id) }
+        }
         result.version = max(version, other.version) + 1
         return result
     }

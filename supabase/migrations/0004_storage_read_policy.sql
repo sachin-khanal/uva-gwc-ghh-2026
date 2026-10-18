@@ -18,16 +18,20 @@
 --
 -- Path convention (unchanged):  <contributor uuid>/<building uuid>/<segment>.arworldmap   in bucket `worldmaps`
 -- Rule: any signed-in user (anonymous sign-ins have role `authenticated`) may READ a scan file if the shared building's
---       `segment_owners` says that segment was contributed by the folder's user. Writing stays restricted to your own folder.
+--       `segment_owners` says that segment was contributed by the folder's user (exact full-path match, see below). Writing stays restricted to your own folder.
 begin;
 
+-- EXACT match (security review 2026-10-18): a file is readable only if its full path is exactly
+--   <contributor>/<building>/<segment>.arworldmap   for a (segment, contributor) pair listed in the building's `segment_owners`.
+-- Extra suffixes (`seg1.evil`), extra path parts (`seg1.arworldmap/x`) and unlisted segments are NOT readable, so a contributor cannot use
+-- their own folder to host arbitrary files for everyone.
 drop policy if exists canonical_worldmaps_read on storage.objects;
 create policy canonical_worldmaps_read on storage.objects for select to authenticated using (
   bucket_id = 'worldmaps'
   and exists (
-    select 1 from public.canonical_buildings c
-    where c.map_id::text = split_part(objects.name, '/', 2)
-      and c.segment_owners ->> split_part(split_part(objects.name, '/', 3), '.', 1) = split_part(objects.name, '/', 1)
+    select 1
+    from public.canonical_buildings c, jsonb_each_text(c.segment_owners) as s(seg, owner_id)
+    where objects.name = s.owner_id || '/' || c.map_id::text || '/' || s.seg || '.arworldmap'
   )
 );
 

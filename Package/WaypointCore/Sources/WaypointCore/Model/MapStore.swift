@@ -76,6 +76,7 @@ extension MapBundle {
                 throw MapStoreError.rejected("An edge's distance does not match its node positions.")
             }
         }
+        try validateExtras() // optional format-3 fields: room floor areas and 3D surface files
     }
 }
 

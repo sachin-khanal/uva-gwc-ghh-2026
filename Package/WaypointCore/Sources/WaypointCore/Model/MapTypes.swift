@@ -74,12 +74,15 @@ public struct RoomExtent: Codable, Hashable, Sendable {
     public var yaw: Float
     /// Floor area actually enclosed by walls, which is <= the rectangle's area.
     public var areaSquareMeters: Float
+    /// Ceiling height, metres, when it was measured (format 3, optional; written by the web viewer's pipeline, ignored by guidance).
+    public var heightMeters: Float?
 
-    public init(center: SIMD3<Float>, halfExtents: SIMD2<Float>, yaw: Float, areaSquareMeters: Float) {
+    public init(center: SIMD3<Float>, halfExtents: SIMD2<Float>, yaw: Float, areaSquareMeters: Float, heightMeters: Float? = nil) {
         self.center = center
         self.halfExtents = halfExtents
         self.yaw = yaw
         self.areaSquareMeters = areaSquareMeters
+        self.heightMeters = heightMeters
     }
 
     /// Is `point` inside the room? `margin` widens the rectangle, e.g. to count a doorway as "in".
@@ -128,6 +131,40 @@ public struct MapNode: Codable, Identifiable, Hashable, Sendable {
         self.segmentId = segmentId
         self.createdBy = createdBy
         self.extent = extent
+    }
+}
+
+/// One 3D surface file of a map that other tools (the web viewer) can draw: an OBJ whose bytes are pinned by a SHA-256, stored in the
+/// `meshes` bucket under `<storageOwner or the map owner>/<map id>/...`. Format 3, OPTIONAL. The app does not create these yet (its own
+/// 3D model is `model.usdz` next to the map), but it CARRIES them: loading and saving a map keeps them, merging unions them, and
+/// `MapBundle.validate()` rejects malformed ones. Field names and rules match web/router.js (U3). See docs/MAP_FORMAT.md.
+public struct MeshAsset: Codable, Hashable, Sendable {
+    public var id: UUID
+    /// The scan segment this surface was captured in; must exist in the map.
+    public var segmentId: String
+    /// Only "obj" for now.
+    public var format: String
+    /// Only "map" (the map frame).
+    public var coordinateFrame: String
+    public var byteCount: Int
+    /// Lowercase hex SHA-256 of the file bytes (64 characters).
+    public var sha256: String
+    public var boundsMin: SIMD3<Float>
+    public var boundsMax: SIMD3<Float>
+    /// Contributor whose storage folder holds the file; nil = the map's owner.
+    public var storageOwner: UUID?
+
+    public init(id: UUID = UUID(), segmentId: String, format: String = "obj", coordinateFrame: String = "map",
+                byteCount: Int, sha256: String, boundsMin: SIMD3<Float>, boundsMax: SIMD3<Float>, storageOwner: UUID? = nil) {
+        self.id = id
+        self.segmentId = segmentId
+        self.format = format
+        self.coordinateFrame = coordinateFrame
+        self.byteCount = byteCount
+        self.sha256 = sha256
+        self.boundsMin = boundsMin
+        self.boundsMax = boundsMax
+        self.storageOwner = storageOwner
     }
 }
 

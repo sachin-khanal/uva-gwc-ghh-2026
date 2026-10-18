@@ -35,11 +35,22 @@ select 'readable objects (BROKEN rule; shows 0)' as what, count(*) from stubstor
 reset role;
 drop policy t on stubstorage.objects;
 
-\echo === FIXED (objects.name)
+\echo === FIXED = migration 0004 (exact full-path match)
 create policy t on stubstorage.objects for select to authenticated using (
-  bucket_id = 'worldmaps' and exists (select 1 from public.canonical_buildings c
-    where c.map_id::text = split_part(objects.name, '/', 2)
-      and c.segment_owners ->> split_part(split_part(objects.name, '/', 3), '.', 1) = split_part(objects.name, '/', 1)));
+  bucket_id = 'worldmaps'
+  and exists (
+    select 1
+    from public.canonical_buildings c, jsonb_each_text(c.segment_owners) as s(seg, owner_id)
+    where objects.name = s.owner_id || '/' || c.map_id::text || '/' || s.seg || '.arworldmap'
+  ));
+-- hostile / sloppy names that the first (split_part) version would have let through:
+insert into stubstorage.objects(bucket_id, name) values
+  ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/seg1.evil'),
+  ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/seg1.arworldmap/extra'),
+  ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa//11111111-1111-4111-8111-111111111111/seg1.arworldmap'),
+  ('worldmaps', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA/11111111-1111-4111-8111-111111111111/seg1.arworldmap'),
+  ('meshes',    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/seg1.arworldmap');
 set role authenticated;
-select 'readable objects (FIXED rule; must be 1)' as what, count(*) from stubstorage.objects;
+select 'readable objects (FIXED rule; must be exactly 1)' as what, count(*) from stubstorage.objects;
+select name as the_one_readable_file from stubstorage.objects;
 reset role;

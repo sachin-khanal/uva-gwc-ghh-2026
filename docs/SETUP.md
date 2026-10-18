@@ -78,6 +78,7 @@ A teammate does this ONCE for the whole team (one shared project), then shares t
 2. **Authentication -> Providers -> Anonymous Sign-Ins -> enable.** (The app signs in anonymously; there is no signup screen.)
 3. **SQL Editor** -> paste all of `supabase/migrations/0001_init.sql` -> Run. It is safe to re-run.
    **Update 2026-10-17 (Claude):** ~~0001 alone is enough~~ the app now talks to `canonical_buildings` and `rpc/extend_building`, which only exist after you ALSO run `0002_canonical_maps.sql` and then `0003_extension_connections.sql` (in that order). Optional checks: `supabase/tests/canonical_maps.sql` and `supabase/tests/extension_connections.sql` (expect PASS notices; fixtures roll back).
+   **Update 2026-10-18 (Claude):** then also run `0005_map_extras_constraint.sql`, and RE-RUN the current `0004` if an older copy was run (it is now an exact-path rule).
    **Update 2026-10-17 (Claude):** also run `supabase/migrations/0004_storage_read_policy.sql` (after 0003). A live two-user test found scan files unreadable by other users without it. Then `python3 tools/supabase_check.py` must print PASS for every line (read-only; `--write` runs a full publish/share/extend round trip and leaves one test building).
 4. **Project Settings -> API:** copy the *Project URL* and the **anon public** key.
    **Never** copy the `service_role` key into the app, the repo, a chat or a screenshot.

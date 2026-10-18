@@ -70,6 +70,65 @@ CURRENT_SCHEMA = 3
 OLDEST_SCHEMA = 1
 
 
+# Format-3 optional fields. Mirrors Swift `MapExtrasValidation.swift` and web/router.js (keep all three in step).
+MAX_ROOM_HALF = 30.0
+MAX_ROOM_HEIGHT = 20.0
+MAX_ASSETS = 100
+MAX_ASSET_BYTES = 40_000_000
+MAX_ASSET_TOTAL = 80_000_000
+SHA256 = re.compile(r"^[a-f0-9]{64}$")
+
+
+def check_extents(nodes):
+    for i, node in enumerate(nodes):
+        extent = node.get("extent")
+        if extent is None:
+            continue
+        path = f"nodes[{i}].extent"
+        object_value(extent, path)
+        require(node.get("kind") == "room", path + ": only a room can have a floor area")
+        center = position(extent.get("center"), path + ".center")
+        half = extent.get("halfExtents")
+        require(isinstance(half, list) and len(half) == 2, path + ".halfExtents: expected [x, z]")
+        hx, hz = float32(half[0], path + ".halfExtents[0]"), float32(half[1], path + ".halfExtents[1]")
+        require(0.05 < hx <= MAX_ROOM_HALF and 0.05 < hz <= MAX_ROOM_HALF, path + ".halfExtents: size out of range")
+        float32(extent.get("yaw"), path + ".yaw")
+        area = float32(extent.get("areaSquareMeters"), path + ".areaSquareMeters")
+        require(0 < area <= 4 * hx * hz + 0.01, path + ".areaSquareMeters: does not match the size")
+        if extent.get("heightMeters") is not None:
+            height = float32(extent["heightMeters"], path + ".heightMeters")
+            require(0 < height <= MAX_ROOM_HEIGHT, path + ".heightMeters: out of range")
+        where = position(node.get("position"), "node.position")
+        far = math.hypot(center[0] - where[0], center[2] - where[2])
+        require(far <= math.hypot(hx, hz) + 1, path + ": floor area is far from its room")
+
+
+def check_mesh_assets(assets, nodes):
+    if assets is None:
+        return
+    require(isinstance(assets, list) and len(assets) <= MAX_ASSETS, "meshAssets: expected a list of at most 100")
+    segments = {n.get("segmentId") for n in nodes}
+    seen, total = set(), 0
+    for i, asset in enumerate(assets):
+        path = f"meshAssets[{i}]"
+        object_value(asset, path)
+        asset_id = uuid_value(asset.get("id"), path + ".id")
+        require(asset_id not in seen, path + ": duplicate id")
+        seen.add(asset_id)
+        segment(asset.get("segmentId"), path + ".segmentId")
+        require(asset["segmentId"] in segments, path + ".segmentId: no such scan in this map")
+        require(asset.get("format") == "obj" and asset.get("coordinateFrame") == "map", path + ": unsupported format or frame")
+        size = asset.get("byteCount")
+        require(type(size) is int and 1 <= size <= MAX_ASSET_BYTES, path + ".byteCount: out of range")
+        require(isinstance(asset.get("sha256"), str) and SHA256.match(asset["sha256"]), path + ".sha256: expected 64 lowercase hex characters")
+        lo, hi = position(asset.get("boundsMin"), path + ".boundsMin"), position(asset.get("boundsMax"), path + ".boundsMax")
+        require(all(a <= b for a, b in zip(lo, hi)), path + ": bounds are inverted")
+        if asset.get("storageOwner") is not None:
+            uuid_value(asset["storageOwner"], path + ".storageOwner")
+        total += size
+    require(total <= MAX_ASSET_TOTAL, "meshAssets: more than 80 MB in total")
+
+
 def validate(document):
     """Raise ValueError for invalid data; accept a bare map or exported bundle."""
     object_value(document, "document")
@@ -112,16 +171,11 @@ def validate(document):
                 path + ": unknown node kind")
         if node.get("label") is not None:
             string(node["label"], path + ".label")
-        if node.get("extent") is not None:  # format 3, optional
-            extent = object_value(node["extent"], path + ".extent")
-            position(extent.get("center"), path + ".extent.center")
-            require(isinstance(extent.get("halfExtents"), list) and len(extent["halfExtents"]) == 2,
-                    path + ".extent.halfExtents: expected [x, z]")
-            for k in ("yaw", "areaSquareMeters"):
-                float32(extent.get(k), f"{path}.extent.{k}")
         string(node.get("createdBy"), path + ".createdBy")
         segment(node.get("segmentId"), path + ".segmentId")
         positions[node_id] = position(node.get("position"), path + ".position")
+    check_extents(nodes)
+    check_mesh_assets(data.get("meshAssets"), nodes)
     for i, edge in enumerate(edges):
         path = f"edges[{i}]"
         object_value(edge, path)

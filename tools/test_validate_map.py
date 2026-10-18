@@ -107,6 +107,54 @@ class MapValidationTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
 
+class FormatThreeExtrasTests(unittest.TestCase):
+    def setUp(self):
+        self.v3 = json.loads((Path(__file__).resolve().parents[1] / "docs/map-format/map-v3.json").read_text(encoding="utf-8"))
+
+    def room(self, data):
+        return next(n for n in data["nodes"] if n.get("extent"))
+
+    def test_fixture_with_extent_and_mesh_assets_passes(self):
+        validate(self.v3)
+        self.assertTrue(self.v3.get("meshAssets"))
+
+    def test_hostile_extents_are_rejected(self):
+        mutations = [
+            lambda e, n: e.update(halfExtents=[500, 500]), lambda e, n: e.update(halfExtents=[0, 2]),
+            lambda e, n: e.update(areaSquareMeters=0), lambda e, n: e.update(areaSquareMeters=9999),
+            lambda e, n: e.update(center=[400, 0, 0]), lambda e, n: e.update(center=[float("nan"), 0, 0]),
+            lambda e, n: e.update(heightMeters=-1), lambda e, n: e.update(yaw=float("inf")),
+            lambda e, n: n.update(kind="door"),
+        ]
+        for i, mutate in enumerate(mutations):
+            data = copy.deepcopy(self.v3)
+            node = self.room(data)
+            mutate(node["extent"], node)
+            with self.assertRaises(ValueError, msg=f"mutation {i}"):
+                validate(data)
+
+    def test_malformed_mesh_assets_are_rejected(self):
+        mutations = [
+            lambda a: a.update(segmentId="nope"), lambda a: a.update(format="usdz"), lambda a: a.update(coordinateFrame="world"),
+            lambda a: a.update(byteCount=0), lambda a: a.update(byteCount=40_000_001), lambda a: a.update(sha256="abc"),
+            lambda a: a.update(sha256="AB" * 32), lambda a: a.update(boundsMin=[9, 0, 0]), lambda a: a.update(storageOwner="x"),
+        ]
+        for i, mutate in enumerate(mutations):
+            data = copy.deepcopy(self.v3)
+            mutate(data["meshAssets"][0])
+            with self.assertRaises(ValueError, msg=f"mutation {i}"):
+                validate(data)
+        data = copy.deepcopy(self.v3)
+        data["meshAssets"] = data["meshAssets"] * 2  # duplicate id
+        with self.assertRaises(ValueError):
+            validate(data)
+
+    def test_web_viewer_fixture_validates_if_it_is_a_map(self):
+        fixture = Path(__file__).resolve().parents[1] / "web/fixtures/rice-hall-sample.json"
+        if fixture.exists():
+            validate(json.loads(fixture.read_text(encoding="utf-8")))
+
+
 class DefaultFolderTests(unittest.TestCase):
     def test_default_run_passes_with_non_map_json_present_and_explicit_path_still_validates_it(self):
         samples = Path(__file__).resolve().parents[1] / "Samples"
