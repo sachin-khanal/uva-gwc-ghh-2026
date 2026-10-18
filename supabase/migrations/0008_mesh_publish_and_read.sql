@@ -96,6 +96,10 @@ revoke all on function public.publish_mesh_assets(uuid, jsonb) from public, anon
 grant execute on function public.publish_mesh_assets(uuid, jsonb) to authenticated;
 
 -- Read rule: exact path listed in some building's meshAssets (same idea as canonical_worldmaps_read in 0004; note `objects.name`).
+-- The live project already has a looser rule of the same purpose, `canonical_mesh_read` (SINGULAR, from a migration applied directly by U3 that is
+-- not in this repo; it trusts any listed meshAssets entry without checking segment_owners or the stored size). Permissive policies are OR-ed, so
+-- leaving it in place would make the stricter rule below meaningless. Drop it here; harmless when it does not exist (e.g. a fresh project).
+drop policy if exists canonical_mesh_read on storage.objects;
 drop policy if exists canonical_meshes_read on storage.objects;
 create policy canonical_meshes_read on storage.objects for select to authenticated using (
   bucket_id = 'meshes'
