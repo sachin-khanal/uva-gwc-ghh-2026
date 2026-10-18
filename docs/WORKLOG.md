@@ -1,5 +1,38 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — You could arrive at a room upstairs by standing underneath it   [tags: BUG]
+Area: B (routing/guidance). Branch `stairs-multifloor`. Anmol: "cut it to within 1.5 up or down from the
+altitude of where it was recorded because we can reach a room upstairs by being directly below it."
+
+THE PROBLEM, and it is everywhere at once: every "am I near this?" test in the app measures HORIZONTALLY. That
+is right on one floor and wrong the moment a building has two. A room directly above you is ZERO metres away in
+plan view, and its `RoomExtent` covers your x,z exactly - so standing underneath it counted as being inside it.
+Separately, `WaypointGraph.nearestNodes` sorts by STRAIGHT-LINE distance, where a node one storey up is about
+3 m away - nearer than a corridor node 5 m along your own hallway - so the router could decide you were standing
+upstairs and plan from there.
+
+Fixed with one shared idea rather than five local thresholds: `Geometry.sameLevelMeters` (1.5 m, Anmol's number)
+and `Geometry.isSameLevel(_:_:)`. Node heights are CAMERA heights and are consistent between a saved map and a
+live session, and a storey is 3-4 m, so 1.5 m separates floors cleanly while tolerating a phone held high or low,
+or someone standing mid-flight on a staircase.
+Applied at every place that could cross floors:
+  * `RouteFollower`: room-extent containment, the "standing on a waypoint, skip it" test, and `reached`.
+  * `RouteFollower.landmark`: a labelled place one floor up is not "on your left".
+  * `RouteFollower.stairsAhead`: a flight on another floor is not ahead of you.
+  * `WaypointGraph.nearestNodes`: candidates are filtered to your level. It FALLS BACK to ignoring the level
+    when nothing on it is known - that only happens on a floor the map does not cover, where every answer is
+    wrong anyway, and refusing to route at all would be the worse one.
+
+Verified: `make test` -> **427 tests, 0 failures** (423 before; 4 new: standing under a room is not arriving,
+standing in it is, nearest-node selection stays on your floor, and an unmapped floor still returns candidates
+rather than failing). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE.
+Open: a node mid-staircase is legitimately between floors, so the 1.5 m window there admits nodes from the
+flight both above and below it. That is correct - they ARE reachable from mid-flight - but it means the level
+filter does nothing useful while the user is on stairs, which is exactly when routing is hardest.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — The arrow pointed left and nothing was said: an obstacle warning was destroying the turn   [tags: BUG, DEVICE]
 Area: B (guidance). Branch `stairs-multifloor`.
 Anmol: "it'll say theres something ahead, the arrow will say turn left but it doesnt speak it ... a bunch of

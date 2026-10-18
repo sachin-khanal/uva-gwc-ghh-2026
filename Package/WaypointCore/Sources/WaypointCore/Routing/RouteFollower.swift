@@ -54,6 +54,7 @@ public final class RouteFollower {
         // thinks it is still heading toward. Without this, a target index that has not caught up means
         // standing in the middle of the room never counts as arriving (device report 2026-10-17).
         if let destination = route.last, let extent = destination.extent,
+           Geometry.isSameLevel(position, destination.position),
            extent.contains(position, margin: Self.doorwayMargin) {
             targetIndex = route.count - 1
             return GuidanceInstruction(
@@ -72,6 +73,7 @@ public final class RouteFollower {
 
         // Still skip a waypoint we are literally standing on.
         while targetIndex < route.count - 1,
+              Geometry.isSameLevel(position, route[targetIndex].position),
               Geometry.horizontalDistance(position, route[targetIndex].position) < arrivalRadius {
             targetIndex += 1
         }
@@ -85,6 +87,8 @@ public final class RouteFollower {
         // the pin the volunteer dropped. Without an extent (older maps, or an open space) we fall
         // back to a radius that depends on the kind of place.
         let reached: Bool = {
+            // On another floor you have not arrived, however close you are in plan view.
+            guard Geometry.isSameLevel(position, target.position) else { return false }
             let withinRadius = distance < ArrivalRadius.meters(for: target.kind)
             guard let extent = target.extent else { return withinRadius }
             // EITHER inside the room OR near the pin. Extent-only meant that when the scan measured a
@@ -233,6 +237,7 @@ public final class RouteFollower {
     /// A staircase or lift close enough and far enough ahead to be worth a warning.
     func stairsAhead(from position: SIMD3<Float>, forward: SIMD3<Float>) -> Hazard? {
         for node in graph.map.nodes where node.kind == .stairs || node.kind == .elevator {
+            guard Geometry.isSameLevel(position, node.position) else { continue } // a flight on another floor is not ahead of you
             guard Geometry.horizontalDistance(position, node.position) <= Self.stairsWarnRadius else { continue }
             let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)
             guard abs(bearing) * 180 / .pi <= Self.stairsAheadDegrees else { continue }
@@ -245,6 +250,7 @@ public final class RouteFollower {
         var best: (node: MapNode, side: Side, distance: Float)?
         for node in graph.map.nodes where node.kind != .corridor && node.id != targetId && node.id != route.last?.id {
             guard let label = node.label, !label.isEmpty else { continue }
+            guard Geometry.isSameLevel(position, node.position) else { continue } // not "on your left" if it is a floor up
             let d = Geometry.horizontalDistance(position, node.position)
             guard d < Self.landmarkRadius else { continue }
             let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)

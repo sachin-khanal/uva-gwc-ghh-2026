@@ -851,4 +851,59 @@ final class LoopRoutingTests: XCTestCase {
         // the frontal band. (Standing ON the node is not a meaningful test - the bearing is undefined.)
         XCTAssertNil(follower.stairsAhead(from: [0, 0, -6], forward: [1, 0, 0]))
     }
+
+    // MARK: Floors - you cannot reach a room by standing under it (2026-10-18)
+
+    private func twoFloorMap() -> BuildingMap {
+        // Same x,z footprint, one storey apart. Node heights are camera heights.
+        let down = (0...3).map { MapNode(kind: .corridor, position: [Float($0) * 2, 1.4, 0]) }
+        let up = (0...3).map { MapNode(kind: .corridor, position: [Float($0) * 2, 5.0, 0]) }
+        let room = MapNode(kind: .room, label: "Room 542", position: [6, 5.0, 0],
+                           extent: RoomExtent(center: [6, 5.0, 0], halfExtents: [3, 3], yaw: 0, areaSquareMeters: 36))
+        var edges = (0..<3).map { MapEdge(from: down[$0].id, to: down[$0 + 1].id, distance: 2) }
+        edges += (0..<3).map { MapEdge(from: up[$0].id, to: up[$0 + 1].id, distance: 2) }
+        edges.append(MapEdge(from: up[3].id, to: room.id, distance: 1))
+        return BuildingMap(name: "Rice", nodes: down + up + [room], edges: edges)
+    }
+
+    /// Standing directly BELOW the destination is not arriving at it - in plan view it is zero metres
+    /// away, and the room's extent covers your x,z exactly.
+    func testStandingUnderARoomIsNotArriving() {
+        let map = twoFloorMap()
+        let graph = WaypointGraph(map: map)
+        let room = map.nodes.first { $0.label == "Room 542" }!
+        let upstairs = map.nodes.filter { $0.position.y > 4 && $0.kind == .corridor }
+        var follower = RouteFollower(route: upstairs + [room], graph: graph)
+        // Underneath the room, on the floor below.
+        let below = SIMD3<Float>(6, 1.4, 0)
+        XCTAssertNotEqual(follower.update(position: below, forward: [1, 0, 0]).kind, .arrived)
+    }
+
+    /// ...and standing IN it is.
+    func testStandingInTheRoomIsArriving() {
+        let map = twoFloorMap()
+        let graph = WaypointGraph(map: map)
+        let room = map.nodes.first { $0.label == "Room 542" }!
+        let upstairs = map.nodes.filter { $0.position.y > 4 && $0.kind == .corridor }
+        var follower = RouteFollower(route: upstairs + [room], graph: graph)
+        XCTAssertEqual(follower.update(position: [6, 5.0, 0], forward: [1, 0, 0]).kind, .arrived)
+    }
+
+    /// The router must not decide you are standing upstairs because a node above is nearer in a
+    /// straight line than one along your own corridor.
+    func testNearestNodesStaysOnYourFloor() {
+        let graph = WaypointGraph(map: twoFloorMap())
+        // Standing at the start of the lower corridor. The node directly above is 3.6 m away; the next
+        // one along this corridor is 4 m. Straight-line sorting alone would pick the one upstairs.
+        let nearest = graph.nearestNodes(to: [4, 1.4, 0], limit: 4)
+        XCTAssertFalse(nearest.isEmpty)
+        XCTAssertTrue(nearest.allSatisfy { $0.position.y < 4 }, "picked a node on another floor: \(nearest.map(\.position))")
+    }
+
+    /// A floor the map does not cover must still route rather than returning nothing.
+    func testAnUnknownFloorFallsBackInsteadOfFailing() {
+        let graph = WaypointGraph(map: twoFloorMap())
+        let nearest = graph.nearestNodes(to: [4, 40, 0], limit: 3)
+        XCTAssertEqual(nearest.count, 3, "no candidates at all would mean no route")
+    }
 }
