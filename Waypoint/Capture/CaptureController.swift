@@ -502,6 +502,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                         var back = 0
                         scene?.rootNode.enumerateHierarchy { node, _ in for e in node.geometry?.elements ?? [] { back += e.primitiveCount } }
                         Log.capture.info("EXPORT PROBE PASS: \(anchors.count) anchors -> \(r.triangles) triangles (read back \(back)), \(r.fileBytes) bytes, cell=\(r.clusterCellSize.map { String($0) } ?? "none"), fits=\(r.fitsBudget), \(Int((CACurrentMediaTime() - started) * 1000)) ms")
+                        // The OBJ copy for the web viewer from the same live anchors.
+                        let objStarted = CACurrentMediaTime()
+                        let surface = try MeshExporter.exportSurface(anchors: anchors, box: box, segmentId: "probe")
+                        let sane = surface.asset.sha256 == ObjExport.sha256Hex(surface.data) && surface.asset.byteCount == surface.data.count
+                        Log.capture.info("EXPORT PROBE OBJ \(sane ? "PASS" : "FAIL"): \(surface.vertices) vertices, \(surface.triangles) triangles, \(surface.data.count) bytes, sha \(surface.asset.sha256.prefix(8)), \(Int((CACurrentMediaTime() - objStarted) * 1000)) ms")
                     } catch {
                         Log.capture.error("EXPORT PROBE FAIL: \(error.localizedDescription)")
                     }
