@@ -4,6 +4,9 @@
 #          (if you mark the check required); on direct pushes to main it turns the commit red so it is noticed.
 #          No macOS runner, no dependencies, ~10 s. (INF-2, the macOS `make test` workflow, is separate and still open.)
 name: docs-check
+# Least privilege (security audit 2026-10-18): this job only reads the repository.
+permissions:
+  contents: read
 on:
   pull_request:
   push:
@@ -17,7 +20,11 @@ jobs:
           fetch-depth: 0
       - name: Pull request - code needs a WORKLOG entry
         if: github.event_name == 'pull_request'
-        run: sh scripts/docs-sync.sh check --range "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}   # passed through the environment, never pasted into the shell command
+        run: sh scripts/docs-sync.sh check --range "origin/$BASE_REF"
       - name: Push to main - code needs a WORKLOG entry
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
-        run: sh scripts/docs-sync.sh check --range "${{ github.event.before }}"
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: sh scripts/docs-sync.sh check --range "$BEFORE_SHA"

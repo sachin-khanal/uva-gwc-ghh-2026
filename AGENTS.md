@@ -28,7 +28,7 @@ Full design: `Architecture.md`. Original goal: `objective.txt`.
    owner's files only to fix a compile error or when asked, and say so in the WORKLOG.
 3. **The data contract is frozen-ish.** `Package/WaypointCore/Sources/WaypointCore/Model/*` is
    used by everyone. Do not rename/remove fields casually. If you must change it: update tests and
-   `Samples/rice-hall-sample.json`, bump `BuildingMap.schemaVersion` if the JSON shape changed, and
+   `Samples/rice-hall-sample.json`, bump ~~`BuildingMap.schemaVersion`~~ `MapSchema.current` (and follow docs/MAP_FORMAT.md) if the JSON shape changed, and
    announce it at the top of the WORKLOG with the tag `CONTRACT CHANGE`.
    **Update 2026-10-17 (Claude):** the map format is now versioned; follow the checklist in `docs/MAP_FORMAT.md` (bump `MapSchema.current`, spec, fixture, migration, tests, validator).
 4. **Where does code go?**
@@ -99,6 +99,7 @@ right of the user's facing. See `Geometry.swift` and its tests.
 | `make team-id` | **Update 2026-10-17:** print your Apple team id from your signing certificate | no |
 | `DEVICE=<id> make run` | build + sign + install + launch + stream console | yes |
 | `make doctor` | diagnose the machine | no |
+| `DEVICE=<id> make backup-maps` / `restore-maps` / `list-map-backups` | **Update 2026-10-18 (Claude):** copy the app's maps (scans, 3D models) off the phone to `~/Library/Caches/Waypoint/map-backups` (newest 5 kept) and back; `make install` and `make uitest` run `backup-maps` first | yes |
 | `make hooks` | **Update 2026-10-17 (Claude):** install the docs pre-commit hook (rule 12); `make test-hooks` self-tests it | no |
 
 ## 6. Working simultaneously (Live Share or git)
@@ -112,3 +113,5 @@ someone else may have changed it a minute ago.
 Roles (A AR/Maps, B Navigation/Feedback, C Vision, D App/Sync/Integration) are defined in
 `docs/MODULES.md`. ~~Fill in the real names there.~~
 **Update 2026-10-17:** the team is U1 (MacBook Pro + iPhone 16 Pro Max), U2 (MacBook Air + iPhone Pro), U3 (Windows + iPhone Pro), U4 (Windows + regular iPhone). Letter roles map to people as: A = U1; B = U2; C = U2 (calibration, OCR wiring) + U3 (mesh export, paired); D = U2 (app UI, Multipeer) + U3 (backend, web, cloud) + U4 (field, demo, QA). Per-task assignments: `docs/ROADMAP.md`, Revision 3.
+
+**Update 2026-10-18 (Claude, audit):** two things every agent must know before trusting a "works on the phone" claim: (1) `make selftest-sim|e2e|scan` only LAUNCH the build already installed, they do not rebuild: run `make build install` first; (2) the phone must be unlocked. Security and privacy rules are in `docs/SECURITY.md` (the repo is PUBLIC: never commit keys, device ids, Apple ids or personal emails).

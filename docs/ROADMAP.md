@@ -352,3 +352,5 @@ Gate status: G1 partial; **G2 untested**; G3-G5 not reached. Highest-value next 
 | U1.15 freeze | later |
 | NEW: size policy | scans over the 50 MB cloud limit are saved on the phone only (`SharePolicy`, `MapStore.saveLocalScan`); see WORKLOG 2026-10-18 |
 | NEW: finish gating | Finish/Save still requires ARKit `mapped` plus one labelled place; no change yet (decision pending) |
+
+**Update 2026-10-18 (Claude, audit):** a security/privacy audit was done; findings and open items are in `docs/SECURITY.md` (cloud abuse limits S-1, personal data in the public repo S-2, Files-app exposure S-3 are the ones to act on before a demo).

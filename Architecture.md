@@ -264,7 +264,7 @@ Roadmap and parallel workstreams: [docs/ROADMAP.md](docs/ROADMAP.md).
   for a first live overlay, then replace with one `ModelEntity` per anchor to colour by class.
 - Bounding box: gravity-aligned box (yaw only) fit to the mesh vertices, drawn as a wireframe, with
   handles to shrink/grow. The box is also the crop volume for export and the "scan area" shown in the HUD.
-  Box math lives in `WaypointCore` (`Scan/BoundingBox.swift`) so it is unit-tested.
+  Box math lives in `WaypointCore` (~~`Scan/BoundingBox.swift`~~ **Update 2026-10-18:** `Scan/OrientedBox.swift`, plus `CoverageGrid.swift` for the unscanned-areas tiles and `MeshDecimator.swift` for the 3D model) so it is unit-tested.
 - Export: crop anchors to the box, assemble `MDLMesh` via ModelIO, write USDZ. Byte budget 40 MB per
   file (Supabase free tier limit is 50 MB per upload); decimate or drop small anchors to fit.
 - Bonus for navigation (stretch): classification gives free door candidates (suggested door nodes)
@@ -293,7 +293,7 @@ Roadmap and parallel workstreams: [docs/ROADMAP.md](docs/ROADMAP.md).
 ### 10.4 Updated module map (additions)
 ```
 Package/WaypointCore/Sources/WaypointCore/
-  Scan/        BoundingBox, ExportBudget                  (A/C)
+  Scan/        BoundingBox, ExportBudget                  (A/C)   <- Update 2026-10-18: now OrientedBox, ConvexHull2D, CoverageGrid, CoverageTracker, MeshDecimator, ExportBudget
   Cloud/       SupabaseClient, CloudModels, SyncEngine    (D)
 Waypoint/
   Scan/        LiveScanView (RealityKit), MeshExporter, ModelViewer   (A/C)

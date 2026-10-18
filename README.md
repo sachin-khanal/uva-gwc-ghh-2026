@@ -34,6 +34,8 @@ DEVICE=<id> make run   # build + install + launch on your iPhone  (see docs/SETU
 | [docs/TESTING.md](docs/TESTING.md) | What is automatically proven, and the on-device test plan |
 | [docs/SETUP.md](docs/SETUP.md) | Fresh Mac to running app, free Apple ID signing, troubleshooting |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Why things are the way they are |
+| [docs/SECURITY.md](docs/SECURITY.md) | **Update 2026-10-18:** what data the app stores and sends, what protects it, open security/privacy findings |
+| [docs/MAP_FORMAT.md](docs/MAP_FORMAT.md) | **Update 2026-10-18:** the map file format, one spec per version, how to change it |
 | [Architecture.md](Architecture.md) | The full design and 24-hour plan |
 
 ## Repo map
@@ -50,10 +52,12 @@ docs/  AGENTS.md        documentation
 
 ## Status
 
-First scaffold is in place and the pure logic is tested (45 tests passing). Everything that touches
+First scaffold is in place and the pure logic is tested (~~45 tests passing~~ 337, see the 2026-10-18 update below). Everything that touches
 ARKit, LiDAR, audio, haptics or Multipeer compiles but has **not yet run on a device**. See
 [docs/WORKLOG.md](docs/WORKLOG.md) for the exact state.
 
 **Update 2026-10-17 (build block 1):** added a live LiDAR scan view with a bounding box, a Simulate mode for testing guidance without a scan, and a Supabase client + SQL schema. Tests: 45 passing. Still untested on a phone and against a real Supabase project. Next steps per person: [docs/ROADMAP.md](docs/ROADMAP.md); device test plan: [docs/TESTING.md](docs/TESTING.md).
 
 **Update 2026-10-17 (Claude):** test counts above (~~45~~) are now 85 Swift tests in `make test`, 9 Python tests for `tools/validate_map.py`, and 7 on-device UI tests. Cloud now uses one shared map per building (migrations 0002 and 0003, see `supabase/CANONICAL_MAPS.md`) and a volunteer can extend an existing building's map. All AR/audio/haptic/cross-phone behavior remains UNVERIFIED ON DEVICE where the WORKLOG says so.
+
+**Update 2026-10-18 (Claude, audit):** current numbers: `make test` runs **337** Swift tests (the code block above still says 45: it is a fenced block and cannot be struck), `python3 -m unittest discover -s tools` 16 Python tests, `make uitest` 11 UI tests on a phone, `make selftest-e2e` 25 on-device checks (35 when the opt-in `-e2eCloudWrite YES` two-user cloud test is added). The repo map above is missing: `web/` (U3's standalone building viewer), `tools/` (map validator, `supabase_check.py`), `docs/map-format/` (one fixture per map format version), `Waypoint/Model3D/` (3D model viewer) and `Waypoint/Services/` + `Waypoint/UI/Scanner|Navigator|DesignSystem/` (the new interface, now the DEFAULT). `make selftest-*` only LAUNCH the installed build: run `make build install` first (details in docs/WORKFLOW.md).
