@@ -1,5 +1,14 @@
 # Work log
 
+## 2026-10-18 04:20 — Claude (agent, for Sachin) — Two more security-review findings fixed: NULL-unsafe 0005 and un-validated merge result   [tags: BUG]
+Area: D / shared contract. Branch `fix/format-alignment-security`.
+Finding A (real bug in my SQL, `0005_map_extras_constraint.sql`): in plpgsql `if <NULL> then` does not fire, so an extent or mesh asset with a MISSING key (`{}`, no `center`, no `boundsMin`, ...) was ACCEPTED (fail-open); my tests only covered wrong values. Fixed by writing every rule as a positive condition wrapped in `coalesce(..., false)` (anything not provably valid is rejected) and requiring node `position`. +17 missing-key cases in `supabase/tests/map_extras_constraint.sql`. Proof in a local Postgres: the PREVIOUS function wrongly accepted 8 of the 32 cases; the fixed one gets 32/32 right and the constraint still refuses a bad row.
+Finding B (`BuildingMap.merged` / `importBundle`): only the INCOMING bundle was validated, so merging two valid maps could exceed the 100-file / 80 MB mesh caps (or node limits). `MapStore.importBundle` now validates the MERGED result before saving; test `testImportRefusesAMergeThatBreaksTheMeshFileLimit` (60 + 60 files -> rejected, stored map unchanged).
+Python validator: +1 test for missing keys / junk entries (16 tests).
+Verified: `make test` 260 pass; Python 16 OK; `make typecheck` OK; local Postgres 32/32.
+NOT verified: the SQL on the LIVE project (0004 re-run and 0005 not applied yet); the phone with this last change (only unit-tested).
+Open problems / handoff: the Supabase person must run the CURRENT `0004` and `0005` (0005 was changed after it was first pushed: if an earlier copy was run, run the new file again; it is idempotent).
+
 ## 2026-10-18 03:40 — Claude (agent, for Sachin) — Phone results for the format-3 alignment + security fixes   [tags: BUILD]
 On Sachin's iPhone 16 Pro Max with this branch installed (`make build install`): `make uitest` 11/11, `make selftest-e2e` 23 passed / 0 failed / 1 skipped, `make selftest-sim` PASS. The 3 real scans from the phone's backup, the sample, the web fixture and all three format fixtures pass the stricter `tools/validate_map.py`; `make check` BUILD SUCCEEDED.
 NOT verified: see the 03:10 entry (live SQL not applied; web viewer reading app-written maps).

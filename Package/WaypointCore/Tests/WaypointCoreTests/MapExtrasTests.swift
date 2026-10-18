@@ -96,4 +96,22 @@ final class MapExtrasTests: XCTestCase {
         XCTAssertNoThrow(try MapBundle(map: map).validate())
         XCTAssertFalse(map.meshAssets?.isEmpty ?? true, "the v3 fixture must carry a meshAssets entry")
     }
+
+    func testImportRefusesAMergeThatBreaksTheMeshFileLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("merge-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MapStore(rootURL: root)
+        var first = map(assets: (0..<60).map { _ in asset() })
+        XCTAssertNil(validates(first))
+        _ = try store.importBundle(MapBundle(map: first))
+        // a second, individually valid copy of the same building with 60 DIFFERENT files: 120 in total, over the cap of 100
+        var second = first
+        second.meshAssets = (0..<60).map { _ in asset() }
+        XCTAssertNil(validates(second))
+        XCTAssertThrowsError(try store.importBundle(MapBundle(map: second))) { error in
+            guard case MapStoreError.rejected = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertEqual(try store.load(id: first.id).meshAssets?.count, 60, "the stored map must be unchanged")
+        first.meshAssets = nil
+    }
 }

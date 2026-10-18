@@ -226,6 +226,9 @@ public final class MapStore {
             }
             // Keep our copy's data on conflicts, add anything new from the incoming copy.
             result = existing.merged(with: bundle.map)
+            // The union of two individually valid maps can still break a limit (node count, 100 mesh files, 80 MB of them): check the RESULT
+            // before anything is saved (security review 2026-10-18).
+            try MapBundle(map: result).validate()
         }
         try save(result)
         for (seg, data) in bundle.worldMaps {

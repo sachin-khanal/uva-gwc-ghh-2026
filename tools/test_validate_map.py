@@ -149,6 +149,27 @@ class FormatThreeExtrasTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate(data)
 
+    def test_missing_keys_are_rejected_not_skipped(self):
+        for key in ("center", "halfExtents", "yaw", "areaSquareMeters"):
+            data = copy.deepcopy(self.v3)
+            del self.room(data)["extent"][key]
+            with self.assertRaises(ValueError, msg="extent without " + key):
+                validate(data)
+        data = copy.deepcopy(self.v3)
+        self.room(data)["extent"] = {}
+        with self.assertRaises(ValueError, msg="empty extent"):
+            validate(data)
+        for key in ("id", "segmentId", "format", "coordinateFrame", "byteCount", "sha256", "boundsMin", "boundsMax"):
+            data = copy.deepcopy(self.v3)
+            del data["meshAssets"][0][key]
+            with self.assertRaises(ValueError, msg="asset without " + key):
+                validate(data)
+        for junk in (5, None, "x"):
+            data = copy.deepcopy(self.v3)
+            data["meshAssets"] = [junk]
+            with self.assertRaises(ValueError, msg=repr(junk)):
+                validate(data)
+
     def test_web_viewer_fixture_validates_if_it_is_a_map(self):
         fixture = Path(__file__).resolve().parents[1] / "web/fixtures/rice-hall-sample.json"
         if fixture.exists():
