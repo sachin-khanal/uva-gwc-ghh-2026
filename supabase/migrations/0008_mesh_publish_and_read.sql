@@ -1,5 +1,5 @@
 -- File:    supabase/migrations/0008_mesh_publish_and_read.sql
--- Owner:   U3 (backend) / U1 (contract). Added 2026-10-18 on branch feature/web-mesh-obj. NOT APPLIED to any project yet.
+-- Owner:   U3 (backend) / U1 (contract). Added 2026-10-18 on branch feature/web-mesh-obj. APPLIED to the team's live project on 2026-10-18 (via the Supabase MCP, history entry `mesh_publish_and_read`).
 -- Why:     The phone now exports a 3D surface file (OBJ) per scan for the web viewer and uploads it to the `meshes` bucket
 --          (`<contributor>/<building>/<asset id>.obj`). Two things were missing on the server:
 --          1. `extend_building` (0002/0003) keeps the stored map and only replaces nodes/edges/version when a building already exists, so

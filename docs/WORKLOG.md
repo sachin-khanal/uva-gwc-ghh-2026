@@ -1,5 +1,13 @@
 # Work log
 
+## 2026-10-18 18:00 — Claude (agent, for Sachin) — Docs updated after 0008 went live   [tags: DOCS]
+Area: shared
+Files edited:   `supabase/migrations/0008_mesh_publish_and_read.sql` (header comment only: now says APPLIED), `docs/MODULES.md` (mesh-publish row: struck the old UNVERIFIED text, added the result), `docs/SETUP.md` (step 3: also run 0008), `supabase/CANONICAL_MAPS.md` (new Update about 0008 and the dropped `canonical_mesh_read`)
+Commands run:   `make test`
+Verified: `make test` -> 347 tests, 0 failures. The SQL change is a comment only (no behaviour change since the E2E run in the entry below).
+NOT verified: the web viewer opening a mesh shared through the LIVE cloud.
+Open problems / handoff: MCP example files (`.mcp.json.example`, `.env.local.example`, SETUP.md 5b) are still on a stash of branch `chore/supabase-mcp-example`, not in this PR.
+
 ## 2026-10-18 17:00 — Claude (agent, for Sachin) — 0008 now drops the live looser mesh read rule; live project inspected through the Supabase MCP   [tags: SECURITY, BUILD]
 Area: D (backend), U3's area edited at U1's request
 Files edited:   `supabase/migrations/0008_mesh_publish_and_read.sql` (+ `drop policy if exists canonical_mesh_read on storage.objects;` before the new rule, with the reason in a comment). Still NOT applied to the live project.
