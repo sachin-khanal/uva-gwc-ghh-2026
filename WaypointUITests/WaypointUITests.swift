@@ -67,13 +67,27 @@ final class WaypointUITests: XCTestCase {
         XCTAssertEqual(result, .completed, "\(message) (waited \(Int(timeout)) s; label now '\(element.label)')")
     }
 
-    /// Opens Navigator, selects the bundled SAMPLE map and starts the simulated walk to Room 204.
+    /// Opens Navigator, selects the first REAL scanned map that has a named place and starts the simulated walk to its first place.
+    /// There is no bundled sample map any more (2026-10-18), so the phone must hold at least one scan with a labelled place.
     private func startSimulatedWalk(paused: Bool = false) {
         need(app.buttons["mode.navigate"], "Home screen missing").tap()
-        // Maps are listed alphabetically; the user's own scans may come first, so pick the SAMPLE map explicitly.
-        let sample = app.buttons.matching(NSPredicate(format: "label CONTAINS 'SAMPLE'")).firstMatch
-        need(sample, "SAMPLE map not listed").tap()
-        need(app.buttons["nav.simulate.Room 204"], "Simulate button for Room 204 missing").tap()
+        let maps = app.buttons.matching(identifier: "nav.map")
+        need(maps.firstMatch, "no scanned map on this phone: scan one (with a labelled place) before running the UI tests")
+        let simulateButtons = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav.simulate.'"))
+        // Maps are listed alphabetically and several real scans can share a name. A scan with no labelled place has nothing to walk to, and one
+        // with a single place nearby finishes the simulated walk in seconds, before a test can pause it or inject an obstacle. So look at every
+        // map and use the one with the most places (a longer route).
+        var best = (index: 0, places: 0)
+        for index in 0..<maps.count {
+            maps.element(boundBy: index).tap()
+            _ = simulateButtons.firstMatch.waitForExistence(timeout: 2)
+            if simulateButtons.count > best.places { best = (index, simulateButtons.count) }
+        }
+        XCTAssertGreaterThan(best.places, 0, "none of the scanned maps on this phone has a named place to walk to")
+        maps.element(boundBy: best.index).tap()
+        need(simulateButtons.firstMatch, "the chosen map shows no places to walk to")
+        // The LAST place is the one scanned last, i.e. the farthest walk from the start.
+        simulateButtons.element(boundBy: simulateButtons.count - 1).tap()
         need(app.staticTexts["nav.status"], "Navigating screen did not appear")
         if paused { flip(app.switches["nav.pauseWalk"], "Pause toggle missing") } // freeze the walker: the whole walk is only ~15 s
     }
@@ -97,7 +111,7 @@ final class WaypointUITests: XCTestCase {
         shot("10-sim-start")
         XCTAssertEqual(app.staticTexts["nav.status"].label, "Simulating walk")
 
-        waitUntil("label == 'Simulation finished'", on: app.staticTexts["nav.status"], timeout: 60, "walk did not finish")
+        waitUntil("label == 'Simulation finished'", on: app.staticTexts["nav.status"], timeout: 150, "walk did not finish")
         shot("11-sim-finished")
         let instruction = app.staticTexts["nav.instruction"].label
         note("final-instruction", instruction)

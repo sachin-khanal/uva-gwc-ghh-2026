@@ -35,7 +35,7 @@ Package/WaypointCore/            pure logic, tested by `make test` (no Apple UI/
   Tests/WaypointCoreTests/   ModelTests, RoutingTests, FeedbackAndVisionTests, ScanAndSimulationTests, CloudTests
 Waypoint/                        the iOS app (ARKit/AVFoundation/SwiftUI glue; needs a phone)
   App/ UI/ Capture/ Scan/ Relocalization/ Navigation/ Guidance/ Vision/ Sync/ Cloud/
-Samples/rice-hall-sample.json    hand-written fake map; also bundled in the app and seeded on first launch
+Samples/rice-hall-sample.json    hand-written fake map; ~~also bundled in the app and seeded on first launch~~ **Update 2026-10-18 (Claude):** a TEST FIXTURE only; the app ships no sample/placeholder map (only scanned ones)
 Config/  project.yml  Makefile  scripts/    build system
 supabase/migrations/0001_init.sql  database + storage schema with RLS (run in the Supabase SQL editor)
 docs/  AGENTS.md  Architecture.md           documentation

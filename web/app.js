@@ -44,7 +44,7 @@ function selectMap(entry) {
   $("geometry-status").textContent = (entry.map.meshAssets ?? []).length ? "Loading verified 3D scan geometry…" : "Room footprints + route graph · No LiDAR mesh attached";
   const map = entry.map;
   $("map-title").textContent = entry.title || map.name;
-  $("map-source").textContent = entry.source === "Shared" ? "SHARED BUILDING" : entry.source === "Sample" ? "HAND-WRITTEN SAMPLE · NOT A REAL SCAN" : "LOCAL MAP";
+  $("map-source").textContent = entry.source === "Shared" ? "SHARED BUILDING" : "LOCAL MAP";
   const heights = map.nodes.map((n) => n.position[1]);
   const multipleLevels = heights.length && Math.max(...heights) - Math.min(...heights) > 1.5;
   $("map-meta").textContent = `${map.nodes.length} places · ${map.edges.length} connections · Version ${map.version}${multipleLevels ? " · Multiple levels" : ""}`;
@@ -295,15 +295,8 @@ $("refresh").addEventListener("click", async () => {
   finally { state.busy = false; $("refresh").disabled = false; }
 });
 
-try {
-  const response = await fetch("./fixtures/rice-hall-sample.json");
-  if (!response.ok) throw new Error("Sample map could not be loaded.");
-  const map = validateMap(await response.json());
-  const entry = { map, source: "Sample", title: "Rice Hall · sample" };
-  state.entries.push(entry);
-  // A slow sample request must not replace a cloud/local map the user already chose.
-  if (!state.active) { selectMap(entry); status("Showing a hand-written sample, not a real building scan. Connect your library to view uploaded buildings."); }
-  else renderBuildings();
-} catch (error) {
-  if (!state.active) status(`${error.message} You can still connect a library or open a local map.`, true);
-}
+// No bundled sample building (removed 2026-10-18): the viewer starts empty and only ever shows REAL scans (the shared library or a local map file).
+$("map-title").textContent = "No building open";
+$("map-source").textContent = "NOTHING LOADED";
+status("Connect your library to see shared scans, or open a local map file.");
+renderBuildings();

@@ -3,7 +3,8 @@
 // Owner:    D (App/Sync/Integration) - used by B and A for headless testing
 // Purpose:  Self-test switches passed as launch arguments, so the app can be exercised from the command line
 //           (no tapping) and report what it did on stderr:
-//             -autoSimulate "Room 204"   open Navigator, run the simulated walk to that destination on the sample/first map,
+//             -autoSimulate "Room 204"   open Navigator, run the simulated walk to that destination on the first scanned map that has it ("*" = the first
+//                                        labelled place of the first scanned map; there is no bundled sample map any more),
 //                                        log every spoken cue / haptic / instruction, print "SELFTEST PASS ..." and exit(0).
 //                                        Fails with exit(1) on timeout (120 s) or exit(2) if the map/destination is not found.
 //             -autoFacingAway YES        with -autoSimulate: the walker starts facing the wrong way (exercises "turn around").

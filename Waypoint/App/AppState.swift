@@ -3,8 +3,8 @@
 // Owner:    D (App/Sync/Integration)
 // Purpose:  App-wide observable state: which mode the user picked (volunteer / navigator), the
 //           on-disk `MapStore`, the list of maps, and a stable device name for `createdBy`.
-//           On first launch it copies Samples/rice-hall-sample.json (bundled as a resource) into
-//           the store so B and C can test navigation WITHOUT having scanned anything.
+//           Only REAL scanned maps live in the store. (Until 2026-10-18 the first launch seeded a hand-written sample map; that is gone, and
+//           launch removes a copy that an older build already seeded.)
 // Threading: UI-only class, always touched from the main thread.
 //
 import SwiftUI
@@ -43,7 +43,7 @@ final class AppState: ObservableObject {
         self.cloud = CloudController(store: self.store)
         cloud.onImported = { [weak self] _ in self?.reloadMaps() }
 
-        seedSampleMapIfNeeded()
+        removeSeededSampleMap()
         reloadMaps()
 
         switch launchCommand {
@@ -85,14 +85,15 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Copies the bundled sample map into the store once (only when the store is empty).
-    private func seedSampleMapIfNeeded() {
-        guard (try? store.listMaps().isEmpty) == true,
-              let url = Bundle.main.url(forResource: "rice-hall-sample", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let map = try? BuildingMap.from(jsonData: data)
-        else { return }
-        try? store.save(map)
-        Log.app.info("seeded sample map")
+    /// Older builds copied a hand-written "SAMPLE - Fake Rice Hall corridor" map into the store on first launch. It is a placeholder, not a scan,
+    /// so remove it once (matched by its fixed id; scanned maps always get fresh random ids).
+    private func removeSeededSampleMap() {
+        guard let sampleId = UUID(uuidString: "5A3E0000-0000-4000-8000-000000000001"),
+              (try? store.listMaps().contains { $0.id == sampleId }) == true else { return }
+        try? store.delete(id: sampleId)
+        if UserDefaults.standard.string(forKey: UIPrefs.pendingMapId) == sampleId.uuidString {
+            UserDefaults.standard.removeObject(forKey: UIPrefs.pendingMapId)
+        }
+        Log.app.info("removed the old bundled sample map")
     }
 }

@@ -41,7 +41,7 @@ DEVICE=<id> make run   # build + install + launch on your iPhone  (see docs/SETU
 ```
 Package/WaypointCore/   pure logic (model, storage, routing, feedback rules, vision math) + tests
 Waypoint/               iOS app: App, UI, Capture, Relocalization, Navigation, Guidance, Vision, Sync
-Samples/                hand-written sample map (also bundled in the app)
+Samples/                ~~hand-written sample map (also bundled in the app)~~ **Update 2026-10-18 (Claude):** test fixtures only (unit tests, web viewer tests); NOT bundled in the app any more
 supabase/migrations/    **Update 2026-10-17:** database + storage schema with Row Level Security (run in the Supabase SQL editor)
 project.yml  Config/    XcodeGen spec + per-developer signing config (Local.xcconfig is git-ignored)
 Makefile  scripts/      every build/test/run command

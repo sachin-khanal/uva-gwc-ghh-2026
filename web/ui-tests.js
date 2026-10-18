@@ -11,14 +11,27 @@ async function check(name, operation) {
   catch (error) { results.push({ name, pass: false, error: error.message }); }
 }
 try {
-  await waitFor(() => iframe.contentDocument?.querySelector("#route-result strong"));
+  await waitFor(() => iframe.contentDocument?.getElementById("map-file") && iframe.contentWindow.document.getElementById("status")?.textContent);
   const doc = iframe.contentDocument, win = iframe.contentWindow, $ = (id) => doc.getElementById(id);
-  const sample = await (await fetch("./fixtures/rice-hall-sample.json")).json();
+  const sample = await (await fetch("./fixtures/rice-hall-sample.json")).json(); // a TEST FIXTURE only: the viewer ships no sample building
   const change = (element) => element.dispatchEvent(new win.Event("change", { bubbles: true }));
-  await check("Sample renders default Room 204 route", () => {
+  await check("Viewer starts empty: no placeholder building is loaded", () => {
+    assert($("map-title").textContent === "No building open");
+    assert($("map-source").textContent === "NOTHING LOADED");
+    assert(!$("buildings").textContent.includes("sample"));
+  });
+  const openFile = async (map) => {
+    const transfer = new win.DataTransfer();
+    transfer.items.add(new win.File([JSON.stringify(map)], "test-map.json", { type: "application/json" }));
+    $("map-file").files = transfer.files; change($("map-file"));
+    await waitFor(() => $("map-file").value === "");
+  };
+  await openFile(sample);
+  await waitFor(() => doc.querySelector("#route-result strong"));
+  await check("A local map renders the default Room 204 route", () => {
     assert($("route-result").textContent.includes("10.5 m"));
     assert($("destinations").querySelectorAll("button").length === 4);
-    assert($("map-source").textContent.includes("NOT A REAL SCAN"));
+    assert($("map-source").textContent === "LOCAL MAP");
     assert($("map-canvas").width > 0);
   });
   await check("Destination click updates route and selector", () => {
@@ -55,12 +68,6 @@ try {
     $("building-search").value = ""; $("building-search").dispatchEvent(new win.Event("input"));
     assert($("buildings").children.length === 1);
   });
-  const openFile = async (map) => {
-    const transfer = new win.DataTransfer();
-    transfer.items.add(new win.File([JSON.stringify(map)], "test-map.json", { type: "application/json" }));
-    $("map-file").files = transfer.files; change($("map-file"));
-    await waitFor(() => $("map-file").value === "");
-  };
   await check("Local map import renders untrusted names as plain text", async () => {
     const map = structuredClone(sample); map.name = "<img src=x onerror=alert(1)>";
     await openFile(map);
@@ -121,7 +128,7 @@ try {
     $("refresh").click(); await waitFor(() => !$("refresh").disabled);
     assert(requests.filter(([url]) => url.includes("/auth/")).length === 1);
   });
-  await check("Empty shared library keeps the sample available", async () => {
+  await check("Empty shared library keeps the map you opened and explains it is empty", async () => {
     win.fetch = async (url) => new win.Response(JSON.stringify(String(url).includes("/auth/")
       ? { access_token: "test-token", refresh_token: "test-refresh", expires_in: 3600 } : []), { status: 200 });
     $("connect-open").click(); $("anon-key").value = "TEST-ANON";
