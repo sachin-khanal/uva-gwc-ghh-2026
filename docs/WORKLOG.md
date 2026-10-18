@@ -1,5 +1,10 @@
 # Work log
 
+## 2026-10-18 - Codex for U3 - Delete Floor 1 experiment
+User explicitly requested removing Floor 1 from personal U3. Deleted all eight tracked files in floor1-demo: checks.html, floor1-model.js, floor1.css, floor1.html, floor1.js, movement-checks.html, preview.png, serve.py. Added this entry; existing historical notes retained. Main unchanged; active web viewer unchanged.
+Verified: clean U3 before deletion; no current references outside experiment/history found by rg; staged deletion list and git diff --check. NOT verified: native make test/typecheck unavailable on Windows as previously established; not rerun for isolated unused-demo removal. No database/device changes.
+
+
 ## 2026-10-18 - Codex for U3 - Include final concurrent team documentation update
 Final fetch found guidance branch commit 3730ae6 (documentation of redundant navigation branch removal only). Merged its WORKLOG entry preserving both histories; no source changes.
 Verified: final ancestry audit and clean U3/origin synchronization after push; git diff --check. NOT verified: native/device/SQL limits from prior entry unchanged; no tests rerun for docs-only change.
