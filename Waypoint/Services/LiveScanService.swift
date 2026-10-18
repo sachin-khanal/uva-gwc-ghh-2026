@@ -78,6 +78,12 @@ final class LiveScanService: ScanService {
 
     func tag(kind: NodeKind, label: String?) {
         guard controller.isRunning, !isPaused else { return }
+
+    /// Locating the phone in the saved map by hand; see `CaptureController.confirmPlace`.
+    func confirmPlace(id: UUID) {
+        guard let node = controller.placesToStandAt.first(where: { $0.id == id }) else { return }
+        controller.confirmPlace(node)
+    }
         let before = controller.nodeCount
         controller.tagPOI(kind: kind, label: label)
         // tagPOI updates nodeCount synchronously when the tag was accepted.
@@ -152,6 +158,10 @@ final class LiveScanService: ScanService {
         s.showCoverage = controller.showCoverage
         s.coveragePercent = controller.gaps?.percent
         s.canRecord = controller.extensionStatus == nil || controller.canRecord
+        s.placesToStandAt = controller.placesToStandAt.compactMap { node in
+            (node.label?.trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : StandPlace(id: node.id, label: $0) }
+        }
+        s.confirmedPlaceCount = controller.confirmedPlaceCount
         snapshot = s
     }
 

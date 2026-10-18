@@ -363,9 +363,18 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     /// Refuses rather than guesses: see `ManualAlignment`. A wrong alignment writes every new node into
     /// the wrong part of the building, which is much worse than asking the volunteer to try again.
     func confirmPlace(_ node: MapNode) {
+        // Deliberately NOT gated on `.normal` tracking. While extending, the saved world map is loaded, so
+        // ARKit sits in `.limited(.relocalizing)` hunting for a space it may never recognise - which is the
+        // exact situation this feature exists to escape. Requiring `.normal` made it unreachable. ARKit is
+        // still tracking its own provisional frame meanwhile, and that frame is all the alignment needs,
+        // because both confirmed places are measured in it.
         guard isExtension, !extensionAttached, isRunning, !isSaving,
-              let frame = session.currentFrame, case .normal = frame.camera.trackingState else {
-            extensionStatus = "Hold the phone up and wait for tracking, then confirm the place again."
+              let frame = session.currentFrame else {
+            extensionStatus = "Hold the phone up so the camera can see, then confirm the place again."
+            return
+        }
+        if case .limited(.initializing) = frame.camera.trackingState {
+            extensionStatus = "Still starting the camera. Give it a second, then confirm the place again."
             return
         }
         let world = Geometry.translation(of: frame.camera.transform)

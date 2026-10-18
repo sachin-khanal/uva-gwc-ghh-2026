@@ -145,6 +145,29 @@ struct LiveScanScreen: View {
                 // Extending a saved map: tell the volunteer what the scanner is waiting for. Recording and tagging are paused until it has found its place.
                 Banner(text: status, kind: s.canRecord ? .info : .warning)
             }
+            // Locating yourself BY HAND. ARKit often will not recognise a space from a new direction, and
+            // waiting for it is what blocked extending a map at all. A sighted volunteer can just look at a
+            // door they labelled. TWO places are needed: the first says where you are, the second which way
+            // you are turned (see ManualAlignment).
+            if !s.placesToStandAt.isEmpty, !s.canRecord {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text(s.confirmedPlaceCount == 0
+                         ? "Standing somewhere you already labelled? Tap it and skip the search."
+                         : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
+                        .font(.subheadline.weight(.medium))
+                        .accessibilityIdentifier("scan.extension.manualHint")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Theme.Space.s) {
+                            ForEach(s.placesToStandAt) { place in
+                                Button(place.label) { model.confirmPlace(place.id) }
+                                    .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("scan.extension.places")
+            }
             if case .limited(let reason) = s.tracking {
                 Banner(text: "\(reason). Slow down and point at walls with detail.")
             }

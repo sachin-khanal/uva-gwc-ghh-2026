@@ -1,5 +1,47 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — The "stand at a labelled place" picker was wired into the wrong screen, and was unreachable anyway   [tags: BUG]
+Area: U3 (scanner UI) + A (capture). Branch `map-extension`.
+Anmol, trying it on the phone: "when i click extend a map ... i can scan around but i dont see how to see if im at a
+saved location, it just starts mapping but the 'Find the selected scanned area. Move slowly until tracking recovers'
+and nothing really showing what room im in to sync up."
+
+TWO faults, both mine, from the previous entry:
+1. WRONG SCREEN. The picker was added to `VolunteerView` (the classic scanner). The Extend-a-map flow goes through
+   the NEW scanner, `LiveScanScreen`, which only ever showed `extensionStatus` as a banner. The feature existed and
+   was simply not reachable from where the button takes you.
+2. UNREACHABLE EVEN THERE. `CaptureController.confirmPlace` required `case .normal` tracking. When extending, the
+   saved ARWorldMap is loaded as `initialWorldMap`, so ARKit sits in `.limited(.relocalizing)` hunting for a space
+   it may never recognise - which is the exact situation this feature exists to escape. The guard made it
+   impossible to use precisely when it was needed.
+
+Fixed:
+* `Waypoint/Services/ScanService.swift`: NEW `StandPlace` (id + label only - the screen needs no positions) and
+  snapshot fields `placesToStandAt` / `confirmedPlaceCount`; NEW protocol method `confirmPlace(id:)` with a no-op
+  default so `MockScanService` is unaffected.
+* `Waypoint/Services/LiveScanService.swift`: fills those from `CaptureController` and forwards the call.
+* `Waypoint/UI/Scanner/LiveScanScreen.swift`: the picker, shown under the extension banner while `!canRecord` (i.e.
+  while the scanner has not yet found its place), with the hint line changing after the first tap.
+* `Waypoint/UI/Scanner/ScanSessionModel.swift`: `confirmPlace(_:)`, deliberately NOT gated on `canRecord` - being
+  unable to record is the whole reason the volunteer is being asked.
+* `Waypoint/Capture/CaptureController.swift`: `confirmPlace` now works while relocalizing. Only
+  `.limited(.initializing)` is refused (the camera genuinely has no pose yet).
+
+Verified: `make test` -> **363 tests, 0 failures** (unchanged - this block is wiring and UI, which `make test`
+cannot reach). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, including whether the picker now actually appears in the Extend flow.
+OPEN PROBLEM, now the biggest one in this feature: while relocalizing, ARKit tracks a PROVISIONAL frame. Both
+confirmed places are measured in it, so the alignment itself is consistent - but if ARKit later succeeds at
+relocalizing, the camera transform silently moves into the saved map's frame while `worldToMap` still describes
+the provisional one, and every node recorded after that lands in the wrong place. Partial protection exists: a
+jump BETWEEN the two taps will usually break the `lengthMismatch` check and be refused. A jump AFTER the second tap
+is currently undetected. The clean fix is to stop loading the saved world map once the volunteer commits to
+aligning by hand (re-run the session without `initialWorldMap`, capture the first place from the fresh frame), so
+ARKit has nothing to relocalize into and the frame cannot move. NOT done here - it is a real change to the session
+lifecycle and wanted testing first.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Extend a map by standing at a place you already labelled   [tags: FEATURE]
 Area: A (AR/Maps) + U3 (scanner UI). NEW branch `map-extension` off `navigation-overhaul` d8afcf1.
 

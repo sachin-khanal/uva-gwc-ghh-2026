@@ -19,6 +19,13 @@ struct ScanTag: Identifiable, Equatable {
     var hasLabel: Bool { !(label ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
+/// A place already labelled in the map being EXTENDED, that the volunteer can say they are standing at.
+/// Carries no position: the screen only needs to show a name and send the id back.
+struct StandPlace: Identifiable, Equatable {
+    let id: UUID
+    var label: String
+}
+
 /// Everything the scanning screen shows, as one value.
 struct ScanSnapshot: Equatable {
     var isRunning = false
@@ -46,6 +53,11 @@ struct ScanSnapshot: Equatable {
     var extensionStatus: String?
     /// False while an extension is still finding its place in the saved area (recording and tagging are paused).
     var canRecord = true
+    /// Extending a saved map: the labelled places the volunteer can confirm standing at, so they can locate
+    /// themselves BY HAND instead of waiting for ARKit to recognise the space. Empty for a new scan.
+    var placesToStandAt: [StandPlace] = []
+    /// How many of those have been confirmed (0 or 1). Two solves the alignment and attaches.
+    var confirmedPlaceCount = 0
 
     var labelledTagCount: Int { tags.filter(\.hasLabel).count }
     var finishGate: FinishGate { FinishGate.evaluate(quality: quality, labelledTagCount: labelledTagCount,
@@ -74,6 +86,9 @@ protocol ScanService: AnyObject {
     var coverageOverlay: CoverageSnapshot? { get }
     func setShowCoverage(_ on: Bool)
     func tag(kind: NodeKind, label: String?)
+    /// "I am standing at this labelled place" while extending a map. Two of them, a few metres apart, locate
+    /// the phone in the saved map without ARKit having to recognise the space. Only the live engine can.
+    func confirmPlace(id: UUID)
     func dismissSuggestion()
     func adjustBox(by delta: Float)
     /// Saves the map; completion on the main thread.
@@ -88,4 +103,6 @@ struct ScanServiceError: LocalizedError {
 
 extension ScanService {
     func start(mapName: String, extending map: BuildingMap?, initialSegment: String?) { start(mapName: mapName) }
+    /// The mock has no saved map to stand in, so confirming a place does nothing.
+    func confirmPlace(id: UUID) {}
 }

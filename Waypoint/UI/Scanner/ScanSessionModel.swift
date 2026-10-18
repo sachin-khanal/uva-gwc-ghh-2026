@@ -55,6 +55,15 @@ final class ScanSessionModel: ObservableObject {
         Announcer.voiceOverOnly(isPaused ? "Scan paused" : "Scan resumed")
     }
 
+    /// "I am standing at this labelled place" while extending a saved map. Deliberately NOT gated on
+    /// `canRecord`: the whole point is that recording is still blocked because the scanner has not
+    /// found its place, and this is how the volunteer gives it one.
+    func confirmPlace(_ id: UUID) {
+        service.confirmPlace(id: id)
+        snapshot = service.snapshot
+        if let status = snapshot.extensionStatus { Announcer.voiceOverOnly(status) }
+    }
+
     func tag(_ kind: NodeKind) {
         guard !isPaused, snapshot.canRecord else { return }
         let label = labelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
