@@ -76,6 +76,16 @@ public enum NarrationText {
         text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
     }
 
+    /// "right" the ADVERB ("right there", "right now", "right on your left") is not the direction. Live Gemini wrote "Room 206 is right there on
+    /// your left." and the instruction check above took it for an added turn. Only these fixed phrases are excused; a bare "right" still counts.
+    static func withoutAdverbRight(_ text: String) -> String {
+        var t = " " + text.lowercased() + " "
+        for follower in ["there", "here", "now", "next", "away", "in", "at", "on", "by", "over", "up", "after", "before", "around"] {
+            t = t.replacingOccurrences(of: " right \(follower) ", with: " \(follower) ")
+        }
+        return t
+    }
+
     static let directionVocabulary = ["left", "right", "ahead", "behind", "straight"]
 
     /// Digit runs, in order: "In 10 meters, Room 204" -> ["10", "204"].
@@ -140,7 +150,7 @@ public enum NarrationGuard {
         for n in NarrationText.numbers(in: text) where !allowed.contains(n) { return nil }
         // ...no direction or instruction is ADDED (a rewrite of "Room 206 on your right" must not grow a "then left" or a "stop")...
         let plainWords = Set(NarrationText.words(in: fact.plain))
-        for word in NarrationText.words(in: text) where NarrationText.instructionVocabulary.contains(word) && !plainWords.contains(word) { return nil }
+        for word in NarrationText.words(in: NarrationText.withoutAdverbRight(text)) where NarrationText.instructionVocabulary.contains(word) && !plainWords.contains(word) { return nil }
         // ...and no reassurance about safety is added.
         let plainLower = fact.plain.lowercased()
         for claim in safetyClaims where lower.contains(claim) && !plainLower.contains(claim) { return nil }
@@ -169,7 +179,7 @@ public enum NarrationPrompt {
 // MARK: - Gemini
 
 public struct GeminiConfig: Equatable, Sendable {
-    public static let defaultModel = "gemini-2.5-flash"
+    public static let defaultModel = "gemini-3.5-flash-lite"
     public var apiKey: String
     public var model: String
 

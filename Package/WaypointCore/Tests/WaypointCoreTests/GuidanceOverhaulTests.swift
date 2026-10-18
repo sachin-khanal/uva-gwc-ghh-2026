@@ -275,6 +275,15 @@ final class NarrationGuardTests: XCTestCase {
         XCTAssertNil(NarrationGuard.accept("Coming up in 10 meters, turn right.", for: countdown), "unexpected 'up' - conservative: a false reject only costs the plain sentence")
     }
 
+    /// Real replies from gemini-3.5-flash-lite on the team's key (2026-10-18).
+    func testRealGeminiRepliesAreAccepted() {
+        XCTAssertEqual(NarrationGuard.accept("Room 206 is right there on your left.", for: landmark), "Room 206 is right there on your left.")
+        XCTAssertEqual(NarrationGuard.accept("In 10 meters, please turn right.", for: countdown), "In 10 meters, please turn right.")
+        // ...but the adverb excuse must not let a real extra turn through.
+        XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, then turn right.", for: landmark))
+        XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, go right.", for: landmark))
+    }
+
     func testReassuranceAboutSafetyRejectsTheRewrite() {
         XCTAssertNil(NarrationGuard.accept("The path is clear, so turn right in 10 meters.", for: countdown))
         XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, and it's safe.", for: landmark))
