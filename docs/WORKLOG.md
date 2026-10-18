@@ -1,5 +1,26 @@
 # Work log
 
+## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul` (27 commits)   [tags: BUILD]
+Area: shared.
+Brings in `main`'s mesh pipeline and cloud/web work: `MeshExporter` (LiDAR mesh -> cropped -> decimated -> USDZ beside
+the map), `MeshDecimator`/`MeshCrop`/`IndexedMesh` in core, `MeshAsset` in the map format, the unscanned-areas
+overlay, the 3D model viewer, the standalone web viewer, Supabase storage policies and the `supabase_check` tool.
+**The format collision I expected was not there.** `main` had already aligned format 3 to include BOTH their
+`meshAssets`/`heightMeters` AND our `keyframes` (see the comment at `BuildingMap.swift:17` and the `CodingKeys` at
+`:85`), so the two meanings of "3" had already been reconciled on their side. Zero textual conflicts, and the merged
+decoder carries every optional field.
+Verified AFTER the merge: `make test` -> **337 tests, 0 failures** (253 ours + main's); `make typecheck` OK (64 app
+files, 1 UI test file); `make check` -> BUILD SUCCEEDED. `make gen` run first, since the branch adds files.
+NOT verified: nothing was run on a phone in this block. Everything already marked UNVERIFIED ON DEVICE stays so.
+Open / handoff:
+1. Zero conflicts is not the same as semantically correct. The areas where both sides moved and git merged silently -
+   `BuildingMap`, `MapStore`, `FeedbackPlanner`, `NavigationController` - deserve a read by their owners.
+2. This unblocks floor-grid routing: `IndexedMesh` and the mesh pipeline are now on the same branch as the guidance
+   work, and the mesh is written in the MAP frame, the same frame as the nodes.
+3. Not merged to `main`; under ROADMAP Revision 3 that is U1's call.
+
+---
+
 ## 2026-10-18 06:20 — Claude (agent, for Sachin) — Integrated U2's navigation-overhaul (12 commits) with main; conflicts resolved; two fixes   [tags: CONTRACT CHANGE, BUILD]
 Area: shared integration (U1 merge captain). Branch `integrate/navigation-overhaul` = main f912ef5 + origin/navigation-overhaul a107f85 (Anmol, 12 commits: keyframe relocalization with visual fingerprints OFF by default, "one move at a time" speech, sooner re-routing, route continuously, scan both directions (`CoverageTracker`), suggest a way round a blockage (`AvoidanceAdvisor`)). Cross-referenced first: main = origin/main; U3 and app-ui-workflows unchanged; Anmol pushed 3 more commits while this was being prepared (latest a107f85, minutes old).
 Conflicts (4 files, 8 blocks) and how they were resolved, keeping BOTH sides: `FeedbackPlanner.swift` (params `context:` + `isMoving:` + U2's `avoidTowards:`); `BuildingMap.swift` (kept my instance `schemaVersion` + `meshAssets` + U2's `keyframes`; U2's own hand-written decoder was a DUPLICATE of mine and was removed, `keyframes` is now decoded by the single decoder with `decodeIfPresent ?? []`; format 3 now also means `keyframes`, MAP_FORMAT.md updated); `NavigationController.swift` (my sensor context + opening briefing + sign speech + U2's pose-jump guard + avoidance advice); WORKLOG (both entries).
