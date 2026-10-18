@@ -10,7 +10,13 @@
 --          user contributed (segment_owners), format "obj", coordinateFrame "map", storageOwner = this user, 1..40 MB, lowercase hex
 --          SHA-256, finite bounds with min <= max. Append-only (existing ids are skipped, never changed). At most 100 files / 80 MB in
 --          total. The CHECK constraint from 0005 then re-validates the whole map.
--- Read:    any signed-in user may read a file only if its EXACT path is listed in a building's `meshAssets`.
+-- Read:    any signed-in user may read a file only if its EXACT path is listed in a building's `meshAssets` AND the listed storageOwner
+--          is the user who contributed that asset's segment (segment_owners, set by extend_building from the real caller). The second
+--          condition matters because the FIRST publication of a building stores the incoming JSON as is, so a forged meshAssets entry
+--          could otherwise point the rule at someone else's folder (automated security review 2026-10-18).
+-- Quota:   limits are PER CONTRIBUTOR (25 files / 40 MB each) as well as per building (100 files / 80 MB), so one user cannot fill the
+--          building's list. A listed file must already exist in storage with exactly the claimed size (upload first, then list).
+--          `remove_mesh_asset(building, id)` lets the contributor delist their own entry.
 -- Tests:   supabase/tests/mesh_publish_and_read.sql (run in a scratch Postgres or the SQL editor). Safe to re-run.
 begin;
 
@@ -23,6 +29,8 @@ declare
   item jsonb;
   b jsonb;
   total bigint := 0;
+  mine integer;
+  mine_bytes numeric;
   i integer;
 begin
   if actor is null then raise exception 'Sign in first'; end if;
@@ -59,6 +67,13 @@ begin
         raise exception 'Invalid mesh bounds';
       end if;
     end loop;
+    -- The file must already be uploaded, at the claimed size (the app uploads first). Size comes from storage metadata.
+    if not exists (select 1 from storage.objects o
+                   where o.bucket_id = 'meshes'
+                     and o.name = actor::text || '/' || building::text || '/' || lower(item->>'id') || '.obj'
+                     and (o.metadata->>'size')::numeric = (item->>'byteCount')::numeric) then
+      raise exception 'Upload the mesh file first (missing or wrong size)';
+    end if;
     -- Append-only: an id that is already listed is skipped, never replaced.
     if exists (select 1 from jsonb_array_elements(merged) m where lower(m->>'id') = lower(item->>'id')) then continue; end if;
     merged := merged || jsonb_build_array(jsonb_set(item, '{id}', to_jsonb(lower(item->>'id'))));
@@ -66,6 +81,10 @@ begin
 
   select coalesce(sum((m->>'byteCount')::numeric), 0) into total from jsonb_array_elements(merged) m;
   if jsonb_array_length(merged) > 100 or total > 80000000 then raise exception 'Too many or too large mesh files'; end if;
+  -- Per contributor, so one user cannot use up the building's whole list.
+  select count(*), coalesce(sum((m->>'byteCount')::numeric), 0) into mine, mine_bytes
+    from jsonb_array_elements(merged) m where lower(m->>'storageOwner') = actor::text;
+  if mine > 25 or mine_bytes > 40000000 then raise exception 'You have listed too many or too large mesh files for this building'; end if;
 
   update public.canonical_buildings
      set map_json = map_json || jsonb_build_object('meshAssets', merged), updated_at = now()
@@ -83,7 +102,25 @@ create policy canonical_meshes_read on storage.objects for select to authenticat
     from public.canonical_buildings c,
          jsonb_array_elements(case when jsonb_typeof(c.map_json->'meshAssets') = 'array' then c.map_json->'meshAssets' else '[]'::jsonb end) a
     where objects.name = lower(a->>'storageOwner') || '/' || c.map_id::text || '/' || lower(a->>'id') || '.obj'
+      and lower(coalesce(c.segment_owners->>(a->>'segmentId'), '')) = lower(a->>'storageOwner')
   )
 );
+
+-- Delist your own mesh (the file stays in your folder; delete it with the Storage API if wanted).
+create or replace function public.remove_mesh_asset(building uuid, asset_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare actor uuid := auth.uid();
+begin
+  if actor is null then raise exception 'Sign in first'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(building::text, 0));
+  update public.canonical_buildings c
+     set map_json = c.map_json || jsonb_build_object('meshAssets',
+           (select coalesce(jsonb_agg(m), '[]'::jsonb) from jsonb_array_elements(c.map_json->'meshAssets') m
+             where not (lower(m->>'id') = lower(asset_id::text) and lower(m->>'storageOwner') = actor::text))),
+         updated_at = now()
+   where c.map_id = building and jsonb_typeof(c.map_json->'meshAssets') = 'array';
+end $$;
+revoke all on function public.remove_mesh_asset(uuid, uuid) from public, anon;
+grant execute on function public.remove_mesh_asset(uuid, uuid) to authenticated;
 
 commit;

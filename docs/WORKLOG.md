@@ -1,5 +1,12 @@
 # Work log
 
+## 2026-10-18 11:30 — Claude (agent, for Sachin) — Hardened migration 0007 after an automated security review   [tags: SECURITY]
+Area: `supabase/migrations/0007_mesh_publish_and_read.sql` and its test, branch `feature/web-mesh-obj` (still not merged, 0007 still not applied anywhere). Two findings from the review of the previous commit, both real:
+(1) READ RULE TRUSTED THE MANIFEST: the first publication of a building stores the incoming JSON as is (`extend_building`), so a forged `meshAssets` entry could name another user's folder as `storageOwner` and make the read rule serve that user's file. Fix: the rule now also requires `segment_owners[segmentId] = storageOwner` (segment owners are set from the real caller). Proven: with the old rule the new forged-entry test reads 2 objects, with the new rule 1.
+(2) SHARED QUOTA: one contributor could fill the building's 100 files / 80 MB. Fix: also 25 files / 40 MB PER contributor; a listed file must already exist in storage with exactly the claimed size (the app already uploads before listing); new `remove_mesh_asset(building, id)` lets a contributor delist their own entry.
+Verified: migrations 0001-0005 + 0007 apply in a throwaway Docker Postgres (removed); `supabase/tests/mesh_publish_and_read.sql` 13 PASS (was 9). The Swift side needed no change.
+NOT verified: 0007 on the real Supabase project (storage.objects.metadata->>'size' is assumed from Supabase's schema; the test stand-in table adds that column); anything on a phone. Note: `extend_building` still accepts `meshAssets` on a building's first publication (kept as is; the read rule no longer trusts it). Stripping it there would be a change to 0002/0003 logic and is left to U3.
+
 ## 2026-10-18 10:45 — Claude (agent, for Sachin) — Web-viewer 3D scans: OBJ export, local storage, upload, server migration 0007   [tags: BUILD, SECURITY]
 Area: scan export + cloud (branch `feature/web-mesh-obj`, from main 6269746; NOT merged, PR pending). Before this, the phone only wrote `model.usdz` and nothing wrote `meshAssets`, so U3's web viewer could only ever show the flat route graph for real scans.
 Files created: `Package/WaypointCore/Sources/WaypointCore/Scan/ObjExport.swift` (mesh -> OBJ text, SHA-256, bounds, fit to 30 MB / viewer limits); `Model/MapStoreMesh.swift` (`meshURL`, `loadMesh`, `attachMesh`: file first, then validated `meshAssets` entry); `Tests/.../ObjExportTests.swift` (11 tests); `supabase/migrations/0007_mesh_publish_and_read.sql`; `supabase/tests/mesh_publish_and_read.sql`.

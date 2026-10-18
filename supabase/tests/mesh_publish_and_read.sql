@@ -17,7 +17,11 @@ create temp table t(a uuid default 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', b uui
 insert into t default values;
 grant select on t to authenticated;
 grant select on public.buildings to authenticated;
+alter table storage.objects add column if not exists metadata jsonb; -- real Supabase has it; the stand-in table may not
 insert into auth.users(id) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'); -- rolled back at the end
+insert into storage.objects(bucket_id, name, metadata) values
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj', '{"size": 1000}'),
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/44444444-4444-4444-8444-444444444444.obj', '{"size": 1000}');
 
 -- user A publishes a one-room building (segment seg1 becomes A's)
 select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true), set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
@@ -34,9 +38,9 @@ do $$ begin
   assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'asset listed';
   raise notice 'PASS owner can list a mesh';
   -- same id again: skipped, not duplicated or replaced
-  perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1', 2000)));
-  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'append-only';
-  assert (select (map_json->'meshAssets'->0->>'byteCount')::int from public.canonical_buildings) = 1000, 'never replaced';
+  perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1'), '{sha256}', to_jsonb(repeat('b',64)))));
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = 1, 'append-only';
+  assert (select map_json->'meshAssets'->0->>'sha256' from public.canonical_buildings where map_id = '11111111-1111-4111-8111-111111111111') = repeat('a',64), 'never replaced';
   raise notice 'PASS append-only';
 end $$;
 
@@ -61,18 +65,50 @@ do $$ declare ok boolean; begin
   assert ok, 'another user must not list a mesh on a segment they did not contribute'; raise notice 'PASS other user refused';
 end $$;
 
+-- file not uploaded / wrong size must be refused (as A again)
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true), set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+do $$ declare ok boolean; begin
+  ok := false; begin perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1'), '{id}', '"77777777-7777-4777-8777-777777777777"'))); exception when others then ok := true; end;
+  assert ok, 'a mesh that was never uploaded must be refused'; raise notice 'PASS not-uploaded mesh refused';
+  ok := false; begin perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1', 999), '{id}', '"44444444-4444-4444-8444-444444444444"'))); exception when others then ok := true; end;
+  assert ok, 'wrong size must be refused'; raise notice 'PASS wrong-size mesh refused';
+  -- delist and relist (uploaded file 4444... exists)
+  perform public.publish_mesh_assets('11111111-1111-4111-8111-111111111111', jsonb_build_array(jsonb_set(pg_temp.asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','seg1'), '{id}', '"44444444-4444-4444-8444-444444444444"')));
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 2, 'two listed';
+  perform public.remove_mesh_asset('11111111-1111-4111-8111-111111111111', '44444444-4444-4444-8444-444444444444');
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'owner can delist';
+  raise notice 'PASS owner can delist';
+end $$;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', true), set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","role":"authenticated"}', true);
+do $$ begin
+  perform public.remove_mesh_asset('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');
+  assert (select jsonb_array_length(map_json->'meshAssets') from public.canonical_buildings) = 1, 'another user cannot delist';
+  raise notice 'PASS other user cannot delist';
+end $$;
+
 -- storage read rule: B can read exactly the listed path
 reset role;
 insert into storage.objects(bucket_id, name) values
-  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj'),
   ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/66666666-6666-4666-8666-666666666666.obj'),
   ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj.evil'),
   ('worldmaps', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.obj');
+-- FORGED entry: building 2 is B's, but its first publication named A as the storageOwner of B's segment. B must not be able to
+-- read A's file through it.
+insert into public.canonical_buildings(map_id, owner, name, version, map_json, segment_owners) values
+  ('99999999-9999-4999-8999-999999999999', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'ZZ FORGED', 1,
+   '{"schemaVersion":3,"id":"99999999-9999-4999-8999-999999999999","name":"ZZ FORGED","version":1,
+     "nodes":[{"id":"88888888-8888-4888-8888-888888888888","segmentId":"segX","kind":"corridor","createdBy":"x","position":[0,0,0]}],"edges":[],
+     "meshAssets":[{"id":"aaaaaaaa-0000-4000-8000-000000000001","segmentId":"segX","format":"obj","coordinateFrame":"map","byteCount":10,
+       "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","boundsMin":[0,0,0],"boundsMax":[1,1,1],
+       "storageOwner":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}]}',
+   '{"segX":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}');
+insert into storage.objects(bucket_id, name) values
+  ('meshes', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/99999999-9999-4999-8999-999999999999/aaaaaaaa-0000-4000-8000-000000000001.obj');
 set local role authenticated;
 do $$ declare n int; begin
   select count(*) into n from storage.objects where bucket_id = 'meshes';
   assert n = 1, 'B should read exactly the listed mesh, got ' || n;
-  raise notice 'PASS other user reads only the listed mesh path (% readable)', n;
+  raise notice 'PASS other user reads only the listed mesh path, forged owner entry unreadable (% readable)', n;
 end $$;
 
 rollback;
