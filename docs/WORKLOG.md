@@ -1,5 +1,9 @@
 # Work log
 
+## 2026-10-18 — Codex for Sachin — Remove redundant navigation-overhaul branch   [tags: DOCS]
+User reiterated the request to delete redundant branches. Fetched origin, verified origin/navigation-overhaul a9f909e is an ancestor of origin/feature/guidance-overhaul, then deleted its remote ref with an exact-tip lease. No local navigation-overhaul branch existed. All navigation/Gemini commits remain in guidance; no code or main changes.
+Files edited: docs/WORKLOG.md only. Commands: git fetch origin --prune; git merge-base --is-ancestor; git rev-parse; git branch --list; git status; leased git push deletion; git diff --check. Verified: ancestry check PASS; remote deletion succeeded. NOT verified: no runtime tests rerun for reference/docs-only cleanup. Previous main-only cleanup was too conservative for this redundant source branch.
+
 ## 2026-10-18 — Codex for Sachin — Delete obsolete branches already merged into main   [tags: DOCS]
 User requested branch cleanup. Read docs/WORKFLOW.md rule 6 (delete merged branches), fetched origin and recomputed ancestry. Main advanced to 7e03f83 during the session, including stairs/map-extension integration; older branch-audit tables are historical snapshots.
 Remote branches deleted: app-ui-workflows (ca2ece5), feature/share-size-policy (f912ef5), integrate/navigation-overhaul (6269746), map-extension (8643c2f), stairs-multifloor (fae2968). Each exact fetched tip is an ancestor of origin/main. Deletion was one atomic push with an explicit expected-tip lease for every branch, protecting commits concurrently pushed after the audit. Local branches deleted with safe git branch -d: chore/supabase-mcp-example, feature/share-size-policy, integrate/navigation-overhaul. No unique commits discarded.
