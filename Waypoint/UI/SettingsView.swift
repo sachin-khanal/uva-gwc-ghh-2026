@@ -23,7 +23,6 @@ struct SettingsView: View {
     @AppStorage(UIPrefs.openInNavigate) private var openInNavigate = false
     @AppStorage(UIPrefs.speakViaVoiceOver) private var speakViaVoiceOver = true
     @AppStorage(UIPrefs.richNarration) private var richNarration = true
-    @AppStorage(UIPrefs.guidanceVoice) private var guidanceVoice = VoiceSource.phone.rawValue
 
     private var serviceMode: ServiceMode { ServiceMode(rawValue: serviceModeRaw) ?? .mock }
 
@@ -77,10 +76,7 @@ struct SettingsView: View {
                 .disabled(!newInterface)
 
                 Section {
-                    Picker("Voice", selection: $guidanceVoice) {
-                        Text("This iPhone's voice").tag(VoiceSource.phone.rawValue)
-                        Text("Waypoint's Siri pick").tag(VoiceSource.app.rawValue)
-                    }
+                    NavigationLink("Voice and speed") { VoiceSettingsView() }
                     Toggle("Speak through VoiceOver when it is on", isOn: $speakViaVoiceOver)
                     Toggle("Richer wording (Gemini)", isOn: $richNarration)
                 } header: {

@@ -72,15 +72,43 @@ final class Speaker: NSObject {
     }
 
     /// Decided per line (cheap): VoiceOver can be switched on or off while the app runs.
-    private static func voiceDecision() -> VoiceDecision {
+    private static func voiceDecision(source: VoiceSource = UIPrefs.guidanceVoiceSource,
+                                      chosen: String? = UIPrefs.guidanceVoiceIdentifier,
+                                      voiceOverRunning: Bool = UIAccessibility.isVoiceOverRunning) -> VoiceDecision {
         let language = AVSpeechSynthesisVoice.currentLanguageCode()
-        return VoiceSelection.choose(source: UIPrefs.guidanceVoiceSource,
-                                     voiceOverRunning: UIAccessibility.isVoiceOverRunning,
+        return VoiceSelection.choose(source: source,
+                                     chosenIdentifier: chosen,
+                                     voiceOverRunning: voiceOverRunning,
                                      phoneDefaultResolvable: AVSpeechSynthesisVoice(language: language) != nil,
                                      candidates: candidates, language: language)
     }
 
     private static var loggedVoice = false
+
+    /// The voice a given setting would use (VoiceOver ignored), for "Hear a sample". nil = the phone's own default.
+    static func previewVoiceIdentifier(source: VoiceSource, chosen: String?) -> String? {
+        voiceDecision(source: source, chosen: chosen, voiceOverRunning: false).voiceIdentifier
+    }
+
+    /// Installed voices for the settings screen (see `VoiceCatalog`).
+    static var voiceRows: [VoiceRow] {
+        VoiceCatalog.rows(from: candidates, language: AVSpeechSynthesisVoice.currentLanguageCode())
+    }
+
+    /// Settings: let the person HEAR a voice and speed. Uses the one synthesizer (so it can never overlap guidance) and ignores VoiceOver, because
+    /// the point is to hear THIS voice. Not tracked as guidance: no lost-line reporting, no queue.
+    func preview(_ text: String, voiceIdentifier: String?, factor: Double) {
+        queue.clear()
+        inFlight.removeAll()
+        currentUtterance = nil
+        speakingPriority = nil
+        synthesizer.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = voiceIdentifier.flatMap { AVSpeechSynthesisVoice(identifier: $0) }
+        utterance.rate = SpeechRate.utteranceRate(factor: factor, defaultRate: AVSpeechUtteranceDefaultSpeechRate,
+                                                  minimum: AVSpeechUtteranceMinimumSpeechRate, maximum: AVSpeechUtteranceMaximumSpeechRate)
+        synthesizer.speak(utterance)
+    }
 
     /// For the on-phone self test: what the next spoken line would use.
     static var voiceDescription: String {
@@ -135,7 +163,8 @@ final class Speaker: NSObject {
         if !decision.useAssistiveSettings {
             // nil identifier = leave the voice unset, so iOS uses the voice this iPhone is set up with.
             utterance.voice = decision.voiceIdentifier.flatMap { AVSpeechSynthesisVoice(identifier: $0) }
-            utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+            utterance.rate = SpeechRate.utteranceRate(factor: UIPrefs.speechRateFactor, defaultRate: AVSpeechUtteranceDefaultSpeechRate,
+                                                      minimum: AVSpeechUtteranceMinimumSpeechRate, maximum: AVSpeechUtteranceMaximumSpeechRate)
         }
         // A short pause after each line so two queued cues do not run together as one sentence.
         utterance.postUtteranceDelay = 0.25

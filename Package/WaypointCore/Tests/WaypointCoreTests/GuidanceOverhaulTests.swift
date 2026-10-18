@@ -554,3 +554,54 @@ final class ProxyNarratorTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 2)
     }
 }
+
+// MARK: - Voice settings
+
+final class VoiceOptionsTests: XCTestCase {
+
+    private func v(_ id: String, _ name: String, _ lang: String, _ q: Int) -> VoiceCandidate {
+        VoiceCandidate(identifier: id, name: name, language: lang, quality: q)
+    }
+
+    func testRowsAreForThePersonsLanguageBestFirst() {
+        let rows = VoiceCatalog.rows(from: [
+            v("a", "Samantha", "en-US", 1),
+            v("b", "Zoe", "en-US", 3),
+            v("c.siri", "Nicky", "en-US", 1),
+            v("d", "Daniel", "en-GB", 2),
+            v("e", "Amelie", "fr-FR", 3),
+        ], language: "en-US")
+        XCTAssertEqual(rows.map(\.title), ["Zoe", "Daniel", "Nicky", "Samantha"], "premium, enhanced, then Siri before plain compact; French excluded")
+        XCTAssertEqual(rows[0].detail, "Premium, en-US")
+        XCTAssertEqual(rows[2].detail, "Siri, Compact, en-US")
+    }
+
+    func testOnlyCompactVoicesSuggestDownloadingABetterOne() {
+        let compact = VoiceCatalog.rows(from: [v("a", "Samantha", "en-US", 1)], language: "en-US")
+        XCTAssertTrue(VoiceCatalog.suggestsBetterVoice(compact))
+        let enhanced = VoiceCatalog.rows(from: [v("a", "Samantha", "en-US", 1), v("b", "Zoe", "en-US", 2)], language: "en-US")
+        XCTAssertFalse(VoiceCatalog.suggestsBetterVoice(enhanced))
+    }
+
+    func testAChosenVoiceWinsWhileInstalledAndFallsBackToThePhoneWhenItIsGone() {
+        let voices = [v("b", "Zoe", "en-US", 3)]
+        let picked = VoiceSelection.choose(source: .chosen, chosenIdentifier: "b", voiceOverRunning: false,
+                                           phoneDefaultResolvable: true, candidates: voices, language: "en-US")
+        XCTAssertEqual(picked, VoiceDecision(voiceIdentifier: "b", useAssistiveSettings: false))
+        let gone = VoiceSelection.choose(source: .chosen, chosenIdentifier: "deleted", voiceOverRunning: false,
+                                         phoneDefaultResolvable: true, candidates: voices, language: "en-US")
+        XCTAssertEqual(gone, VoiceDecision(voiceIdentifier: nil, useAssistiveSettings: false), "voice was uninstalled: the phone's own default")
+        let withVoiceOver = VoiceSelection.choose(source: .chosen, chosenIdentifier: "b", voiceOverRunning: true,
+                                                  phoneDefaultResolvable: true, candidates: voices, language: "en-US")
+        XCTAssertTrue(withVoiceOver.useAssistiveSettings, "VoiceOver always wins")
+    }
+
+    func testRateIsAFactorOfTheDefaultAndStaysInRange() {
+        XCTAssertEqual(SpeechRate.utteranceRate(factor: 1.0, defaultRate: 0.5, minimum: 0, maximum: 1), 0.5, accuracy: 1e-6)
+        XCTAssertEqual(SpeechRate.utteranceRate(factor: 1.4, defaultRate: 0.5, minimum: 0, maximum: 1), 0.7, accuracy: 1e-6)
+        XCTAssertEqual(SpeechRate.clamp(99), 1.6)
+        XCTAssertEqual(SpeechRate.clamp(0.1), 0.75)
+        XCTAssertEqual(SpeechRate.clamp(.nan), 1.0)
+        XCTAssertEqual(SpeechRate.utteranceRate(factor: 1.6, defaultRate: 0.9, minimum: 0, maximum: 1), 1.0, accuracy: 1e-6, "never above the system maximum")
+    }
+}

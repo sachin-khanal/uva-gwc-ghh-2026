@@ -47,6 +47,10 @@ enum UIPrefs {
     static let richNarration = "guidance.richNarration"
     /// "phone" = the voice this iPhone already uses (default); "app" = the app's own Siri pick. See `VoiceSelection`.
     static let guidanceVoice = "guidance.voice"
+    /// The voice picked in Settings (an `AVSpeechSynthesisVoice` identifier), used when `guidanceVoice` is "chosen".
+    static let guidanceVoiceId = "guidance.voiceId"
+    /// Speaking speed as a factor of the system default (1.0). Ignored while VoiceOver is on: its own rate applies.
+    static let speechRate = "guidance.speechRate"
 }
 
 extension UIPrefs {
@@ -55,6 +59,10 @@ extension UIPrefs {
     }
     static var richNarrationEnabled: Bool {
         UserDefaults.standard.object(forKey: UIPrefs.richNarration) as? Bool ?? true
+    }
+    static var guidanceVoiceIdentifier: String? { UserDefaults.standard.string(forKey: UIPrefs.guidanceVoiceId) }
+    static var speechRateFactor: Double {
+        SpeechRate.clamp(UserDefaults.standard.object(forKey: UIPrefs.speechRate) as? Double ?? SpeechRate.defaultFactor)
     }
     static var guidanceVoiceSource: VoiceSource {
         VoiceSource(rawValue: UserDefaults.standard.string(forKey: UIPrefs.guidanceVoice) ?? "") ?? .phone

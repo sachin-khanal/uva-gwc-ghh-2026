@@ -205,3 +205,7 @@ is only "verified" once someone has done it on a device and written it down.
 
 | G10 | After setting the `GEMINI_API_KEY` secret: Simulate walk on a CLOUD-configured build with NO `GEMINI_API_KEY` in `Local.xcconfig`; log shows `narration: via the narrate Edge Function` and `narrated: <plain> -> <rich>` | calm lines are reworded with no key in the build; with the secret removed or `NARRATION_ENABLED=false`, plain sentences and no crash |
 
+| G11 | VoiceOver OFF. Settings > Voice and speed > "A voice I choose": tap several voices | each tap speaks the sample in THAT voice; the checkmark follows; leaving the screen stops the speech |
+| G12 | Move the speed slider to 1.4x and 0.8x, tap "Hear a sample"; then run a Simulate walk | the sample and the walk follow the speed; at 1.4x it is clearly faster and still understandable |
+| G13 | Uninstall (or pick on another phone) a chosen voice, start a walk | no crash, no silence: the phone's own default voice is used |
+

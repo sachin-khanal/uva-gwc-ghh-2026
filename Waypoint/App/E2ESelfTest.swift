@@ -52,6 +52,8 @@ enum E2ESelfTest {
         let siri = AVSpeechSynthesisVoice.speechVoices().filter { $0.identifier.lowercased().contains("siri") || $0.name.lowercased().contains("siri") }
         info("speech.siriVoices", "\(siri.count) installed: \(siri.prefix(4).map { "\($0.name) [\($0.language)]" })  (none = download one in Settings > Accessibility > Spoken Content > Voices)")
         info("speech.voice.chosen", Speaker.voiceDescription)
+        let rows = Speaker.voiceRows
+        info("speech.voice.picker", "\(rows.count) voices offered; best 3: \(rows.prefix(3).map { "\($0.title) (\($0.detail))" })")
         let languages = (try? VNRecognizeTextRequest().supportedRecognitionLanguages()) ?? []
         check("vision.textRecognition", !languages.isEmpty, "languages=\(languages.prefix(3))")
         do {

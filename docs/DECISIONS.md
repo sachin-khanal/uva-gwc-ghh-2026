@@ -632,3 +632,10 @@ Closes the open item in D-046 §5 (and the security review's "hardcoded secret i
    the prompt exists twice (server + `NarrationPrompt.system`) and can drift in style only; sentences (place names included) go to Google, and on the FREE tier Google may use them to improve its products.
 **Status:** accepted. Guards and limits verified against the live function (401/405/400/503) and the SQL test. The Gemini call through the function is UNVERIFIED until the `GEMINI_API_KEY` secret is set.
 
+## D-048 — The in-app voice is choosable: any installed voice, a speed setting, a sample button (2026-10-18)
+Applies only when VoiceOver is OFF (with VoiceOver on, D-046 hands the voice and speed to the person's own VoiceOver settings). Settings > "Voice and speed": (1) which voice - the iPhone's own (default),
+the app's Siri pick (fallback), or a voice the person chooses from the installed ones (tap = hear it; a chosen voice that was uninstalled falls back to the phone's own); (2) speed as a factor of the
+system default, 0.75x-1.6x (`SpeechRate`); (3) "Hear a sample". Logic in WaypointCore (`VoiceCatalog`, `SpeechRate`, `VoiceSelection`), 4 tests; previews go through the SAME synthesizer as guidance, so they cannot overlap it.
+Why a speed setting: the fixed default rate is slow for experienced screen-reader users. Why a picker: nobody has yet listened to "the phone's default voice" and judged it; this lets the team and the user settle it by ear.
+**Status:** accepted; UNVERIFIED ON DEVICE (how the previews sound, whether every listed voice can be selected by identifier, the screen with VoiceOver on). Not done: a pace that adapts to the walker, Gemini text-to-speech for calm lines.
+
