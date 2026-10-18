@@ -253,7 +253,12 @@ public struct FeedbackPlanner {
         // 2. Obstacles: say WHAT and WHERE when the level or the kind of thing changes, and keep reminding while STOP persists.
         // Is the thing ahead the way IN rather than something to avoid? (door of the target room,
         // the stairs we routed to). If so it gets instructions, not an alarm, and guidance continues.
-        let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind)
+        // No manoeuvre left and a few metres to go: whatever is in front is the destination, not an ambush.
+        let onFinalApproach = instruction.map {
+            $0.upcoming == nil && $0.distanceMeters <= RouteFeature.finalApproachMeters
+        } ?? false
+        let wayThrough = RouteFeature.isWayThrough(obstacle: report?.kind, target: instruction?.targetKind,
+                                                   onFinalApproach: onFinalApproach)
         let levelChanged = obstacle != lastObstacle
         // A CHANGE OF KIND only counts as news while the user is actually moving. Standing in front of
         // one wall, the classifier flickers between what it thinks it is seeing - wall, then unknown,

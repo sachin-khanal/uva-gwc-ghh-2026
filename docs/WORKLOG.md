@@ -1,5 +1,9 @@
 # Work log
 
+## 2026-10-18 - Codex for U3 - Preserve concurrent main updates before push
+GitHub main advanced to 7e03f83 during publication, so the initial push was rejected without changing remote main. Merged origin/main, retaining newer floor-aware arrival, obstacle/guidance and tooling fixes. Resolved conflicts in docs/WORKLOG.md (both histories), tools/test_validate_map.py and web/router.js (schema-4 comment additions; U3 stair validation retained). Files: incoming main changes plus those three resolutions. Floor 1 remains absent from final main tree and available on U3.
+Verified: after this merge Python 22/22, browser logic 58/58 and UI 23/23 PASS; git diff --check clean. NOT verified: native make test/typecheck unavailable as already attempted on Windows; SQL not applied; UNVERIFIED ON DEVICE.
+
 ## 2026-10-18 - Codex for U3 - Publish resolved U3 work to main
 User explicitly requested pushing everything to main. Fetched origin, backed up older open-workspace web/docs changes in a named git stash, confirmed local main is an ancestor of resolved U3, and fast-forwarded main to U3 eaed57e. Preserved newer resolved schema/mesh/viewer changes instead of restoring stale duplicate workspace files. Removed floor1-demo from main only per earlier request to keep that experiment separate; all eight demo files remain saved on U3. Newer unrelated remote feature-branch commits were not merged in this publication.
 
@@ -148,6 +152,217 @@ Open problems / handoff: Sachin decides S-2 (history rewrite vs private repo), S
 
 
 **Update 2026-10-18 (Codex, stairs/navigation integration):** Preserve incoming branch notes below.
+
+
+**Update 2026-10-18 (Codex, main publication):** Retaining concurrent main work-log entries below.
+
+## 2026-10-18 — Claude (agent, for Anmol) — Merged `stairs-multifloor` into `main`, and found four things a green build could not see   [tags: BUILD, CONTRACT CHANGE, DOCS]
+Area: shared, plus U3's `web/` and `tools/` (see the note below - I edited another owner's files).
+`main` + `stairs-multifloor` (21 commits). `origin/main` had NOT moved since the branch point, so there were no
+textual conflicts and nothing of U1/U3's to reconcile. `make gen` run; a CLEAN `make test` (spm scratch deleted
+first, after this morning's stale-build incident) -> **427 tests, 0 failures**; `make typecheck` OK (65 app
+files); `make check` -> BUILD SUCCEEDED.
+
+THEN LOOKED FOR WHAT A PASSING BUILD CANNOT SEE, because the branch contains a CONTRACT CHANGE (format 3 -> 4)
+and the format is shared with code `make test` never compiles. Four problems, all mine, all real:
+1. **`web/router.js:64` refused `schemaVersion > 3`** - so U3's web viewer would have REJECTED EVERY MAP the app
+   now writes, with "unsupported schemaVersion; update the viewer." Fixed to accept 4. The viewer ignores the
+   `stairs` object, so accepting it costs nothing.
+2. **`web/geometry-tests.js` asserted that format 4 is INVALID** (`for(const schemaVersion of [0,4,...])`). It
+   passed, while encoding the opposite of the truth. Now asserts it for 5.
+3. **`tools/test_validate_map.py` asserted the same thing** and FAILED once `CURRENT_SCHEMA` became 4. I bumped
+   the validator on the branch and never ran its own tests. Now checks `map-v4.json` decodes and uses 5 as the
+   "newer than this tool" case.
+4. **`docs/MAP_FORMAT.md` had no format 4 section**, although the checklist inside `BuildingMap.swift` says to
+   add one. Written, with format 3 struck through as "readable; was current until format 4" per rule 11.
+   (`tools/supabase_check.py` also still wrote `schemaVersion: 3` in its connection probe; bumped. Harmless,
+   since 3 stays readable, but it would have misled the next person.)
+
+THE UNDERLYING PROBLEM, which is worth more than the four fixes: **nothing runs the non-Swift tests.** `make
+test` only builds WaypointCore, and the single GitHub workflow (`docs-check.yml`) checks documentation. So the
+map validator's tests and the web viewer's tests are run only when somebody remembers to. That is precisely how
+four separate places came to pin "format 4 is invalid" while the app was busy writing format 4.
+Added `make test-tools` (python validator + node web tests, each SKIPPED with a message when the tool is not
+installed, because U3 and U4 are on Windows) and `make test-all` = `test` + `test-tools`. `make test` itself is
+UNCHANGED: it is named in AGENTS.md section 5 and in the pre-commit hook's messaging, and changing what a
+contract command does mid-hackathon for four people is its own kind of bug.
+Current state of `make test-tools`: validator 16/16 OK; web 45/46, the one failure being
+"WebGL renders captured surfaces: document is not defined" - PRE-EXISTING and unrelated, that test needs a DOM
+and plain `node` has none.
+
+AGENTS.md rule 2 (stay in your lane): `web/router.js`, `web/geometry-tests.js`, `tools/test_validate_map.py` and
+`tools/supabase_check.py` are U3's. I edited them because MY contract change broke them, which is the "fix a
+compile error" case - a viewer that rejects every map is the web equivalent. Flagged here and in `MAP_FORMAT.md`
+so U3 can review rather than discover it.
+Verified: `make gen`; a CLEAN `make test` (spm scratch deleted first) -> **427 tests, 0 failures**;
+`make typecheck` OK (65 app files); `make check` -> BUILD SUCCEEDED; `make test-tools` -> map validator 16/16 OK,
+web viewer 45/46 (the one failure pre-existing and unrelated: "WebGL renders captured surfaces: document is not
+defined", which needs a DOM that plain `node` has not); `python3 tools/validate_map.py docs/map-format/map-v4.json
+Samples/rice-hall-sample.json` -> PASS, PASS.
+NOT verified: nothing from this merge has been run on a phone since the merge. The web viewer was not opened
+against a real format-4 map; only its validator path was exercised.
+Open / handoff:
+1. U1/U3 decision: should `test-tools` go into CI? There is no workflow that runs any test today.
+2. The `stairs` object is accepted but INSPECTED by nobody outside the app - same position `keyframes` has been
+   in since format 3. If a hostile map matters, the limits belong in `validate_map.py`, `router.js` and SQL.
+3. Still unbuilt from this branch's own plan: the stairs hand-off (announce entering, guide through, announce
+   leaving) and any notion of "up" in guidance.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — You could arrive at a room upstairs by standing underneath it   [tags: BUG]
+Area: B (routing/guidance). Branch `stairs-multifloor`. Anmol: "cut it to within 1.5 up or down from the
+altitude of where it was recorded because we can reach a room upstairs by being directly below it."
+
+THE PROBLEM, and it is everywhere at once: every "am I near this?" test in the app measures HORIZONTALLY. That
+is right on one floor and wrong the moment a building has two. A room directly above you is ZERO metres away in
+plan view, and its `RoomExtent` covers your x,z exactly - so standing underneath it counted as being inside it.
+Separately, `WaypointGraph.nearestNodes` sorts by STRAIGHT-LINE distance, where a node one storey up is about
+3 m away - nearer than a corridor node 5 m along your own hallway - so the router could decide you were standing
+upstairs and plan from there.
+
+Fixed with one shared idea rather than five local thresholds: `Geometry.sameLevelMeters` (1.5 m, Anmol's number)
+and `Geometry.isSameLevel(_:_:)`. Node heights are CAMERA heights and are consistent between a saved map and a
+live session, and a storey is 3-4 m, so 1.5 m separates floors cleanly while tolerating a phone held high or low,
+or someone standing mid-flight on a staircase.
+Applied at every place that could cross floors:
+  * `RouteFollower`: room-extent containment, the "standing on a waypoint, skip it" test, and `reached`.
+  * `RouteFollower.landmark`: a labelled place one floor up is not "on your left".
+  * `RouteFollower.stairsAhead`: a flight on another floor is not ahead of you.
+  * `WaypointGraph.nearestNodes`: candidates are filtered to your level. It FALLS BACK to ignoring the level
+    when nothing on it is known - that only happens on a floor the map does not cover, where every answer is
+    wrong anyway, and refusing to route at all would be the worse one.
+
+Verified: `make test` -> **427 tests, 0 failures** (423 before; 4 new: standing under a room is not arriving,
+standing in it is, nearest-node selection stays on your floor, and an unmapped floor still returns candidates
+rather than failing). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE.
+Open: a node mid-staircase is legitimately between floors, so the 1.5 m window there admits nodes from the
+flight both above and below it. That is correct - they ARE reachable from mid-flight - but it means the level
+filter does nothing useful while the user is on stairs, which is exactly when routing is hardest.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The arrow pointed left and nothing was said: an obstacle warning was destroying the turn   [tags: BUG, DEVICE]
+Area: B (guidance). Branch `stairs-multifloor`.
+Anmol: "it'll say theres something ahead, the arrow will say turn left but it doesnt speak it ... a bunch of
+times the arrow will have a direction and the speaker doesn't actually say it."
+
+Checked the arrow first, because the two could have diverged either way: `GuidingView` already follows
+`spokenKind ?? kind`, i.e. it prefers WHAT WAS SAID and only falls back to the raw instruction. So the arrow was
+behaving; the speech really was being lost.
+
+CAUSE: `Speaker` held ONE pending line, and at equal priority the newer one won. Cautions became `.high` earlier
+today - deliberately, so they would stop cutting sentences in half - which made them the SAME priority as turns.
+So an obstacle warning arriving a moment after a turn silently overwrote it. The user heard the obstacle, saw
+the arrow (which had fallen back to the raw instruction), and was never told to turn. Every piece of that was a
+consequence of a fix made earlier the same day.
+
+Fixed: a short QUEUE instead of a slot. Most important first, equal priorities in arrival order, capped at 3
+(beyond which the least important, oldest line goes - never the newest arrival). Every line still carries its own
+`maxAge`, so this cannot become the backlog of stale directions the single slot was guarding against: a line that
+waited too long is discarded and logged rather than spoken late.
+
+The rules now live in `Package/.../Guidance/SpeechQueue.swift`, NOT in `Speaker`. Same reasoning that put
+`SpeechGate` in core: AVSpeechSynthesizer cannot be unit-tested and never runs in `make test`, and this specific
+logic has now caused THREE device bugs - a turn destroyed by a warning (this one), a line dropped because waiting
+itself made it stale (the 2.0 s budget), and a direction spoken after arrival. `Speaker` keeps only the
+AVFoundation plumbing.
+
+Verified: `make test` -> **423 tests, 0 failures** (415 before; 8 new, one per rule: a caution no longer destroys
+a queued turn, safety jumps the queue, a stale line is dropped AND reported, a stale line does not block a fresh
+one behind it, the briefing's long budget survives, the queue is bounded and drops the ambient line, `clear`
+empties everything, and an empty queue returns nothing). `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE.
+Open: with turns no longer being destroyed, the arrow's `spokenKind` fallback should fire far less often - if
+Anmol still sees a direction on screen that was never spoken, the remaining suspects are the planner's own
+`directionCooldownSeconds` (1.5 s) and the repeat window, both of which suppress the SPEECH while the arrow keeps
+showing the instruction. Those are deliberate, so the fix there would be to make the arrow follow the spoken
+state strictly rather than falling back.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Pacing: the twelve-second door, and duplicates that slipped past the repeat check   [tags: BUG, DEVICE]
+Area: B (guidance). Branch `stairs-multifloor`. Both causes read straight off the Rice Hall walk-2 transcript.
+
+1. THE DESTINATION DOOR, WARNED ABOUT FOR TWELVE SECONDS (2:31-2:43, "Stop. You are about to walk into a door.
+   No room to pass." repeating). `RouteFeature.isWayThrough` matched `(.door, .room)` and `(.door, .door)` - but
+   "Guide me back to the start" routes to the BREADCRUMB the walk began at, whose kind is `.corridor`. So the
+   door of the office the user started in matched nothing, was treated as an ordinary obstacle, and because
+   `repeatDue` only skips a way-through, the stop warning fired every 3 s while they stood in front of their own
+   destination. The transcript even shows it ending with "Back up slowly. You have arrived."
+   Fixed: `isWayThrough(..., onFinalApproach:)`. With no manoeuvre left and 3 m or less to go, a DOOR is the way
+   in whatever the destination node calls itself. Mid-route doors are unchanged and still obstacles.
+
+2. "IN 3 METERS, TURN RIGHT. IN 3 METERS, TURN RIGHT." (1:11). `SpeechGate` remembered only the LAST line
+   spoken, so its repeat check only caught duplicates that were immediately consecutive - any other line in
+   between reset it, and on this walk obstacle warnings were constantly in between. Replaced with a small
+   text -> time map, pruned to `repeatWindow`, so a line is dropped if it was said within the window no matter
+   what came after it. A genuinely persisting state can still re-warn once the window passes (covered by a test,
+   because `stopRepeatSeconds` and `repeatWindow` are both 3 s and that must keep working).
+
+Verified: `make test` -> **415 tests, 0 failures** (411 before; 4 new: a duplicate is dropped across an
+interleaved line, the same line is allowed again after the window, a door on the final approach is the way in,
+and a mid-route door is still an obstacle). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone dropped off again.
+Open / handoff:
+1. Still unexplained from the same transcript: "In 5 meters, turn right. Continue straight." (0:48) and
+   "Turn around. Toward Room 542. Continue straight." (1:06) are a countdown and a direction landing together.
+   They are two legitimate cues in one tick; the `Speaker` speaks one and queues the other, so they arrive
+   back to back. Whether that is wrong, or just sounds wrong, needs a judgement from Anmol rather than a guess.
+2. Anmol's stairs hand-off ("explicitly state to leave the staircase, and the directions on doing so") is still
+   unbuilt, and guidance still has no concept of "up".
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Rice Hall walk 2 (Room 542 and back): a turn spoken AFTER arrival, and silent stairs   [tags: BUG, DEVICE]
+Area: B (guidance/routing). Branch `stairs-multifloor`. Anmol: "that worked amazing" - a complete guided walk to
+Room 542 and back, with a full transcript. Three findings, one of them a regression I introduced.
+
+1. A TURN SPOKEN AFTER ARRIVAL - MY REGRESSION. The transcript is exact:
+     1:34  You have arrived at Room 542.
+     1:36  Left 45 degrees.
+   The planner goes silent the moment `hasArrived` is set, so that line was queued BEFORE arrival and survived
+   it. It survived because of this morning's fix making `.interrupt` KEEP what is waiting - which is right for a
+   safety cue (it is what lets a turn follow an obstacle warning) and wrong for a terminal one. Arrival ends the
+   walk; nothing queued before it is still true.
+   Fixed: `Speaker.say(..., clearsPending:)`, passed `true` for arrival only (forwarded through `SpeechGuide`).
+
+2. NO WARNING WHEN WALKING TOWARD STAIRS. Two separate gaps, and between them a staircase straight ahead was
+   announced by nothing at all:
+     * `RouteFollower` took the hazard ONLY from the edge being traversed (`:112`). `addPOI` records a staircase
+       as a LEAF hanging off one breadcrumb, so a route that walks past it never traverses that edge and the
+       "Stairs ahead." warning never fires. It fired once on the return leg (2:12) only because the route
+       happened to step onto a stairs node there.
+     * `landmark` only mentions things 50-130 degrees to the SIDE, so anything directly ahead is excluded by
+       design. That is why "Rear Stairs 4 on your left" played at 0:13 and nothing played on approach.
+   Fixed: new `RouteFollower.stairsAhead(from:forward:)` reports `.stairs` when a stairs or lift node is within
+   4 m and within 45 degrees of straight ahead, regardless of edges. The edge hazard still wins when there is one.
+
+3. "SOMETIMES IT SKIPS THE STEPS NEEDED TO BE SAID" - NOT FIXED, and the transcript shows what it really is:
+   lines arriving faster than they can be spoken. "In 5 meters, turn right. Continue straight." (0:48) and
+   "In 3 meters, turn right. In 3 meters, turn right." (1:11) are two cues merged and one duplicated; 1:32 is cut
+   off by arrival (correct). 2:31-2:43 repeats "Stop. You are about to walk into a door" for twelve seconds,
+   which is `stopRepeatSeconds = 3` firing while the user shuffles in front of a door that is their destination.
+   This needs its own pass over pacing; it is the last big guidance problem.
+
+Verified: `make test` -> **411 tests, 0 failures** (407 before; 4 new for `stairsAhead`: toward, behind, too far,
+and across the corridor). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+One of my new tests was WRONG and the code was right: it stood the user exactly ON the stairs node, where the
+distance is zero and the bearing is undefined. Corrected to stand 3 m short facing across the corridor.
+NOT verified: UNVERIFIED ON DEVICE.
+Open / handoff:
+1. Anmol's second ask - "explicitly state to leave the staircase, and the directions on doing so" - is NOT built.
+   That is the transition-space hand-off: announce entering, guide through, announce leaving. Guidance still has
+   no concept of "up", so a vertical stretch is spoken as "Continue straight".
+2. The stairs warning re-announces as the route target advances (the planner latches per target node, and at
+   1.5 m node spacing a 4 m radius spans two or three). Expect it twice; it needs a per-stairs-node latch.
+3. The door at the end of trip 2 is the DESTINATION, and it was still warned about as an obstacle to stop for.
+   `RouteFeature.isWayThrough` covers a door when the target kind is a room or door - worth re-checking why it
+   did not apply there.
+
+---
 
 ## 2026-10-18 — Claude (agent, for Anmol) — The route went STRAIGHT UP the stairwell, and extensions still missing from the 3D viewer   [tags: BUG, DEVICE]
 Area: B (routing) + A (export). Branch `stairs-multifloor`. Extending and navigating both work now; these are

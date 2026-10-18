@@ -38,6 +38,23 @@ public enum Geometry {
     }
 
     /// Distance between two points ignoring height (we navigate on a floor plane).
+    /// Heights closer than this are the same level of the building.
+    ///
+    /// Everything that asks "am I near this?" measures HORIZONTALLY, which is right on one floor and
+    /// wrong the moment a building has two: a room directly above you is zero metres away in plan view,
+    /// so you could arrive at it by standing underneath it, and the router could pick a start node on
+    /// another floor because it is nearer in a straight line than one down your own corridor
+    /// (Anmol, 2026-10-18). Node heights are camera heights, consistent between a saved map and a live
+    /// session, and a storey is 3-4 m - so 1.5 m separates floors cleanly while tolerating someone
+    /// holding the phone high or low, or standing mid-flight on a staircase.
+    public static let sameLevelMeters: Float = 1.5
+
+    /// Are these two points on the same level of the building?
+    public static func isSameLevel(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                                   tolerance: Float = sameLevelMeters) -> Bool {
+        abs(a.y - b.y) <= tolerance
+    }
+
     public static func horizontalDistance(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
         let d = b - a
         return (d.x * d.x + d.z * d.z).squareRoot()

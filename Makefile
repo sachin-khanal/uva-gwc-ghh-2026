@@ -42,7 +42,7 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 # Lets xcodebuild create/refresh the free provisioning profile and register the phone.
 SIGN_FLAGS := -allowProvisioningUpdates -allowProvisioningDeviceRegistration
 
-.PHONY: backup-maps restore-maps list-map-backups help setup doctor hooks test-hooks team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
+.PHONY: test-tools test-all backup-maps restore-maps list-map-backups help setup doctor hooks test-hooks team-id gen test typecheck check build install launch run logs selftest-sim selftest-scan selftest-e2e uitest uitest-shots devices open clean clean-all
 
 help: ## Show this help
 	@echo "Waypoint make targets:"; echo
@@ -76,6 +76,19 @@ gen: ## Generate Waypoint.xcodeproj from project.yml (run after editing project.
 
 test: ## Run WaypointCore unit tests on macOS (no phone, no simulator needed)
 	cd $(CORE_PKG) && swift test --scratch-path $(SPM_SCRATCH)
+
+test-tools: ## Run the NON-Swift tests: map validator (python) and web viewer (node). Skips what is not installed.
+	@# `make test` only builds WaypointCore, so nothing here is covered by it and nothing in CI runs it
+	@# either. That is how four separate places came to pin "format 4 is invalid" while the app was
+	@# writing format 4 (2026-10-18): the web viewer refused every map and no build complained.
+	@if command -v python3 >/dev/null 2>&1; then \
+	  echo "== map validator (python) =="; python3 -m unittest discover -s tools -q || exit 1; \
+	else echo "python3 not installed; skipping the map validator tests"; fi
+	@if command -v node >/dev/null 2>&1; then \
+	  echo "== web viewer (node) =="; cd web && node test-web.mjs | tail -3; \
+	else echo "node not installed; skipping the web viewer tests"; fi
+
+test-all: test test-tools ## Everything testable without a phone: WaypointCore + validator + web viewer
 
 typecheck: ## Type-check the iOS app against the iOS SDK (works even if xcodebuild is broken)
 	./scripts/typecheck.sh

@@ -54,6 +54,7 @@ public final class RouteFollower {
         // thinks it is still heading toward. Without this, a target index that has not caught up means
         // standing in the middle of the room never counts as arriving (device report 2026-10-17).
         if let destination = route.last, let extent = destination.extent,
+           Geometry.isSameLevel(position, destination.position),
            extent.contains(position, margin: Self.doorwayMargin) {
             targetIndex = route.count - 1
             return GuidanceInstruction(
@@ -72,6 +73,7 @@ public final class RouteFollower {
 
         // Still skip a waypoint we are literally standing on.
         while targetIndex < route.count - 1,
+              Geometry.isSameLevel(position, route[targetIndex].position),
               Geometry.horizontalDistance(position, route[targetIndex].position) < arrivalRadius {
             targetIndex += 1
         }
@@ -85,6 +87,8 @@ public final class RouteFollower {
         // the pin the volunteer dropped. Without an extent (older maps, or an open space) we fall
         // back to a radius that depends on the kind of place.
         let reached: Bool = {
+            // On another floor you have not arrived, however close you are in plan view.
+            guard Geometry.isSameLevel(position, target.position) else { return false }
             let withinRadius = distance < ArrivalRadius.meters(for: target.kind)
             guard let extent = target.extent else { return withinRadius }
             // EITHER inside the room OR near the pin. Extent-only meant that when the scan measured a
@@ -107,9 +111,14 @@ public final class RouteFollower {
         let bearing = Geometry.signedBearing(forward: forward, toTarget: aim - position)
         let kind = cue.update(bearing: bearing)
 
-        var hazard: Hazard? = nil
+        // Stairs you are WALKING TOWARD, not only stairs the route steps onto. A staircase is tagged as
+        // a leaf hanging off the corridor chain, so a route that passes it never traverses its edge and
+        // the hazard below never fires; and `landmark` only mentions things 50-130 degrees to the SIDE,
+        // so a staircase straight ahead was announced by nothing at all (device report 2026-10-18:
+        // "didn't warn that there were stairs ahead or that im approaching the stairs").
+        var hazard: Hazard? = stairsAhead(from: position, forward: forward)
         if targetIndex > 0 {
-            hazard = graph.edge(between: route[targetIndex - 1].id, target.id)?.hazard
+            hazard = graph.edge(between: route[targetIndex - 1].id, target.id)?.hazard ?? hazard
         }
 
         return GuidanceInstruction(
@@ -218,10 +227,30 @@ public final class RouteFollower {
     }
 
     /// The nearest labelled place (room, door, stairs...) that is beside the user: close, and roughly 50-130 degrees to the left or right.
+    /// How close a staircase or lift has to be before we warn about walking toward it.
+    public static let stairsWarnRadius: Float = 4
+    /// ...and how far off straight ahead it may be. Wide enough to catch a staircase you are heading
+    /// for at an angle, narrow enough that one across a corridor you are merely passing stays quiet -
+    /// that case is already covered by the landmark announcement.
+    public static let stairsAheadDegrees: Float = 45
+
+    /// A staircase or lift close enough and far enough ahead to be worth a warning.
+    func stairsAhead(from position: SIMD3<Float>, forward: SIMD3<Float>) -> Hazard? {
+        for node in graph.map.nodes where node.kind == .stairs || node.kind == .elevator {
+            guard Geometry.isSameLevel(position, node.position) else { continue } // a flight on another floor is not ahead of you
+            guard Geometry.horizontalDistance(position, node.position) <= Self.stairsWarnRadius else { continue }
+            let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)
+            guard abs(bearing) * 180 / .pi <= Self.stairsAheadDegrees else { continue }
+            return .stairs
+        }
+        return nil
+    }
+
     func landmark(at position: SIMD3<Float>, forward: SIMD3<Float>, excluding targetId: UUID) -> Landmark? {
         var best: (node: MapNode, side: Side, distance: Float)?
         for node in graph.map.nodes where node.kind != .corridor && node.id != targetId && node.id != route.last?.id {
             guard let label = node.label, !label.isEmpty else { continue }
+            guard Geometry.isSameLevel(position, node.position) else { continue } // not "on your left" if it is a floor up
             let d = Geometry.horizontalDistance(position, node.position)
             guard d < Self.landmarkRadius else { continue }
             let bearing = Geometry.signedBearing(forward: forward, toTarget: node.position - position)

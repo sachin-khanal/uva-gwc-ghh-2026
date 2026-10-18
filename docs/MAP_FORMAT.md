@@ -21,7 +21,15 @@ Example file per version: `docs/map-format/map-v1.json`, `docs/map-format/map-v2
 - The server (`canonical_buildings.map_json`) stores whatever JSON it is given; readers migrate on load, so rows written before format 2 stay valid.
 - Limits (all versions): ≤ 5 000 nodes, ≤ 20 000 edges, ≤ 50 MB per world map, segment ids `[A-Za-z0-9_-]{1,64}`, finite positions, unique node ids, every edge joins two existing different nodes, edge `distance` within max(0.5 m, 25 %) of the straight-line distance of its nodes.
 
-## Format 3 (current)
+## Format 4 (current)
+
+**Update 2026-10-18 (Claude):** format 4 = format 3 plus the OPTIONAL per-node key `stairs`, written only for nodes of kind `stairs` or `elevator` (branch `stairs-multifloor`):
+`"stairs": { "direction": "up" | "down" | "both", "railings": "left" | "right" | "both" | "neither", "stepCount": int }` — every field itself optional, and the whole object absent when the volunteer recorded nothing. Maps without it stay valid and decode with none.
+Why it exists: the two ends of one staircase are recorded in SEPARATE maps (one per floor) and matched across them by the node's LABEL, so `direction` is what tells the two ends apart; `railings` has no other possible source, because ARKit's mesh classification has no railing class. Nothing reads any of it yet — `BuildingMap` still has no `building`/`floor` field, so floors are not matched.
+Validated in `MapBundle.validate()` only by being optional and decodable; `tools/validate_map.py` (CURRENT_SCHEMA = 4), `web/router.js` and the SQL migrations ACCEPT format 4 but do not inspect the `stairs` object — same position `keyframes` is in. Example: `docs/map-format/map-v4.json`. `schemaVersion` must be 1...4. Older apps ignore `stairs`.
+**Note for U3:** `web/router.js` and `web/geometry-tests.js` were edited by me (B/A area) to accept 4, because the bump otherwise made the viewer reject every map the app writes. The test that asserted "format 4 is unsupported" now asserts it for 5.
+
+## ~~Format 3 (current)~~ Format 3 (readable; was current until format 4)
 
 **Update 2026-10-17 (Claude):** format 3 = format 2 plus the OPTIONAL per-node key `extent` (room floor area derived from the scan mesh, added on branch `navigation-overhaul`):
 `"extent": { "center": [x,y,z], "halfExtents": [halfWidthX, halfDepthZ], "yaw": radians, "areaSquareMeters": float }` (`y` of `center` is floor level). Maps without `extent` stay valid; guidance then falls back to a fixed arrival radius.
