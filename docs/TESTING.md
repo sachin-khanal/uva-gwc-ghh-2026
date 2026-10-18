@@ -211,3 +211,23 @@ is only "verified" once someone has done it on a device and written it down.
 | G12 | Move the speed slider to 1.4x and 0.8x, tap "Hear a sample"; then run a Simulate walk | the sample and the walk follow the speed; at 1.4x it is clearly faster and still understandable |
 | G13 | Uninstall (or pick on another phone) a chosen voice, start a walk | no crash, no silence: the phone's own default voice is used |
 
+
+
+## Gemini proxy on-phone E2E — Update 2026-10-18 (Codex)
+
+`NarrationSelfTest.swift` adds opt-in checks through the app's shared authenticated Supabase client and the production `ProxyNarrator` deadline/guard. Normal E2E runs do not spend Gemini quota unless requested. `EXTRA` now reaches both self-test launch targets (previously the Makefile ignored it for these targets).
+
+```sh
+DEVICE=<phone-id> make build SIGN_FLAGS='-allowProvisioningUpdates -allowProvisioningDeviceRegistration GEMINI_API_KEY='
+DEVICE=<phone-id> make install
+DEVICE=<phone-id> EXTRA='-e2eNarration YES' make selftest-e2e
+DEVICE=<phone-id> ROOM=409 EXTRA='-guidance.richNarration YES' make selftest-sim
+```
+
+The empty build-setting override excludes the Gemini key from that app bundle without editing `Local.xcconfig`. `make install` backs up phone maps. Keep the phone unlocked. Use a room present on the phone; Room 409 was used on Sachin's real Floor 4 map. The simulation speaks through the app; no physical walk is performed.
+
+Recorded on Sachin's iPhone 16 Pro Max: opt-in E2E **35 PASS / 0 FAIL / 1 SKIP** (cloud map-write test deliberately not requested). Live landmark accepted in 1068 ms; countdown in 824 ms; briefing used the original wording. Aggregate requires at least one live guarded response within the normal deadline and fails if all requests fall back. A single fallback is expected behavior for timeout, refusal or guard rejection; this test does not diagnose which of those occurred for the briefing.
+
+Device-injected offline, HTTP 503, null JSON text, malformed reply, added-direction and slow-response checks all pass through `ProxyNarrator`; slow request cancelled in 101 ms. These do **not** claim the phone was actually in airplane mode or that production secrets were removed. The live invalid-kind request returned HTTP 400. Mac-side live probes also observed missing-auth and public-anon-key HTTP 401 plus real Gemini rewrites.
+
+The full phone simulation on the no-key build logged `narration: via the narrate Edge Function`, rewritten opening and landmark sentences, `You have arrived at 409.`, and `SELFTEST PASS`. The normal speech/haptic calls ran, but no human listening judgement or physical navigation was performed: audible quality, VoiceOver overlap and physical guidance remain **UNVERIFIED ON DEVICE**. Tests did not change server secrets, deployment or caps.

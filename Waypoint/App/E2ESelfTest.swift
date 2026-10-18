@@ -233,6 +233,9 @@ enum E2ESelfTest {
                 let rows = try await client.listBuildings()
                 pass("cloud.listBuildings", "\(rows.count) visible row(s)")
             } catch { fail("cloud", "\(error)") }
+            if NarrationSelfTest.requested {
+                await NarrationSelfTest.run(client: SharedCloud.client ?? client) { name, ok, detail in check(name, ok, detail) }
+            }
             // Opt-in WRITE test (two users, publish, share, extend, stale upload, reliability). See CloudRoundTripTest.
             if CloudRoundTripTest.requested {
                 await CloudRoundTripTest.run(config: config) { name, ok, detail in check(name, ok, detail) }
@@ -241,6 +244,9 @@ enum E2ESelfTest {
             }
         } else {
             skip("cloud", "Supabase not configured (SUPABASE_URL / SUPABASE_ANON_KEY in Config/Local.xcconfig)")
+            if NarrationSelfTest.requested {
+                fail("narration.config", "the requested proxy test requires cloud configuration")
+            }
         }
 
         return finish(tally)
