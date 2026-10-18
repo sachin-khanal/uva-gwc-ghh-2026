@@ -14,6 +14,23 @@ extension MapStore {
         directory(for: mapId).appendingPathComponent("mesh-\(assetId.uuidString.lowercased()).obj")
     }
 
+    /// The 3D surface file is built in the background AFTER a scan is saved (it takes seconds on a big scan). Until it is attached the saved
+    /// map has no `meshAssets`, so an upload in that window would publish the map without its 3D scan. This marker file says "still building".
+    /// It ignores a marker older than `maxAge` so a crash during the build cannot block uploads forever.
+    public func markMeshPending(mapId: UUID) {
+        try? Data().write(to: directory(for: mapId).appendingPathComponent(".mesh-pending"), options: .atomic)
+    }
+
+    public func clearMeshPending(mapId: UUID) {
+        try? FileManager.default.removeItem(at: directory(for: mapId).appendingPathComponent(".mesh-pending"))
+    }
+
+    public func isMeshPending(mapId: UUID, maxAge: TimeInterval = 600, now: Date = Date()) -> Bool {
+        let url = directory(for: mapId).appendingPathComponent(".mesh-pending")
+        guard let made = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date else { return false }
+        return now.timeIntervalSince(made) < maxAge
+    }
+
     public func loadMesh(mapId: UUID, assetId: UUID) -> Data? {
         try? Data(contentsOf: meshURL(mapId: mapId, assetId: assetId))
     }

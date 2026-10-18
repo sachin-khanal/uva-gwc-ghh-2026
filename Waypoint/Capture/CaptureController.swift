@@ -424,6 +424,8 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
                     let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
                     self.savedMap = saved
+                    // Marked BEFORE the background export starts, so an upload tapped right after Save waits for the 3D scan instead of leaving it out.
+                    if !meshAnchors.isEmpty { self.store.markMeshPending(mapId: saved.id) }
                     self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id, segmentId: savedSegment)
                     self.stop()
                     Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
@@ -461,6 +463,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
                 message = "3D model not saved: \(error.localizedDescription)"
                 Log.capture.error("model export failed: \(error.localizedDescription)")
             }
+            store.clearMeshPending(mapId: mapId) // success or failure: either way the upload must not wait any longer
             DispatchQueue.main.async { self?.modelStatus = message }
         }
     }

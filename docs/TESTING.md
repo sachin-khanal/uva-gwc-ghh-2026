@@ -71,6 +71,8 @@ Run after SETUP.md §3 (`DEVICE=<id> make run`). Owner B/D. Mark each result in 
 | 3.8 | Point the camera at a door sign | (SignReader is not wired into a screen yet) check the console for "confirmed room number" once wired |
 | 3.9 | Dress rehearsal | blindfolded teammate + escort reaches the target room |
 
+**Update 2026-10-18 (Claude):** upload one REAL saved map from the command line, as the Upload button does: `DEVICE=<id> make selftest-e2e EXTRA="-e2ePushMap <map uuid>"` (the uuid is the folder name under the app's Documents/Maps). Prints `push.realMap PASS - published N mesh(es), skipped M`. It writes to the live cloud with the phone's own identity.
+
 ## Reading logs from the phone
 
 `DEVICE=<id> make launch` streams `os.Logger` output (subsystem ~~`edu.virginia.waypoint`~~ **Update 2026-10-17:** `io.github.sachin-khanal.waypoint`, categories:

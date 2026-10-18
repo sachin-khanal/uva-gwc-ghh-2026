@@ -134,4 +134,52 @@ final class ObjExportTests: XCTestCase {
         let paths = t.requests.map { $0.url.path }
         XCTAssertFalse(paths.contains { $0.contains("/meshes/") || $0.hasSuffix("publish_mesh_assets") })
     }
+
+    // MARK: upload must not race the background 3D export (found 2026-10-18: a real floor went up without its mesh)
+
+    private func engine(_ store: MapStore) -> (SyncEngine, MockTransport) {
+        let t = MockTransport { req in
+            req.url.path.hasPrefix("/auth/") ? HTTPResponse(status: 200, body: Data(#"{"access_token":"t","refresh_token":"r","expires_in":3600,"user":{"id":"\#(userId)"}}"#.utf8)) : HTTPResponse(status: 200, body: Data("{}".utf8))
+        }
+        let client = SupabaseClient(config: SupabaseConfig(url: URL(string: "https://abc.supabase.co")!, anonKey: "ANON"),
+                                    transport: t, sessionStore: InMemorySessionStore())
+        return (SyncEngine(client: client, store: store), t)
+    }
+
+    func testPushIsRefusedWhileTheMeshIsStillBeingBuiltThenWorks() async throws {
+        let (store, map) = try storeWithSample()
+        try store.saveWorldMap(Data([1]), mapId: map.id, segmentId: "seg1")
+        store.markMeshPending(mapId: map.id)
+        XCTAssertTrue(store.isMeshPending(mapId: map.id))
+        let (sync, t) = engine(store)
+        do { try await sync.push(mapId: map.id, share: false); XCTFail("must refuse while the 3D scan is being built") }
+        catch CloudError.meshNotReady { /* expected */ }
+        XCTAssertTrue(t.requests.isEmpty, "nothing is sent while waiting")
+
+        let out = try ObjExport.make(grid(5), segmentId: map.nodes[0].segmentId)
+        try store.attachMesh(out.asset, data: out.data, mapId: map.id)
+        store.clearMeshPending(mapId: map.id)
+        XCTAssertFalse(store.isMeshPending(mapId: map.id))
+        let report = try await sync.push(mapId: map.id, share: false)
+        XCTAssertEqual(report, SyncEngine.PushReport(meshesPublished: 1, meshesSkipped: 0))
+    }
+
+    func testStaleMeshMarkerDoesNotBlockUploadsForever() throws {
+        let (store, map) = try storeWithSample()
+        store.markMeshPending(mapId: map.id)
+        XCTAssertTrue(store.isMeshPending(mapId: map.id, maxAge: 600, now: Date()))
+        XCTAssertFalse(store.isMeshPending(mapId: map.id, maxAge: 600, now: Date().addingTimeInterval(601)), "a crashed export must not block forever")
+        XCTAssertFalse(store.isMeshPending(mapId: UUID()), "no marker, not pending")
+    }
+
+    func testPushReportsAMeshItCouldNotSend() async throws {
+        let (store, map) = try storeWithSample()
+        try store.saveWorldMap(Data([1]), mapId: map.id, segmentId: "seg1")
+        let out = try ObjExport.make(grid(5), segmentId: map.nodes[0].segmentId)
+        try store.attachMesh(out.asset, data: out.data, mapId: map.id)
+        try Data("changed".utf8).write(to: store.meshURL(mapId: map.id, assetId: out.asset.id))
+        let (sync, _) = engine(store)
+        let report = try await sync.push(mapId: map.id, share: false)
+        XCTAssertEqual(report, SyncEngine.PushReport(meshesPublished: 0, meshesSkipped: 1), "the caller can now tell the map went up WITHOUT its 3D scan")
+    }
 }

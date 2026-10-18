@@ -252,6 +252,15 @@ enum E2ESelfTest {
                 let rows = try await client.listBuildings()
                 pass("cloud.listBuildings", "\(rows.count) visible row(s)")
             } catch { fail("cloud", "\(error)") }
+            // Opt-in: upload one REAL saved map of this phone (`-e2ePushMap <map uuid>`), exactly what the Upload button does, with the phone's
+            // own Keychain identity (the one that owns the scan segments). Added 2026-10-18 to debug a floor that reached the cloud without its mesh.
+            if let raw = UserDefaults.standard.string(forKey: "e2ePushMap"), let id = UUID(uuidString: raw) {
+                let real = SyncEngine(client: SupabaseClient(config: config, sessionStore: KeychainSessionStore()), store: app.store)
+                do {
+                    let report = try await real.push(mapId: id, share: true)
+                    check("push.realMap", report.meshesPublished > 0, "published \(report.meshesPublished) mesh(es), skipped \(report.meshesSkipped)")
+                } catch { fail("push.realMap", "\(error)") }
+            }
             // Opt-in WRITE test (two users, publish, share, extend, stale upload, reliability). See CloudRoundTripTest.
             if CloudRoundTripTest.requested {
                 await CloudRoundTripTest.run(config: config) { name, ok, detail in check(name, ok, detail) }

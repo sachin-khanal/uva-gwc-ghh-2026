@@ -42,7 +42,18 @@ public final class SyncEngine {
     }
 
     /// Publishes an additive extension. All canonical maps are shared; share is retained for API compatibility.
-    public func push(mapId: UUID, share: Bool) async throws {
+    /// What a push actually sent, so the UI can say so instead of reporting success for a map that went up without its 3D scan.
+    public struct PushReport: Equatable, Sendable {
+        public var meshesPublished = 0
+        /// Listed in the map but not uploaded: this phone's own file is missing or changed since it was listed (other contributors' files are not this phone's to upload and are not counted).
+        public var meshesSkipped = 0
+    }
+
+    @discardableResult
+    public func push(mapId: UUID, share: Bool) async throws -> PushReport {
+        if store.isMeshPending(mapId: mapId) {
+            throw CloudError.meshNotReady("The 3D model of this scan is still being built. Wait for \"3D model saved\", then upload again.")
+        }
         // A scan file over the cloud limit never leaves the phone. Checked from file sizes BEFORE anything is loaded or sent.
         let verdict = store.shareVerdict(mapId: mapId)
         if verdict.isLocalOnly, let why = SharePolicy.message(verdict) { throw CloudError.localOnly(why) }
@@ -58,9 +69,10 @@ public final class SyncEngine {
         // SHA-256. They go up before the row is extended; the row itself carries no meshAssets (the server lists mine in a separate
         // call, because extending an existing building keeps its stored mesh list).
         var published: [MeshAsset] = []
+        var report = PushReport()
         for var asset in bundle.map.meshAssets ?? [] where asset.storageOwner == nil || asset.storageOwner?.uuidString.lowercased() == owner.lowercased() {
             guard let data = store.loadMesh(mapId: mapId, assetId: asset.id),
-                  data.count == asset.byteCount, ObjExport.sha256Hex(data) == asset.sha256 else { continue }
+                  data.count == asset.byteCount, ObjExport.sha256Hex(data) == asset.sha256 else { report.meshesSkipped += 1; continue }
             let path = try Self.meshPath(owner: owner, mapId: mapId, assetId: asset.id)
             try await client.upload(bucket: Self.meshBucket, path: path, data: data)
             asset.storageOwner = UUID(uuidString: owner)
@@ -71,6 +83,8 @@ public final class SyncEngine {
         let row = BuildingRow(mapId: mapId, name: outgoing.name, version: outgoing.version, map: outgoing, isShared: share)
         try await client.upsertBuilding(row)
         if !published.isEmpty { try await client.publishMeshAssets(mapId: mapId, assets: published) }
+        report.meshesPublished = published.count
+        return report
     }
 
     public func listRemote() async throws -> [RemoteMap] {
