@@ -68,6 +68,14 @@ public struct NarrationFact: Equatable, Sendable {
 
 public enum NarrationText {
 
+    /// Words that tell a person where to go or what to do. A rewrite may only use the ones the plain sentence already used.
+    static let instructionVocabulary: Set<String> = ["left", "right", "ahead", "behind", "straight", "back", "around", "turn", "stop", "go", "forward", "backward", "up", "down"]
+
+    /// Lower-case whole words (letters only), so "right" is not found inside "bright".
+    static func words(in text: String) -> [String] {
+        text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+    }
+
     static let directionVocabulary = ["left", "right", "ahead", "behind", "straight"]
 
     /// Digit runs, in order: "In 10 meters, Room 204" -> ["10", "204"].
@@ -130,6 +138,9 @@ public enum NarrationGuard {
         // ...no number is invented...
         let allowed = Set(NarrationText.numbers(in: fact.plain))
         for n in NarrationText.numbers(in: text) where !allowed.contains(n) { return nil }
+        // ...no direction or instruction is ADDED (a rewrite of "Room 206 on your right" must not grow a "then left" or a "stop")...
+        let plainWords = Set(NarrationText.words(in: fact.plain))
+        for word in NarrationText.words(in: text) where NarrationText.instructionVocabulary.contains(word) && !plainWords.contains(word) { return nil }
         // ...and no reassurance about safety is added.
         let plainLower = fact.plain.lowercased()
         for claim in safetyClaims where lower.contains(claim) && !plainLower.contains(claim) { return nil }

@@ -1,5 +1,11 @@
 # Work log
 
+## 2026-10-18 14:05 — Claude (agent, for Sachin) — Narration guard: a rewrite may not ADD a direction or an order (automated security review)   [tags: BUG]
+Area: B. Branch `feature/guidance-overhaul`. Finding (MEDIUM, valid): `NarrationGuard.accept` only required the plain sentence's direction words to SURVIVE; a rewrite could still append "then turn left" / "stop here". Fixed: any whole word from `instructionVocabulary` (left, right, ahead, behind, straight, back, around, turn, stop, go, forward, backward, up, down) in the rewrite must already be in the plain sentence. Deliberately conservative (a false reject only costs the plain sentence). Files edited: `Guidance/Narration.swift`, `GuidanceOverhaulTests.swift` (+1 test).
+Second finding (MEDIUM, key in the app bundle via `GeminiApiKey` in project.yml): acknowledged, not changed - already surfaced to Sachin and written in D-046 §5 / Narration.swift header: acceptable for our own phones only; a Supabase edge function (auth + rate limit) must replace it before any build leaves the team. Not built yet.
+Verified: `make test` -> 395 tests, 0 failures. NOT verified: on device; live Gemini.
+Open problems / handoff: build the Gemini proxy edge function before any public build.
+
 ## 2026-10-18 13:40 — Claude (agent, for Sachin) — Guidance voice overhaul: VoiceOver-aware single voice, no silently lost lines, optional Gemini wording   [tags: BUG, BUILD]
 Area: B (Guidance), touching U3's Settings/GuidingView/Announcer and the E2E self-test line that printed the voice. Branch `feature/guidance-overhaul`, cut from `origin/navigation-overhaul` (d8afcf1), NOT from `main`: `main` lacks d8afcf1 (the "Speak the turn" speech fix).
 Why: Sachin asked for (1) testing + review of the voice/guidance state, (2) obstacle-vs-voice priority checked, (3) Gemini for richer guidance with fallback to the manual wording, (4) no overlap with Apple VoiceOver (issue #10), (5) the iPhone's own voice first, the app's Siri pick only as fallback. Design in D-046.

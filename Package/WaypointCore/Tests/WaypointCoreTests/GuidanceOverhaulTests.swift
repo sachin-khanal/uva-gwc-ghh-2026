@@ -265,6 +265,16 @@ final class NarrationGuardTests: XCTestCase {
         XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, about 3 steps.", for: landmark))
     }
 
+    /// Security review 2026-10-18: keeping the required words is not enough - a rewrite must not ADD a direction or an order.
+    func testAnAddedDirectionOrInstructionRejectsTheRewrite() {
+        XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, then turn right.", for: landmark))
+        XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, so stop here.", for: landmark))
+        XCTAssertNil(NarrationGuard.accept("Go straight past Room 206 on your left.", for: landmark))
+        XCTAssertNil(NarrationGuard.accept("In 10 meters, turn right, then back up.", for: countdown))
+        XCTAssertNotNil(NarrationGuard.accept("Room 206 is just on your left.", for: landmark), "whole words only; nothing added")
+        XCTAssertNil(NarrationGuard.accept("Coming up in 10 meters, turn right.", for: countdown), "unexpected 'up' - conservative: a false reject only costs the plain sentence")
+    }
+
     func testReassuranceAboutSafetyRejectsTheRewrite() {
         XCTAssertNil(NarrationGuard.accept("The path is clear, so turn right in 10 meters.", for: countdown))
         XCTAssertNil(NarrationGuard.accept("Room 206 is on your left, and it's safe.", for: landmark))
