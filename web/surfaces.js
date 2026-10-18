@@ -24,9 +24,9 @@ export class SurfaceRenderer {
       return s;
     };
     const vertex=shader(gl.VERTEX_SHADER,`
-      attribute vec3 position; attribute vec3 normal;
+      attribute vec3 position; attribute vec3 normal; attribute vec3 color;
       uniform vec3 center; uniform vec4 camera; uniform vec2 scale;
-      uniform float radius; varying vec3 surfaceNormal; varying float height;
+      uniform float radius; uniform float walking; uniform vec3 eye; varying vec3 surfaceNormal; varying vec3 surfaceColor; varying float height;
       void main(){
         vec3 p=position-center;
         float rx=camera.x*p.x+camera.y*p.z;
@@ -35,15 +35,24 @@ export class SurfaceRenderer {
         float distance=radius*3.0-(camera.w*p.y+camera.z*rz);
         float near=radius*0.1; float far=radius*6.0;
         gl_Position=vec4(rx*scale.x,y*scale.y,(far+near)/(far-near)*distance-2.0*far*near/(far-near),distance);
-        surfaceNormal=normal; height=position.y;
+        if(walking>0.5){
+          vec3 d=position-eye;
+          float right=camera.x*d.x+camera.y*d.z;
+          float forward=camera.y*d.x-camera.x*d.z;
+          float up=camera.z*d.y-camera.w*forward;
+          float depth=camera.w*d.y+camera.z*forward;
+          float n=0.12;float f=10000.0;
+          gl_Position=vec4(right*scale.x,up*scale.y,(f+n)/(f-n)*depth-2.0*f*n/(f-n),depth);
+        }
+        surfaceNormal=normal;surfaceColor=color; height=position.y;
       }`);
     const fragment=shader(gl.FRAGMENT_SHADER,`
-      precision highp float; varying vec3 surfaceNormal; varying float height;
+      precision highp float; varying vec3 surfaceNormal; varying vec3 surfaceColor; varying float height;
       uniform float cutHeight;
       void main(){
         if(height>cutHeight) discard;
         float light=0.42+0.58*abs(dot(normalize(surfaceNormal),normalize(vec3(0.35,0.8,0.5))));
-        gl_FragColor=vec4(vec3(0.79,0.82,0.78)*light,1.0);
+        gl_FragColor=vec4(surfaceColor*light,1.0);
       }`);
     this.program=gl.createProgram();gl.attachShader(this.program,vertex);gl.attachShader(this.program,fragment);gl.linkProgram(this.program);
     if (!gl.getProgramParameter(this.program,gl.LINK_STATUS)) throw new Error('Could not link scan surface rendering.');
@@ -54,9 +63,10 @@ export class SurfaceRenderer {
     this.buffers=[];this.clear();
   }
   add(mesh) {
-    this.initialize();const gl=this.gl, data=surfaceVertices(mesh), buffer=gl.createBuffer();
+    this.initialize();const gl=this.gl, base=surfaceVertices(mesh), data=new Float32Array(mesh.triangles.length*27), buffer=gl.createBuffer();
+    for(let i=0;i<base.length/6;i++){data.set(base.subarray(i*6,i*6+6),i*9);data.set(mesh.colors?.[Math.floor(i/3)]||[.79,.82,.78],i*9+6);}
     gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
-    this.buffers.push({buffer,count:data.length/6});
+    this.buffers.push({buffer,count:data.length/9,ceiling:!!mesh.ceiling});
   }
   clear() { if(this.gl) this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT); }
   draw(scene,width,height,zoom,yaw,pitch,cutHeight) {
@@ -66,13 +76,15 @@ export class SurfaceRenderer {
     gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clearColor(0,0,0,0);this.clear();
     gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.useProgram(this.program);
     const uniform=name=>gl.getUniformLocation(this.program,name);
-    const focal=Math.max(40,Math.min(width-100,height-100))*2*zoom;
+    const focal=scene.walking?scene.focal:Math.max(40,Math.min(width-100,height-100))*2*zoom;
+    gl.uniform1f(uniform("walking"),scene.walking?1:0);gl.uniform3fv(uniform("eye"),scene.eye||[0,0,0]);
     gl.uniform3fv(uniform('center'),scene.center);gl.uniform4f(uniform('camera'),Math.cos(yaw),Math.sin(yaw),Math.cos(pitch),Math.sin(pitch));
     gl.uniform2f(uniform('scale'),2*focal/width,2*focal/height);gl.uniform1f(uniform('radius'),scene.radius);gl.uniform1f(uniform('cutHeight'),cutHeight);
-    for(const {buffer,count} of this.buffers){
+    for(const {buffer,count,ceiling} of this.buffers){
+      if(ceiling&&!scene.walking)continue;
       gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
-      for(const [name,offset] of [['position',0],['normal',12]]){
-        const loc=gl.getAttribLocation(this.program,name);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,3,gl.FLOAT,false,24,offset);
+      for(const [name,offset] of [['position',0],['normal',12],['color',24]]){
+        const loc=gl.getAttribLocation(this.program,name);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,3,gl.FLOAT,false,36,offset);
       }
       gl.drawArrays(gl.TRIANGLES,0,count);
     }
