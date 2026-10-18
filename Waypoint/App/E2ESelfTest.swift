@@ -51,7 +51,9 @@ enum E2ESelfTest {
         check("speech.voice.enUS", hasVoice, hasVoice ? "" : "no en-US voice installed")
         let siri = AVSpeechSynthesisVoice.speechVoices().filter { $0.identifier.lowercased().contains("siri") || $0.name.lowercased().contains("siri") }
         info("speech.siriVoices", "\(siri.count) installed: \(siri.prefix(4).map { "\($0.name) [\($0.language)]" })  (none = download one in Settings > Accessibility > Spoken Content > Voices)")
-        info("speech.voice.chosen", Speaker.voice.map { "\($0.name) [\($0.language), quality \($0.quality.rawValue)]" } ?? "system default")
+        info("speech.voice.chosen", Speaker.voiceDescription)
+        let rows = Speaker.voiceRows
+        info("speech.voice.picker", "\(rows.count) voices offered; best 3: \(rows.prefix(3).map { "\($0.title) (\($0.detail))" })")
         let languages = (try? VNRecognizeTextRequest().supportedRecognitionLanguages()) ?? []
         check("vision.textRecognition", !languages.isEmpty, "languages=\(languages.prefix(3))")
         do {
@@ -259,6 +261,9 @@ enum E2ESelfTest {
                     check("push.realMap", report.meshesPublished > 0, "published \(report.meshesPublished) mesh(es), skipped \(report.meshesSkipped)")
                 } catch { fail("push.realMap", "\(error)") }
             }
+            if NarrationSelfTest.requested {
+                await NarrationSelfTest.run(client: SharedCloud.client ?? client) { name, ok, detail in check(name, ok, detail) }
+            }
             // Opt-in WRITE test (two users, publish, share, extend, stale upload, reliability). See CloudRoundTripTest.
             if CloudRoundTripTest.requested {
                 await CloudRoundTripTest.run(config: config) { name, ok, detail in check(name, ok, detail) }
@@ -267,8 +272,14 @@ enum E2ESelfTest {
             }
         } else {
             skip("cloud", "Supabase not configured (SUPABASE_URL / SUPABASE_ANON_KEY in Config/Local.xcconfig)")
+            if NarrationSelfTest.requested {
+                fail("narration.config", "the requested proxy test requires cloud configuration")
+            }
         }
 
+        if VoiceSelfTest.requested {
+            await VoiceSelfTest.run { name, ok, detail in check(name, ok, detail) }
+        }
         return finish(tally)
     }
 

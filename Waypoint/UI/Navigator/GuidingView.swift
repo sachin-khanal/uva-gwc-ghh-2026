@@ -76,7 +76,9 @@ struct GuidingView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(g.spokenText + (model.isPaused ? " Paused." : ""))
             .accessibilityHint("Double tap to repeat.")
-            .accessibilityAddTraits(.updatesFrequently)
+            // NO `.updatesFrequently` (2026-10-18): it makes VoiceOver re-read this label every time the instruction changes, in its own voice, while
+            // `Speaker` says the same instruction - two voices at once with VoiceOver on. Guidance is spoken once, by `Speaker`; the label is
+            // read when the person moves focus here or asks for a repeat.
             .accessibilityAction(named: "Distance remaining") { model.announceDistanceRemaining() }
             .accessibilityAction(named: pauseActionName) { model.togglePause() }
             .accessibilityAction(named: "Stop navigation") { confirmStop = true }

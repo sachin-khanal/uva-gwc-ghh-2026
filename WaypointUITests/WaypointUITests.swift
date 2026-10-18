@@ -11,6 +11,7 @@
 // Limits:   cannot move the phone through space, so AR scanning/relocalization are only checked for "screen shows live HUD",
 //           not for correctness. Cannot judge audio/haptics (the simulated-walk test checks the TEXT the app shows).
 // Style:    one behaviour per test; ids are defined next to the views (`.accessibilityIdentifier("...")`) - keep them in sync.
+// Status:   Real-scan simulation selection and obstacle re-entry checks; UNVERIFIED ON DEVICE after the Codex handoff.
 //
 import XCTest
 
@@ -142,12 +143,17 @@ final class WaypointUITests: XCTestCase {
         waitUntil("label CONTAINS 'walk into a trash can'", on: spoken, timeout: 10, "trash can sentence")
         shot("50-trash-can")
 
-        // Change what the obstacle is: the sentence must change with it.
+        let trashSentence = spoken.label
+        // A stationary user's classifier changing kind is deliberately silent. Clear the hazard first,
+        // then introduce a new wall: the clear -> stop transition must announce it even while paused.
+        flip(app.switches["nav.injectObstacle"], "Obstacle toggle missing")
+        waitUntil("exists == false", on: app.staticTexts["nav.obstacle"], timeout: 10, "obstacle did not clear")
         need(app.buttons["nav.obstacleKind"], "obstacle type picker missing").tap()
         need(app.buttons["wall"], "wall option missing").tap()
+        flip(app.switches["nav.injectObstacle"], "Obstacle toggle missing")
         waitUntil("label CONTAINS 'heading toward a wall'", on: app.staticTexts["nav.lastSpoken"], timeout: 10, "wall sentence")
         shot("51-wall")
-        note("sentences", "trash can -> \(spoken.label)")
+        note("sentences", "\(trashSentence) -> \(spoken.label)")
     }
 
     func testPhonePostureCoachSpeaksAndRecovers() {

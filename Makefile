@@ -126,7 +126,7 @@ EXTRA ?=
 
 selftest-sim: ## HEADLESS on-phone test: run the simulated walk to ROOM (default: the first labelled place of the first scanned map), print every cue, exit PASS/FAIL (DEVICE=...). Phone must be unlocked; you will hear it.
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }
-	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoSimulate "$(ROOM)"
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing --console $(BUNDLE_ID) -- -autoSimulate "$(ROOM)" $(EXTRA)
 
 selftest-e2e: ## HEADLESS end-to-end self-test on the phone: capabilities, storage, Keychain, synthetic scan -> save -> reload -> share -> simulated walk, cloud (if configured). Prints PASS/FAIL per check (DEVICE=...)
 	@[ -n "$(DEVICE)" ] || { echo "Set DEVICE=<id>; list with 'make devices'"; exit 1; }

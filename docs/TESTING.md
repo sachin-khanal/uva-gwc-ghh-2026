@@ -1,5 +1,7 @@
 # Testing — what is proven, and the device test plan
 
+**Update 2026-10-18 (Codex):** On `feature/guidance-overhaul`, classic UI tests now select a real saved scan using `nav.map`, with no fixed SAMPLE/Room 204 requirement. The obstacle naming test clears the trash-can hazard before introducing a wall, because stationary classifier kind changes are intentionally silent. `make test`: 406 pass; `make typecheck`: PASS. Revised UI tests are UNVERIFIED ON DEVICE; retain the prior results as historical evidence.
+
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
 
 First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).
@@ -453,3 +455,63 @@ is only "verified" once someone has done it on a device and written it down.
 
 
 **Update 2026-10-18 (Codex, U3 conflict integration):** Combined format is schema 4 with optional stairs, retaining extents and keyframes. Mesh approval requires publish_mesh_assets after upload. Migration order: audit 0006, secure mesh 0008, rich format 0009, validator alias 0010. Browser 58/58, UI 23/23 and Python 22/22 pass. Native tests/typecheck unavailable on Windows; SQL not executed. UNVERIFIED ON DEVICE.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Retain incoming branch notes below.
+
+## Guidance voice overhaul — added 2026-10-18 (branch `feature/guidance-overhaul`; needs a phone, headphones, and VoiceOver ON then OFF)
+`make test` covers the logic (`GuidanceOverhaulTests`, 40 tests). None of the rows below has been run by anyone yet.
+
+| # | Do this | Expect |
+|---|---|---|
+| G1 | VoiceOver ON, Simulate walk, listen to the whole route | ONE voice (yours, at your VoiceOver speed); VoiceOver never reads an instruction on top of the app; arrival is heard once |
+| G2 | VoiceOver ON, rest focus on the big guiding button during the walk | VoiceOver does NOT re-read the label each time the instruction changes (the old `.updatesFrequently` bug) |
+| G3 | VoiceOver ON, touch the screen mid-instruction | the cut-off instruction is said again a moment later (lost-line re-arm) |
+| G4 | VoiceOver OFF | the voice is the one this iPhone is set up with (Settings > Accessibility > Spoken Content). If it is a stiff generic voice instead, record that in the WORKLOG - the assumption in D-046 §2 is wrong |
+| G5 | Settings > Voice > "Waypoint's Siri pick" | the app's Siri voice is used instead |
+| G6 | Simulate + "Inject obstacle" while a long line is being said | the STOP cuts it off mid-word; the turn that was cut off is repeated after it; two stops never cut each other |
+| G7 | Tap the guiding button twice quickly | the instruction is repeated both times |
+| G8 | Add `GEMINI_API_KEY` to `Config/Local.xcconfig`, `make gen`, run Simulate; watch the log for `narrated: <plain> -> <rich>` | opening/landmark/far countdown sound more natural; turns, warnings and arrival are word-for-word the plain text |
+| G9 | Same, but airplane mode | at most one short wait on the first calm line, then the plain sentences; log shows no `narrated:` lines; still works |
+
+| G10 | After setting the `GEMINI_API_KEY` secret: Simulate walk on a CLOUD-configured build with NO `GEMINI_API_KEY` in `Local.xcconfig`; log shows `narration: via the narrate Edge Function` and `narrated: <plain> -> <rich>` | calm lines are reworded with no key in the build; with the secret removed or `NARRATION_ENABLED=false`, plain sentences and no crash |
+
+| G11 | VoiceOver OFF. Settings > Voice and speed > "A voice I choose": tap several voices | each tap speaks the sample in THAT voice; the checkmark follows; leaving the screen stops the speech |
+| G12 | Move the speed slider to 1.4x and 0.8x, tap "Hear a sample"; then run a Simulate walk | the sample and the walk follow the speed; at 1.4x it is clearly faster and still understandable |
+| G13 | Uninstall (or pick on another phone) a chosen voice, start a walk | no crash, no silence: the phone's own default voice is used |
+
+
+
+## Gemini proxy on-phone E2E — Update 2026-10-18 (Codex)
+
+`NarrationSelfTest.swift` adds opt-in checks through the app's shared authenticated Supabase client and the production `ProxyNarrator` deadline/guard. Normal E2E runs do not spend Gemini quota unless requested. `EXTRA` now reaches both self-test launch targets (previously the Makefile ignored it for these targets).
+
+```sh
+DEVICE=<phone-id> make build SIGN_FLAGS='-allowProvisioningUpdates -allowProvisioningDeviceRegistration GEMINI_API_KEY='
+DEVICE=<phone-id> make install
+DEVICE=<phone-id> EXTRA='-e2eNarration YES' make selftest-e2e
+DEVICE=<phone-id> ROOM=409 EXTRA='-guidance.richNarration YES' make selftest-sim
+```
+
+The empty build-setting override excludes the Gemini key from that app bundle without editing `Local.xcconfig`. `make install` backs up phone maps. Keep the phone unlocked. Use a room present on the phone; Room 409 was used on Sachin's real Floor 4 map. The simulation speaks through the app; no physical walk is performed.
+
+Recorded on Sachin's iPhone 16 Pro Max: opt-in E2E **35 PASS / 0 FAIL / 1 SKIP** (cloud map-write test deliberately not requested). Live landmark accepted in 1068 ms; countdown in 824 ms; briefing used the original wording. Aggregate requires at least one live guarded response within the normal deadline and fails if all requests fall back. A single fallback is expected behavior for timeout, refusal or guard rejection; this test does not diagnose which of those occurred for the briefing.
+
+Device-injected offline, HTTP 503, null JSON text, malformed reply, added-direction and slow-response checks all pass through `ProxyNarrator`; slow request cancelled in 101 ms. These do **not** claim the phone was actually in airplane mode or that production secrets were removed. The live invalid-kind request returned HTTP 400. Mac-side live probes also observed missing-auth and public-anon-key HTTP 401 plus real Gemini rewrites.
+
+The full phone simulation on the no-key build logged `narration: via the narrate Edge Function`, rewritten opening and landmark sentences, `You have arrived at 409.`, and `SELFTEST PASS`. The normal speech/haptic calls ran, but no human listening judgement or physical navigation was performed: audible quality, VoiceOver overlap and physical guidance remain **UNVERIFIED ON DEVICE**. Tests did not change server secrets, deployment or caps.
+
+
+## Audible voice integration — Update 2026-10-18 (Codex)
+
+Opt-in `VoiceSelfTest.swift` runs through the actual singleton `Speaker` and collects OS speech delegate events. `say` or queue insertion alone is insufficient to pass. The optional diagnostic observer has no subscriber during normal navigation.
+
+```sh
+DEVICE=<phone-id> EXTRA='-e2eVoice YES -guidance.voice phone -guidance.speechRate 1' make selftest-e2e
+```
+
+Run on a built/installed guidance branch, keep the phone unlocked, and listen. Voice/source overrides apply to this launch and do not alter saved preferences. If testing the proxy without a direct bundled key, use the empty `GEMINI_API_KEY=` build override documented above. For the VoiceOver route, turn VoiceOver ON before running the same opt-in test; it waits for a real successful announcement completion, never treating the watchdog as proof. That route was explicitly skipped by Sachin on 2026-10-18.
+
+Recorded with VoiceOver OFF on Sachin's iPhone 16 Pro Max: **37 PASS, 0 FAIL, 1 SKIP** (cloud map-write test not requested). Output volume 0.3, Speaker route. Live Gemini phrase "You are passing Room 206 on your left." produced actual `didStart` and `didFinish`. Turn right finished before Continue straight started. A long line received `didCancel` and loss notification when interrupted by STOP; STOP and recovery then finished. Two safety lines finished in order without canceling one another. Arrival finished and the queued stale countdown never started. Preview 0.8x took 4.388 s; 1.4x took 1.917 s. Installed Aaron preview also produced start/finish callbacks. Sachin confirmed the audible output was clear and as described; the tests intentionally interrupt only their long safety/arrival setup lines.
+
+This closes the earlier gap between requesting speech and checking actual playback callbacks with human listening. It does not establish VoiceOver ON overlap behavior, acoustic quality on other devices/output routes, physical navigation or every available voice. VoiceOver overlap remains **UNVERIFIED ON DEVICE**. No microphone recording or persistent system-setting change was made.

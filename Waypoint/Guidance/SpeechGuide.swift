@@ -13,8 +13,13 @@ import WaypointCore
 
 final class SpeechGuide {
 
-    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, clearsPending: Bool = false) {
-        Speaker.shared.say(text, priority: priority, staysFresh: staysFresh, clearsPending: clearsPending)
+    func say(_ text: String, priority: SpeechPriority, staysFresh: Bool = false, clearsQueue: Bool = false) {
+        Speaker.shared.say(text, priority: priority, staysFresh: staysFresh, clearsQueue: clearsQueue)
+    }
+
+    /// Tell `handler` (main thread) whenever a line was thrown away before it was heard. Cleared by `stop()`'s owner via `nil`.
+    func onLineLost(_ handler: ((String) -> Void)?) {
+        Speaker.shared.onLineLost = handler
     }
 
     func stop() {

@@ -93,6 +93,15 @@ final class NavigationController: ObservableObject {
     private var openingQueued = false
     /// The text of the opening briefing, so the speaker can be told it must not be dropped as stale (see Speaker.openingMaxQueuedAge).
     private var openingBriefingText: String?
+    /// Gemini rewording for the calm lines; nil when no key is configured, the setting is off, or the app is not navigating. Every failure
+    /// falls back to the plain sentence (see Narration.swift). Never used for obstacles, turns, posture, lost position or arrival.
+    private var narration: NarrationCoordinator?
+    /// Bumped on every `begin`/`stop`, so a rewrite that comes back after navigation ended or restarted is not spoken.
+    private var navigationGeneration = 0
+    /// Rewritten text -> the plain sentence the planner knows it by (for `FeedbackPlanner.lineLost`). Small: only recent lines matter.
+    private var spokenAliases: [String: String] = [:]
+    /// Keeps a busy voice from turning every displaced line into a re-announcement next tick (see `LossThrottle`).
+    private var lossThrottle = LossThrottle()
     /// Where to save remembered routes (real mode only; simulation does not persist).
     private var memoryHome: (store: MapStore, mapId: UUID)?
     private var blockage = BlockageTracker()
@@ -218,7 +227,12 @@ final class NavigationController: ObservableObject {
         isPreparing = false
         relocalizer.stop()
         audio.stop()
+        speech.onLineLost(nil)
         speech.stop()
+        navigationGeneration += 1
+        narration = nil
+        spokenAliases = [:]
+        lossThrottle.reset()
         statusText = "Stopped"
     }
 
@@ -257,6 +271,14 @@ final class NavigationController: ObservableObject {
         postureText = ""
 
         do { try audio.start() } catch { Log.guidance.error("audio start failed: \(error.localizedDescription)") }
+        narration = Self.makeNarration()
+        // A line the speaker threw away (displaced, expired, cut off by a warning) was already recorded by the planner as announced: tell it,
+        // so it is said again if it still applies.
+        speech.onLineLost { [weak self] text in
+            guard let self else { return }
+            let plain = self.spokenAliases[text] ?? text
+            if self.lossThrottle.shouldRearm(plain, now: ProcessInfo.processInfo.systemUptime) { self.planner.lineLost(plain) }
+        }
         openingQueued = false
         openingBriefingText = nil
         sceneContext = nil
@@ -580,9 +602,31 @@ final class NavigationController: ObservableObject {
             // still being said is out of date. It interrupts, like a safety cue (found on the phone 2026-10-18: "You have arrived" was dropped after
             // 2.7 s queued behind the briefing in the simulated walk).
             let isArrival = line.text.hasPrefix("You have arrived")
-            speech.say(line.text, priority: isArrival ? .critical : line.priority,
-                       staysFresh: line.text == openingBriefingText,
-                       clearsPending: isArrival)
+            let priority: SpeechPriority = isArrival ? .critical : line.priority
+            let staysFresh = line.text == openingBriefingText
+            // Only calm lines carry a `narration` fact (the planner decides; see FeedbackPlanner.note) - never an obstacle, turn, posture or arrival.
+            if !isArrival, let fact = planner.info(for: line.text)?.narration, let narration {
+                let generation = navigationGeneration
+                let plain = line.text
+                Task { [weak self] in
+                    let rich = await narration.narrate(fact) // nil on ANY failure -> the plain sentence
+                    DispatchQueue.main.async {
+                        guard let self, self.navigationGeneration == generation else { return }
+                        var text = plain
+                        if let rich {
+                            text = rich
+                            self.spokenAliases[rich] = plain
+                            if self.spokenAliases.count > 12 { self.spokenAliases = [rich: plain] }
+                            self.setIfChanged(\.lastSpoken, rich)
+                            if let i = self.recentSpeech.lastIndex(of: plain) { self.recentSpeech[i] = rich }
+                            Log.guidance.info("narrated: \(plain) -> \(rich)")
+                        }
+                        self.speech.say(text, priority: priority, staysFresh: staysFresh, clearsQueue: isArrival)
+                    }
+                }
+            } else {
+                speech.say(line.text, priority: priority, staysFresh: staysFresh, clearsQueue: isArrival)
+            }
         }
 
         for action in actions {
@@ -609,6 +653,24 @@ final class NavigationController: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Richer wording for the calm lines, or nil (= plain sentences). Two routes, in this order:
+    ///  1. the `narrate` Edge Function through the signed-in Supabase client: the Gemini key lives on the server and in NO build (D-047);
+    ///  2. DEVELOPER FALLBACK only when cloud is not configured at all: a Gemini key in Config/Local.xcconfig, called directly.
+    private static func makeNarration() -> NarrationCoordinator? {
+        guard UIPrefs.richNarrationEnabled else { return nil }
+        if let client = SharedCloud.client {
+            // Sign in now, so the first rewrite does not spend its 1.5 s deadline on the anonymous sign-up.
+            Task { _ = try? await client.ensureSession() }
+            Log.guidance.info("narration: via the narrate Edge Function")
+            return NarrationCoordinator(narrator: ProxyNarrator(caller: client))
+        }
+        guard let config = GeminiConfig.validated(apiKey: Bundle.main.object(forInfoDictionaryKey: "GeminiApiKey") as? String,
+                                                  model: Bundle.main.object(forInfoDictionaryKey: "GeminiModel") as? String)
+        else { return nil }
+        Log.guidance.info("narration: Gemini \(config.model)")
+        return NarrationCoordinator(narrator: GeminiNarrator(config: config))
     }
 
     private func describe(trackingOK: Bool) -> String {

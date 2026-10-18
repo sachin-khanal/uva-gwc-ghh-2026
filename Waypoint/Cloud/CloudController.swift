@@ -45,7 +45,9 @@ final class CloudController: ObservableObject {
             urlString: bundle.object(forInfoDictionaryKey: "SupabaseURL") as? String,
             anonKey: bundle.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String)
         if let config {
-            let client = SupabaseClient(config: config, sessionStore: KeychainSessionStore())
+            // The app's own bundle shares ONE client with the guidance narrator (see SharedCloud); a test bundle gets its own.
+            let client = (bundle === Bundle.main ? SharedCloud.client : nil)
+                ?? SupabaseClient(config: config, sessionStore: KeychainSessionStore())
             engine = SyncEngine(client: client, store: store)
             isConfigured = true
             status = "Cloud ready"

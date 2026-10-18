@@ -199,6 +199,9 @@ Related but separate: a single tick emitting several `.speak` lines used to clip
 coalescing them in `NavigationController.perform`.
 **Status:** accepted; `SpeechGate` unit-tested (8 tests). The audible result is UNVERIFIED ON DEVICE.
 
+**Update 2026-10-18 (Claude):** the VoiceOver trade-off above (the app speaks in its own voice while VoiceOver reads focused elements in its own) is
+superseded by D-046: with VoiceOver on, guidance is now spoken THROUGH VoiceOver. The one-synthesizer rule stands.
+
 ## D-027 — Guide along the corridor, not along the volunteer's exact footsteps (2026-10-17)
 Six findings from walking Rice Hall. All of them came from the same root idea being wrong: the app treated the
 breadcrumb chain as the path to follow, rather than as a description of where it is possible to walk.
@@ -612,3 +615,55 @@ U2's speaker keeps ONE waiting line and discards it after 2 s (right for turn cu
 
 ## D-050 — Security posture for a public repo and a public anon key (2026-10-18, Claude)
 The Supabase anon key is public by design and anonymous sign-in is open, so every defence must be server-side and every shared map is hostile input. Done: RLS, exact-path scan reads (0004), extent/meshAssets constraints (0005), caps per account (0006, written and tested incl. a concurrency race test, not applied; ~~a global cap of 500~~ removed after review: it would let throw-away accounts lock everyone out), validation after merge, least-privilege CI, personal data redacted from current files. Accepted trade-offs: Files-app exposure and default file protection stay on for debugging (S-3, S-4), the Claude start-up hook runs a repo script (S-8). Open: captcha/rate limits in the Supabase dashboard, personal data still in git history of the public repo (S-2). Details and status of every finding: `docs/SECURITY.md`.
+
+
+**Update 2026-10-18 (Codex, U3 team sync):** Retain incoming branch notes below.
+
+## D-046 — Guidance voice overhaul: one VoiceOver-aware voice, no silently lost lines, optional Gemini wording (2026-10-18)
+Asked for by the team: richer, more natural guidance; no overlap with Apple's VoiceOver (issue #10); the phone's own voice first; obstacle
+warnings keep priority over the voice; Gemini must fall back to the hand-written wording. Branch `feature/guidance-overhaul`, off `navigation-overhaul` d8afcf1.
+
+1. **VoiceOver cannot be paused** (no iOS API), so the app speaks THROUGH it. VoiceOver running -> every line is a VoiceOver announcement
+   (`AccessibilityNotification.Announcement`): `.critical` at VoiceOver's `.high` priority (interrupts, uninterruptible), everything else `.low` (queued).
+   One voice, the person's own voice and speed, and VoiceOver does the queuing. Setting: "Speak through VoiceOver when it is on" (default on); off ->
+   AVSpeechSynthesizer with `prefersAssistiveTechnologySettings`. A second, separate cause of overlap was removed: `GuidingView` marked its main button
+   `.updatesFrequently`, which makes VoiceOver re-read the label whenever the instruction changes - in its own voice, while `Speaker` said it too.
+2. **Voice order** (`VoiceSelection`): VoiceOver on -> its settings; else the voice the iPhone already uses (no voice set on the utterance); else, as FALLBACK
+   only, the app's Siri pick (`VoicePicker`). Setting "Voice" can force the app's pick. Whether "no voice set" is really the person's Spoken Content voice is iOS
+   behaviour we could not test: UNVERIFIED ON DEVICE.
+3. **No line is lost quietly.** `SpeechQueue` (pure, tested) returns every line it displaces or expires; `Speaker.onLineLost` forwards it (also lines cut
+   off by a safety interrupt, or VoiceOver announcements that did not finish) to `FeedbackPlanner.lineLost`, which forgets that the cue was announced so the next
+   tick says it again if it still applies. This is the root cause behind F-1/F-5/F-7: the planner latches a cue when it MAKES it, the speaker could still drop it.
+4. **Obstacle vs voice** is unchanged in intent and now pinned by tests: a STOP (`.critical`) cuts off route guidance mid-sentence but never another safety line;
+   route lines queue behind a warning; cautions are `.high` (queue), never `.critical`; the way round follows the stop. `Announcer.say(interrupt: true)` used to
+   map to `.high` (queue), so "repeat"/"stop"/"distance" waited behind guidance; it is now `.critical` and skips the 3 s duplicate filter (the person asked).
+5. **Gemini** (`Narration.swift`, URLSession through the existing `HTTPTransport`; no new dependency, D-003 stands): rewords ONLY the opening briefing, the route
+   briefing, landmarks and countdowns beyond 5 m. Never obstacles, turns, posture, lost position, arrival. Sent: one sentence + its kind (scrubbed of markup/quotes).
+   Not sent: images, depth, coordinates, map or user ids. Reply must keep every direction word and number, invent no number, claim nothing is safe/clear, contain no
+   markup/emoji, and be short - else the plain sentence is spoken. 1.5 s deadline; two failures in a row switch it off for 60 s (`NarrationBreaker`).
+   Key: `GEMINI_API_KEY` in git-ignored `Config/Local.xcconfig` -> Info.plist. **A key in an app bundle can be extracted**: fine for our own phones, not for a public
+   build - the follow-up is a Supabase edge function holding the key (TODO(B)/U3). Model defaults to `gemini-2.5-flash` (`GEMINI_MODEL`); the model id was NOT checked
+   against the live API.
+**Status:** accepted; `make test` 394 pass (40 new), `make typecheck`, `make check` OK. Everything audible and the live Gemini call are UNVERIFIED ON DEVICE.
+
+## D-047 — Gemini goes through a Supabase Edge Function; no build carries the key (2026-10-18)
+Closes the open item in D-046 §5 (and the security review's "hardcoded secret in client bundle"). Function `narrate` (`supabase/functions/narrate/index.ts`), live on project
+`mssakhavfsyjiymcqskr`, `verify_jwt` on; migration `0009_narration_limits.sql` applied live.
+1. **Who:** a signed-in user (anonymous sign-in counts: role `authenticated`); the public anon key alone is refused (401).
+2. **What:** `{kind, sentence}` only, strictly validated (4 kinds, <= 500 chars, letters/digits/space/`. , ' -`). The SERVER owns the prompt, model and length, so it is not
+   a free general Gemini endpoint. The app still runs `NarrationGuard` on every reply, whatever the server says.
+3. **Limits:** per-user and global daily caps (`narration_take`, secrets `NARRATION_USER_DAILY_CAP` default 200, `NARRATION_GLOBAL_DAILY_CAP` default 1500) -> 429. Anonymous users are
+   cheap to create, so the GLOBAL cap is the real protection. `NARRATION_ENABLED=false` switches it off for everyone at once. Missing config or a failing limit check -> 503 (fail closed).
+4. **App:** `ProxyNarrator` through the shared `SupabaseClient` (`SharedCloud`). Direct `GeminiNarrator` (key in `Config/Local.xcconfig`) remains only as a DEVELOPER fallback when cloud is
+   not configured; with cloud configured the direct key is never used, so remove `GEMINI_API_KEY` from `Local.xcconfig` once the proxy works.
+5. **Residual risks:** anyone with the app can sign in anonymously and spend the global cap (denial of the nice wording, never of guidance - the plain sentence is the fallback);
+   the prompt exists twice (server + `NarrationPrompt.system`) and can drift in style only; sentences (place names included) go to Google, and on the FREE tier Google may use them to improve its products.
+**Status:** accepted. Guards and limits verified against the live function (401/405/400/503) and the SQL test. The Gemini call through the function is UNVERIFIED until the `GEMINI_API_KEY` secret is set.
+
+## D-048 — The in-app voice is choosable: any installed voice, a speed setting, a sample button (2026-10-18)
+Applies only when VoiceOver is OFF (with VoiceOver on, D-046 hands the voice and speed to the person's own VoiceOver settings). Settings > "Voice and speed": (1) which voice - the iPhone's own (default),
+the app's Siri pick (fallback), or a voice the person chooses from the installed ones (tap = hear it; a chosen voice that was uninstalled falls back to the phone's own); (2) speed as a factor of the
+system default, 0.75x-1.6x (`SpeechRate`); (3) "Hear a sample". Logic in WaypointCore (`VoiceCatalog`, `SpeechRate`, `VoiceSelection`), 4 tests; previews go through the SAME synthesizer as guidance, so they cannot overlap it.
+Why a speed setting: the fixed default rate is slow for experienced screen-reader users. Why a picker: nobody has yet listened to "the phone's default voice" and judged it; this lets the team and the user settle it by ear.
+**Status:** accepted; UNVERIFIED ON DEVICE (how the previews sound, whether every listed voice can be selected by identifier, the screen with VoiceOver on). Not done: a pace that adapts to the walker, Gemini text-to-speech for calm lines.
+

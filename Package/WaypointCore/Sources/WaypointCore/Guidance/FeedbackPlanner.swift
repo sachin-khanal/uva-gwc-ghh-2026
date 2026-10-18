@@ -69,6 +69,26 @@ public enum FeedbackAction: Equatable, Sendable {
     case beacon(SIMD3<Float>?)
 }
 
+/// What to undo if a line the planner emitted never reached the user's ears (see `FeedbackPlanner.lineLost`).
+public enum Rearm: Equatable, Sendable {
+    case none
+    /// The direction cue ("Continue straight", "Turn right"): announce the CURRENT one again.
+    case direction
+    /// A corner announced from the route's geometry.
+    case corner(UUID)
+    /// A countdown line ("In 5 meters, turn right."), by its de-duplication key.
+    case warning(String)
+    case landmark(UUID)
+    case hazard
+}
+
+/// Bookkeeping the planner keeps per spoken line, for whoever performs the actions.
+public struct LineInfo: Equatable, Sendable {
+    public var rearm: Rearm
+    /// Present only for lines that may be reworded by `Narration` (never for anything urgent).
+    public var narration: NarrationFact?
+}
+
 public struct FeedbackPlanner {
 
     /// Meters-to-go at which advance warnings are spoken (each at most once per maneuver).
@@ -125,6 +145,9 @@ public struct FeedbackPlanner {
     /// A drop in the floor ahead has been announced. Re-armed once the floor is good again, so a
     /// staircase is not re-announced at every tick while the user stands at the top of it.
     private var announcedDrop = false
+    /// The last few spoken lines and what they were (newest last), so a LOST line can be said again and a line can be offered for rewording.
+    private var lineLog: [(text: String, info: LineInfo)] = []
+    private static let lineLogLimit = 16
 
     public init() {}
 
@@ -150,6 +173,37 @@ public struct FeedbackPlanner {
         announcedWayThrough = false
         announcedAvoidance = false
         announcedDrop = false
+        lineLog = []
+    }
+
+    /// What the planner knows about a line it emitted (nil for a line it did not emit, or one that is too old).
+    public func info(for text: String) -> LineInfo? { lineLog.last(where: { $0.text == text })?.info }
+
+    /// A line the planner emitted was thrown away before it was spoken (replaced, or too old by the time the voice was free).
+    /// The planner had already recorded it as announced, so without this it would never be said: a turn simply vanished (device findings
+    /// F-1/F-7, 2026-10-18). This forgets that it was announced; if the situation still holds, the next tick says it again.
+    public mutating func lineLost(_ text: String) {
+        guard let info = info(for: text) else { return }
+        switch info.rearm {
+        case .none: break
+        case .direction:
+            lastKey = nil
+            lastDirectionSpeech = nil
+            turnInProgress = nil
+        case .corner(let id):
+            announcedCorners.remove(id)
+            lastKey = nil
+            lastDirectionSpeech = nil
+            turnInProgress = nil
+        case .warning(let key): announcedWarnings.remove(key)
+        case .landmark(let id): announcedLandmarks.remove(id)
+        case .hazard: lastHazardTarget = nil
+        }
+    }
+
+    private mutating func note(_ text: String, _ rearm: Rearm, narration: NarrationKind? = nil) {
+        lineLog.append((text, LineInfo(rearm: rearm, narration: narration.map { NarrationFact(kind: $0, plain: text) })))
+        if lineLog.count > Self.lineLogLimit { lineLog.removeFirst(lineLog.count - Self.lineLogLimit) }
     }
 
     /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
@@ -397,9 +451,11 @@ public struct FeedbackPlanner {
                 }
                 if let l = i.landmark { announcedLandmarks.insert(l.nodeId) }
                 actions.append(.speak(opening, priority: .high))
+                note(opening, .none, narration: .opening)
                 if i.kind == .continueStraight { lastKey = i.kind.rawValue }
             } else if let text = ManeuverSpeech.briefing(distanceToFirstManeuver: i.upcoming) {
                 actions.append(.speak(text, priority: .normal))
+                note(text, .none, narration: .briefing)
                 if i.kind == .continueStraight { lastKey = i.kind.rawValue }
             }
         }
@@ -450,8 +506,9 @@ public struct FeedbackPlanner {
                 turnInProgress = kind
                 actions.append(.haptic(kind == .turnRight ? .turnRight : .turnLeft))
                 if let text = TurnSpeech.text(kind: kind, bearingRadians: corner.angleRadians ?? 0) {
-                    actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
-                                          priority: .high))
+                    let line = TurnSpeech.withDestination(text, destination: i.destinationLabel)
+                    actions.append(.speak(line, priority: .high))
+                    note(line, .corner(corner.nodeId))
                 }
             } else {
             switch i.kind {
@@ -469,8 +526,9 @@ public struct FeedbackPlanner {
                 // `.normal`, which SpeechGate drops whenever the speaker is busy - and it always is
                 // right after a turn. The planner had already recorded it as announced, so the cue
                 // telling the user to carry on was lost every single time (reported 2026-10-17).
-                actions.append(.speak(TurnSpeech.withDestination(text, destination: i.destinationLabel),
-                                      priority: .high))
+                let line = TurnSpeech.withDestination(text, destination: i.destinationLabel)
+                actions.append(.speak(line, priority: .high))
+                note(line, .direction)
             }
             }
         }
@@ -478,6 +536,7 @@ public struct FeedbackPlanner {
             if lastHazardTarget != i.targetNodeId {
                 lastHazardTarget = i.targetNodeId
                 actions.append(.speak(Self.hazardText(hazard), priority: .high))
+                note(Self.hazardText(hazard), .hazard)
             }
         } else {
             lastHazardTarget = nil
@@ -491,7 +550,10 @@ public struct FeedbackPlanner {
                 let key = "\(u.nodeId)-\(t)"
                 if !announcedWarnings.contains(key) {
                     for larger in Self.warningThresholds where larger >= t { announcedWarnings.insert("\(u.nodeId)-\(larger)") }
-                    actions.append(.speak(ManeuverSpeech.warning(u), priority: t <= 5 ? .high : .normal))
+                    let line = ManeuverSpeech.warning(u)
+                    actions.append(.speak(line, priority: t <= 5 ? .high : .normal))
+                    // Only the far countdown may be reworded; within 5 m it is a timing cue and goes out as written.
+                    note(line, .warning(key), narration: t > 5 ? .countdown : nil)
                 }
             }
         }
@@ -499,7 +561,9 @@ public struct FeedbackPlanner {
         // 4d. Landmarks as they are passed.
         if let l = i.landmark, !announcedLandmarks.contains(l.nodeId) {
             announcedLandmarks.insert(l.nodeId)
-            actions.append(.speak(ManeuverSpeech.landmark(label: l.label, side: l.side), priority: .normal))
+            let line = ManeuverSpeech.landmark(label: l.label, side: l.side)
+            actions.append(.speak(line, priority: .normal))
+            note(line, .landmark(l.nodeId), narration: .landmark)
         }
 
         actions.append(.beacon(i.kind == .arrived ? nil : i.targetPosition))

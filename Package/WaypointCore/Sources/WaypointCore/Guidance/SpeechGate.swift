@@ -52,10 +52,11 @@ public struct SpeechGate {
     ///   safety cue avoid cutting off ANOTHER safety cue (see `.critical` below).
     public mutating func decide(text: String, priority: SpeechPriority,
                                 isSpeaking: Bool, now: TimeInterval,
-                                speakingPriority: SpeechPriority? = nil) -> Decision {
+                                speakingPriority: SpeechPriority? = nil,
+                                allowRepeat: Bool = false) -> Decision {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .drop }
         spokenAt = spokenAt.filter { now - $0.value < repeatWindow }
-        if let last = spokenAt[text], now - last < repeatWindow { return .drop }
+        if !allowRepeat, let last = spokenAt[text], now - last < repeatWindow { return .drop }
 
         switch priority {
         case .critical:

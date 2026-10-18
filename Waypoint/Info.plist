@@ -20,6 +20,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>GeminiApiKey</key>
+	<string>$(GEMINI_API_KEY)</string>
+	<key>GeminiModel</key>
+	<string>$(GEMINI_MODEL)</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSBonjourServices</key>
