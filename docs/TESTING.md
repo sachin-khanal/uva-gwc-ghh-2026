@@ -1,5 +1,7 @@
 # Testing — what is proven, and the device test plan
 
+**Update 2026-10-18 (Codex, viewer completion):** From `feature/web-viewer-integration`, run `node web/test-web.mjs` (73 PASS, 2 browser-only SKIP), then `python3 -B web/serve.py --port 8041` and open `/web/tests.html` (74/74 PASS) and `/web/ui-tests.html` (24/24 PASS). Verified in fresh headless Chrome profiles with software WebGL, including schema 4, hostile OBJ bounds/indices, truncated downloads, route/walkthrough controls, progress, re-opening cache and changed-manifest revalidation. Native `make test` 349/349 PASS; `make typecheck` PASS (64 app files, 1 UI file; existing concurrency warnings). Live Supabase and real LiDAR visual fidelity were not tested in this session; native features remain UNVERIFIED ON DEVICE.
+
 ## Update 2026-10-17 (Codex) — existing-building extension checks (pending)
 
 First run `make test` and `make typecheck` on a Mac (new MapExtensionTests included).

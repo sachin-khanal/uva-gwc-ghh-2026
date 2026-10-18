@@ -4,6 +4,7 @@ import {walkingProjection,sampleJourney,visiblePlaces,createFloorTour,namedPlace
 import { projection,roomCorners,parseOBJ,verifyMesh } from "./geometry3d.js";
 import { validateMap } from "./router.js";
 import { SurfaceRenderer, surfaceVertices } from "./surfaces.js";
+import { parseOBJFast, verifyMeshFast, surfaceBuffer, MeshCache } from "./meshloader.js";
 export async function runGeometryChecks(sample) {
   const results = [];
   const assert = (v) => { if (!v) throw new Error("Assertion failed"); };
@@ -11,6 +12,14 @@ export async function runGeometryChecks(sample) {
     try { await fn(); results.push({name,pass:true}); }
     catch(error){results.push({name,pass:false,error:error.message});}
   };
+  await check("Schema 4 stair metadata survives validation",()=>{
+    const map=structuredClone(sample);map.schemaVersion=4;
+    const node=map.nodes.find(n=>n.kind==='stairs');
+    assert(node);node.stairs={direction:'both',railings:'both',stepCount:12};
+    validateMap(map);
+    node.stairs.stepCount=-1;
+    let rejected=false;try{validateMap(map);}catch{rejected=true;}assert(rejected);
+  });
   await check("3D projection uses height and yaw",()=>{
     const p=projection([[0,0,0],[0,3,0]],500,400);
     assert(p.project([0,0,0]).y!==p.project([0,3,0]).y);
@@ -36,7 +45,77 @@ export async function runGeometryChecks(sample) {
     assert((await verifyMesh(asset,bytes)).vertices.length===3);
     let failed=false;try{await verifyMesh({...asset,sha256:"0".repeat(64)},bytes);}catch{failed=true;}assert(failed);
   });
-  for(const schemaVersion of [0,4,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
+  // ---- fast scan pipeline (meshloader.js) ----
+  const syntheticObj=(triangles,{crlf=false,extras=true}={})=>{
+    const lines=extras?["# generated","o scan","vn 0 0 1"]:[];const vertices=triangles+2;
+    for(let i=0;i<vertices;i++)lines.push(`v ${(i%97)*0.013-0.5} ${((i*7)%89)*0.011} ${(i%53)*-0.02}`);
+    for(let t=0;t<triangles;t++)lines.push(extras&&t%2?`f ${t+1}//1 ${t+2}//1 ${t+3}//1`:`f ${t+1} ${t+2} ${t+3}`);
+    return lines.join(crlf?"\r\n":"\n")+"\n";
+  };
+  await check("Fast OBJ parser agrees with the reference parser (comments, vn, a//b faces, CRLF)",()=>{
+    for(const options of [{},{crlf:true},{extras:false}]){
+      const text=syntheticObj(500,options),slow=parseOBJ(text),fast=parseOBJFast(text);
+      assert(fast.vertexCount===slow.vertices.length&&fast.triangleCount===slow.triangles.length);
+      for(let i=0;i<slow.vertices.length;i++)for(let k=0;k<3;k++)assert(Math.abs(fast.positions[i*3+k]-slow.vertices[i][k])<1e-6);
+      for(let t=0;t<slow.triangles.length;t++)for(let k=0;k<3;k++)assert(fast.indices[t*3+k]===slow.triangles[t][k]);
+    }
+  });
+  await check("Fast OBJ parser rejects what the reference parser rejects",()=>{
+    for(const bad of ["v 0 0 0\nf 1 2 3\n","v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 1 2\n","v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3 1\n","v 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+      "v 0 0 x\nv 1 0 0\nv 0 1 0\nf 1 2 3\n","v 0 0 0\nv 1 0 0\nv 0 1 0\nf 0 1 2\n","v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1.5 2 3\n","v 0 0 0\nv 1 0 0\nv 0 1 0\n","# nothing\n","v 0 0 0\nv 1 0 0\nv 0 1 0\nf -1 2 3\n"]){
+      let fast=false,slow=false;try{parseOBJFast(bad);}catch{fast=true;}try{parseOBJ(bad);}catch{slow=true;}
+      assert(fast&&slow);
+    }
+  });
+  await check("Fast OBJ parser handles whitespace and rejects typed-array overflow",()=>{
+    const text="  v 0 0 0\n\tv 1 0 0\n v 0 1 0\n  f 1 2 3\n";
+    assert(parseOBJFast(text).triangleCount===1);
+    for(const bad of [text.replace("f 1 2 3","f 4294967297 2 3"),text.replace("v 1 0 0","v 1e100 0 0")]){
+      let rejected=false;try{parseOBJFast(bad);}catch{rejected=true;}assert(rejected);
+    }
+  });
+  await check("Fast OBJ parser enforces the manifest bounds",()=>{
+    const text="v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    assert(parseOBJFast(text,{boundsMin:[0,0,0],boundsMax:[1,1,0]}).vertexCount===3);
+    let failed=false;try{parseOBJFast(text,{boundsMin:[0,0,0],boundsMax:[0.5,1,0]});}catch{failed=true;}assert(failed);
+  });
+  await check("verifyMeshFast checks size, SHA-256, then parses",async()=>{
+    const bytes=new TextEncoder().encode("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").buffer;
+    const sha256=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(b=>b.toString(16).padStart(2,"0")).join("");
+    const asset={byteCount:bytes.byteLength,sha256,boundsMin:[0,0,0],boundsMax:[1,1,0]};
+    const mesh=await verifyMeshFast(asset,bytes);assert(mesh.vertexCount===3&&mesh.triangleCount===1&&mesh.positions instanceof Float32Array);
+    for(const bad of [{...asset,sha256:"0".repeat(64)},{...asset,byteCount:5},{...asset,boundsMax:[0.1,0.1,0]}]){
+      let failed=false;try{await verifyMeshFast(bad,bytes);}catch{failed=true;}assert(failed);
+    }
+  });
+  await check("surfaceBuffer matches the reference layout: position, unit normal, colour",()=>{
+    let seed=7;const rnd=()=>(seed=(seed*1103515245+12345)%2147483648)/2147483648; // well-conditioned triangles: exactly collinear ones round differently in Float32
+    const lines=[];for(let i=0;i<120;i++)lines.push(`v ${rnd()} ${rnd()} ${rnd()}`);for(let t=0;t<40;t++)lines.push(`f ${t*3+1} ${t*3+2} ${t*3+3}`);
+    const text=lines.join("\n")+"\n",slow=parseOBJ(text),fast=parseOBJFast(text);
+    const reference=surfaceVertices(slow),data=surfaceBuffer(fast);
+    assert(data.length===fast.triangleCount*27);
+    for(let v=0;v<fast.triangleCount*3;v++){
+      for(let k=0;k<6;k++)assert(Math.abs(data[v*9+k]-reference[v*6+k])<1e-4);
+      assert(Math.abs(data[v*9+6]-0.79)<1e-6&&Math.abs(data[v*9+8]-0.78)<1e-6);
+    }
+  });
+  await check("Mesh cache is content-addressed and evicts the least recently used",()=>{
+    const cache=new MeshCache(2);cache.put("a",{n:1});cache.put("b",{n:2});assert(cache.get("a").n===1);cache.put("c",{n:3});
+    assert(cache.get("b")===null&&cache.get("a").n===1&&cache.get("c").n===3&&cache.get("zzz")===null);
+  });
+  await check("Large scan budget: 150k triangles parse and buffer fast, with typed arrays only",()=>{
+    const text=syntheticObj(150000,{extras:false}); // plain 'f a b c' lines: an unbounded indexOf('/') made this quadratic once
+    let t0=performance.now();const mesh=parseOBJFast(text);const parse=performance.now()-t0;
+    t0=performance.now();const data=surfaceBuffer(mesh);const buffer=performance.now()-t0;
+    assert(mesh.triangleCount===150000&&data.length===150000*27);
+    assert(parse<800&&buffer<400,`parse ${Math.round(parse)} ms, buffer ${Math.round(buffer)} ms`);
+  });
+  await check("SurfaceRenderer accepts a typed scan mesh (browser only)",()=>{
+    if(typeof document==="undefined")return; // browser-only check is reported as skipped below
+    const renderer=new SurfaceRenderer(document.createElement("canvas"));renderer.add(parseOBJFast("v -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n"));
+    assert(renderer.buffers.length===1&&renderer.buffers[0].count===3);
+  });
+  for(const schemaVersion of [0,5,"3",true]) await check(`Reject unsupported format ${schemaVersion}`,()=>{
     let failed=false;try{validateMap({...sample,schemaVersion});}catch{failed=true;}assert(failed);
   });
   await check("Schema 3 rejects malformed room and mesh fields",()=>{
@@ -49,6 +128,7 @@ export async function runGeometryChecks(sample) {
     const data=surfaceVertices(mesh);assert(data.length===12001*18 && Math.abs(data[5]-1)<0.00001);
   });
   await check("WebGL renders captured surfaces and clips upper geometry",()=>{
+    if(typeof document==="undefined")return;
     const canvas=document.createElement("canvas"), renderer=new SurfaceRenderer(canvas);
     renderer.add({vertices:[[-1,-1,0],[1,-1,0],[0,1,0]],triangles:[[0,1,2]]});
     const scene=projection([[-1,-1,0],[1,1,0]],200,200,1,0,0);
@@ -120,5 +200,8 @@ export async function runGeometryChecks(sample) {
     assert(!sampleFloorTour(tour,5.5,1.5).paused&&sampleFloorTour(tour,5.5,1.5).position[2]<-3);
     assert(sampleFloorTour(tour,8,1.5).done);
   });
+  if(typeof document==="undefined") for(const test of results) {
+    if(test.name==="SurfaceRenderer accepts a typed scan mesh (browser only)" || test.name==="WebGL renders captured surfaces and clips upper geometry") test.skipped=true;
+  }
   return results;
 }

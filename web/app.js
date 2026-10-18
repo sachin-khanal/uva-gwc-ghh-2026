@@ -1,7 +1,8 @@
 // Owner: U3. Read-only building explorer. All map positions are map-frame meters.
 import { key, route, routeSummary, validateMap } from "./router.js";
 import { CloudLibrary } from "./cloud.js";
-import { DEFAULT_CAMERA, projectionForMap, roomCorners, verifyMesh } from "./geometry3d.js";
+import { DEFAULT_CAMERA, projectionForMap, roomCorners } from "./geometry3d.js";
+import { verifyMeshFast, MeshCache, formatMegabytes } from "./meshloader.js";
 
 import { hasLabel, visiblePlaces, walkingProjection, sampleJourney, createFloorTour, namedPlaces, sampleFloorTour } from "./walkthrough.js";
 import { buildEstimatedBuilding, wallOccludes } from "./building-model.js";
@@ -23,7 +24,9 @@ function status(message, error = false) {
 
 function renderBuildings() {
   const query = $("building-search").value.trim().toLocaleLowerCase();
-  const entries = state.entries.filter((e) => e.map.name.toLocaleLowerCase().includes(query));
+  const hasScan = (e) => (e.map.meshAssets ?? []).length > 0;
+  // Buildings with a 3D scan first (stable sort keeps the library's newest-first order inside each group).
+  const entries = state.entries.filter((e) => e.map.name.toLocaleLowerCase().includes(query)).sort((a, b) => Number(hasScan(b)) - Number(hasScan(a)));
   $("buildings").replaceChildren();
   for (const entry of entries) {
     const button = document.createElement("button");
@@ -31,7 +34,7 @@ function renderBuildings() {
     button.setAttribute("aria-pressed", String(state.active === entry));
     const name = document.createElement("strong"), detail = document.createElement("small");
     name.textContent = entry.title || entry.map.name;
-    detail.textContent = `${entry.source} · ${/floor\s*4/i.test(entry.map.name)?namedPlaces(entry.map).length:entry.map.nodes.length} places · v${entry.map.version}`;
+    detail.textContent = `${entry.source} · ${/floor\s*4/i.test(entry.map.name)?namedPlaces(entry.map).length:entry.map.nodes.length} places · v${entry.map.version} · ${hasScan(entry) ? "3D scan" : "no 3D scan"}`;
     button.append(name, detail); button.addEventListener("click", () => selectMap(entry));
     $("buildings").append(button);
   }
@@ -40,7 +43,8 @@ function renderBuildings() {
 }
 
 function selectMap(entry) {
-  stopWalking(); state.active = entry; state.zoom = entry.preview?1.05:1;state.building=null;
+  ++state.meshRequest; // invalidate old progress callbacks before changing the visible building
+  stopWalking(); state.active = entry; state.zoom = 1;state.building=null;
   surfaces.clearMeshes(); $("show-overlay").checked=true; $("show-surfaces").checked=true; $("cutaway").value=100;
   state.overlayChanged=false;
   state.yaw = DEFAULT_CAMERA.yaw; state.pitch = DEFAULT_CAMERA.pitch; state.meshes = [];
@@ -71,25 +75,55 @@ function selectMap(entry) {
   renderBuildings(); updateRoute(); queueMicrotask(()=>loadGeometry(entry));
 }
 
-async function loadGeometry(entry) {
-  const request = ++state.meshRequest;
-  try {
-    for (const asset of entry.map.meshAssets ?? []) {
+// Verified scans by SHA-256 for the life of the tab: switching back to a building does not download or parse it again,
+// and two requests for the same scan (e.g. auto-select then a click) share one download.
+const meshCache = new MeshCache(3), inflight = new Map();
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0)); // let the progress text paint between heavy steps
+
+function fetchMesh(entry, asset, say) {
+  // Verification includes the manifest bounds and size, not just the file hash.
+  const cacheKey = JSON.stringify([asset.sha256, asset.byteCount, asset.boundsMin, asset.boundsMax]);
+  const cached = meshCache.get(cacheKey);
+  if (cached) return Promise.resolve(cached);
+  const running = inflight.get(cacheKey);
+  if (running) { running.say = say; if (running.last) say(running.last); return running.promise; } // a joining request shows where the shared download is
+  const job = { say: null, last: "" };
+  const relay = (text) => { job.last = text; job.say(text); }; job.say = say;
+  job.promise = (async () => {
+    try {
       let bytes;
-      if (entry.library) bytes = await entry.library.mesh(entry.map,asset);
-      else {
+      if (entry.library) {
+        relay("Downloading…");
+        bytes = await entry.library.mesh(entry.map, asset, { onProgress: (received, total) => relay(total ? `Downloading ${formatMegabytes(received)} of ${formatMegabytes(total)}` : `Downloading ${formatMegabytes(received)}`) });
+      } else {
         const pair = Object.entries(entry.meshFiles ?? {}).find(([id]) => key(id) === key(asset.id));
         if (!pair) throw new Error("This map references a 3D scan file. Connect its shared library or open a bundle containing meshFiles.");
         const decoded = atob(pair[1]); bytes = Uint8Array.from(decoded,(c)=>c.charCodeAt(0)).buffer;
       }
+      relay("Verifying and reading geometry…"); await nextTask();
+      const mesh = await verifyMeshFast(asset, bytes);
+      meshCache.put(cacheKey, mesh);
+      return mesh;
+    } finally { inflight.delete(cacheKey); }
+  })();
+  inflight.set(cacheKey, job);
+  return job.promise;
+}
+
+async function loadGeometry(entry) {
+  const request = ++state.meshRequest, assets = entry.map.meshAssets ?? [];
+  const label = (text) => { if (request === state.meshRequest) $("geometry-status").textContent = assets.length > 1 ? `3D scan ${state.meshes.length + 1}/${assets.length} · ${text}` : `3D scan · ${text}`; };
+  try {
+    for (const asset of assets) {
+      const mesh = await fetchMesh(entry, asset, label);
       if (request !== state.meshRequest) return;
-      const mesh = await verifyMesh(asset,bytes);
+      label("Preparing surfaces…"); await nextTask();
       if (request !== state.meshRequest) return;
       if(!state.meshes.length&&state.building){surfaces.clearMeshes();state.building=null;}
       surfaces.add(mesh);
       state.meshes.push(mesh);
       if (!state.overlayChanged) $("show-overlay").checked=false;
-      $("geometry-status").textContent = `${state.meshes.length}/${entry.map.meshAssets.length} verified LiDAR meshes loaded`;
+      $("geometry-status").textContent = `${state.meshes.length}/${assets.length} verified LiDAR meshes loaded`;
       drawMap();
     }
   } catch (error) { if (request === state.meshRequest) { $("geometry-status").textContent="3D scan unavailable · Route graph remains visible"; status(error.message,true); } }

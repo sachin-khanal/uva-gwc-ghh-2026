@@ -1,10 +1,9 @@
-"""U3 local preview: serve only web assets and two sample JSON files on loopback."""
+"""U3 local preview: serve only web assets (plus two TEST-ONLY JSON fixtures used by the browser test pages) on loopback.
+The viewer itself ships no sample building: it shows only scans from the shared library or a map file you open."""
 import argparse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
-
-PREVIEW_MAP = None
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,16 +16,6 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
     def send_head(self):
         path = unquote(urlsplit(self.path).path)
-        if path == "/preview-map.json" and PREVIEW_MAP is not None:
-            from io import BytesIO
-            data = PREVIEW_MAP.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            return BytesIO(data)
-
         if path == "/":
             self.send_response(302)
             self.send_header("Location", "/web/")
@@ -49,9 +38,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--preview-map", type=Path, help="Explicit local map snapshot, served only on loopback")
     args = parser.parse_args()
-    PREVIEW_MAP = args.preview_map
     print(f"Waypoint viewer: http://127.0.0.1:{args.port}/web/", flush=True)
     with ThreadingHTTPServer(("127.0.0.1", args.port), ViewerHandler) as server:
         try:

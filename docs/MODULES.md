@@ -1,5 +1,7 @@
 # Modules — ownership, interfaces, status
 
+**Update 2026-10-18 (Codex, viewer completion):** `web/` on `feature/web-viewer-integration` now accepts U3 schema 4, retains U3 routing/walkthrough/building reconstruction, and completes the existing large-scan loader (`meshloader.js`, typed geometry, progress, stall timeout, manifest-aware tab cache). Browser logic/WebGL 74/74 and UI 24/24 PASS; Node 73/73 with 2 explicit browser-only skips. Native branch tests 349/349 and typecheck PASS. Live cloud/real-scan fidelity remain unverified; no backend/native integration claimed.
+
 **Update 2026-10-17 (Claude):** the Codex/U3 notes below that say tests or SQL are "pending" or "UNVERIFIED" are partly closed: Swift 85/85, typecheck OK, SQL migrations 0001-0003 + both SQL tests PASS locally (stubbed storage schema), Python 9/9. Still open: live-server concurrency and everything on a phone (UNVERIFIED ON DEVICE). New unmerged work: branch `app-ui-workflows` (new Scanner/Navigator UI, `Flows/`, `Services/`).
 
 **Update 2026-10-17 (Codex, U3 request):** existing-building scan extension now has UI/controller wiring and pure MapBuilder attachment logic (SCAFFOLD, new Swift tests pending Mac execution, UNVERIFIED ON DEVICE). Migration 0003 aligns server extension connections with local import rules (SQL execution pending). This supersedes the earlier unfinished scan-extension note below; see WORKLOG and the new TESTING checklist.

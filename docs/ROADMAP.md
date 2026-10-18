@@ -1,5 +1,7 @@
 # Roadmap — what to work on now (revision 2, ~~PROPOSED~~ IN PROGRESS)
 
+**Update 2026-10-18 (Codex, viewer completion):** Viewer-only handoff completed on `feature/web-viewer-integration`, cross-referenced against `origin/U3` eaed57e. No web router/walkthrough/building-model differences remain from U3; retained empty startup, local-only real maps and completed Claude's uncommitted large-mesh loading improvements. Automated browser/native checks pass (WORKLOG). Broader U3 native/schema/SQL merge and live-cloud validation are separate remaining integration work; no migrations applied or deployment performed.
+
 ~~Status: **proposed, needs team OK.**~~ **Update 2026-10-17:** the team asked to keep building, so this plan is in progress (build block 1 done, see below). Written 2026-10-17 after the direction change: native iPhone app
 (sideloaded, not published), **Supabase free tier** as backend, and a **Polycam-style LiDAR
 scanner** (live mesh overlay + bounding box → saved 3D model) that also feeds indoor navigation.
