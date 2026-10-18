@@ -307,9 +307,13 @@ final class NavigationController: ObservableObject {
         // ...and if there is not, the user still needs somewhere to go. Must be asked AFTER `advise`,
         // which is what knows whether a way round was found (F-5, 2026-10-18).
         let backUp = avoidance.isBoxedIn(clearance)
+        // Is the floor still there? Nothing else in the app can see a staircase going DOWN.
+        let floor = FloorAhead.verdict(samples: ObstacleDetector.floorSamples(in: frame),
+                                       standingFloorY: Geometry.translation(of: frame.camera.transform).y
+                                           - ObstacleBand.assumedPhoneHeight)
         tick(camera: frame.camera.transform, mapToWorld: relocalizer.mapToWorld, trackingOK: trackingOK,
              nearestDepth: hit?.depth, report: report, time: frame.timestamp, avoidTowards: avoidTowards,
-             backUp: backUp)
+             backUp: backUp, floorAhead: floor)
     }
 
     /// Simulated driver: one timer tick.
@@ -341,7 +345,7 @@ final class NavigationController: ObservableObject {
 
     private func tick(camera: simd_float4x4, mapToWorld: simd_float4x4, trackingOK: Bool, nearestDepth: Float?,
                       report: ObstacleReport?, time: TimeInterval, avoidTowards: Side? = nil,
-                      backUp: Bool = false) {
+                      backUp: Bool = false, floorAhead: FloorAhead.Verdict = .continuous) {
         let level = obstacles.update(nearest: nearestDepth)
         if level != obstacleLevel { obstacleLevel = level }
 
@@ -450,7 +454,7 @@ final class NavigationController: ObservableObject {
 
         let actions = planner.plan(instruction: instruction, obstacle: level, trackingOK: trackingOK,
                                    posture: posture, report: report, time: time, context: sceneContext, isMoving: isMoving,
-                                   avoidTowards: avoidTowards, backUp: backUp)
+                                   avoidTowards: avoidTowards, backUp: backUp, floorAhead: floorAhead)
         perform(actions, camera: camera, mapToWorld: mapToWorld)
     }
 

@@ -122,6 +122,9 @@ public struct FeedbackPlanner {
     private var announcedWayThrough = false
     /// The way round the current obstacle has been suggested. Re-armed when the way is clear.
     private var announcedAvoidance = false
+    /// A drop in the floor ahead has been announced. Re-armed once the floor is good again, so a
+    /// staircase is not re-announced at every tick while the user stands at the top of it.
+    private var announcedDrop = false
 
     public init() {}
 
@@ -146,6 +149,7 @@ public struct FeedbackPlanner {
         turnInProgress = nil
         announcedWayThrough = false
         announcedAvoidance = false
+        announcedDrop = false
     }
 
     /// The opening message ("You are near Room 206 ... Room 204 is about 25 meters away ..."), spoken instead of the plain route briefing the
@@ -162,7 +166,8 @@ public struct FeedbackPlanner {
         context: SceneContext? = nil,
         isMoving: Bool? = nil,
         avoidTowards: Side? = nil,
-        backUp: Bool = false
+        backUp: Bool = false,
+        floorAhead: FloorAhead.Verdict = .continuous
     ) -> [FeedbackAction] {
         var actions: [FeedbackAction] = []
 
@@ -215,6 +220,34 @@ public struct FeedbackPlanner {
             lastObstacleKind = (obstacle == .clear) ? nil : (report?.kind ?? lastObstacleKind)
             actions.append(.beacon(nil))
             return actions
+        }
+
+        // 1c. THE FLOOR FALLING AWAY. This sits above the obstacle branch deliberately: that branch can
+        // `return`, and a staircase going down is the one hazard nothing else in the app can see. A
+        // descending flight puts NOTHING in the obstacle band - the floor simply stops - so without this
+        // the most dangerous thing in a building reads as clear corridor.
+        // Said once per edge and re-armed when the floor is good again. `unsure` is deliberately silent
+        // but also does NOT re-arm: from the top of a staircase the treads are edge-on and return almost
+        // nothing, so `unsure` is frequently the same physical situation as `drop`.
+        switch floorAhead {
+        case .continuous:
+            announcedDrop = false
+        case .unsure:
+            break
+        case .drop(let atMeters, let byMeters):
+            // Stairs we were ROUTED to are the way onward, not an ambush: the user still needs telling,
+            // but the beacon keeps guiding and we do not stop them.
+            let routedToStairs = instruction?.targetKind == .stairs
+            if !announcedDrop, let text = FloorAhead.speech(for: .drop(atMeters: atMeters, byMeters: byMeters)) {
+                announcedDrop = true
+                actions.append(.speak(text, priority: .critical))
+                actions.append(.haptic(.obstacleStop))
+            }
+            if byMeters >= FloorAhead.stairsDropMeters, !routedToStairs {
+                // A flight of stairs we are not meant to be taking: stop guiding the user into it.
+                actions.append(.beacon(nil))
+                return actions
+            }
         }
 
         // 2. Obstacles: say WHAT and WHERE when the level or the kind of thing changes, and keep reminding while STOP persists.

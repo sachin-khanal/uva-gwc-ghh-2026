@@ -1,5 +1,62 @@
 # Work log
 
+## 2026-10-18 — Claude (agent, for Anmol) — Stairs going DOWN: the one hazard nothing in the app could see   [tags: FEATURE, SAFETY]
+Area: C (Vision) + B (guidance). NEW branch `stairs-multifloor` off `map-extension`. Step 1 of the stairs /
+multi-floor plan agreed with Anmol (see the handoff note at the bottom for the rest of that plan).
+
+THE HAZARD: every obstacle check in this app looks for things that stick UP. `ObstacleBand` keeps depth samples
+between roughly knee height and just above the phone, and only those count. A staircase going DOWN puts NOTHING
+in that band - the floor simply stops - so the most dangerous thing in a building read as clear corridor and a
+blind user walking toward it was told nothing at all. `ObstacleDetector`'s own header has carried
+"TODO(C): stairs-down and ledges (need a downward check)" since it was written. Ascending stairs have the mirror
+problem (treads sit inside the band and read as an obstacle) - NOT addressed here.
+
+New:
+* `Package/.../Vision/FloorAhead.swift` - pure. Takes floor samples (distance ahead + world height) and the
+  height of the floor under the user, and returns `.continuous` / `.drop(atMeters:byMeters:)` / `.unsure`.
+  Errs toward warning: a false "step down" costs a pause, a missed one costs a fall. Key decision: floor that
+  simply STOPS COMING BACK returns `.unsure`, never `.continuous` - from the top of a staircase the treads are
+  edge-on to the sensor and return almost nothing, so "no floor seen" and "a staircase" look identical. Tells a
+  kerb (>= 0.12 m) from a flight (>= 0.35 m) so one gets "Careful." and the other "Stop."
+* `Waypoint/Vision/ObstacleDetector.floorSamples(in:)` - the producer. Works in the USER's frame: every sample is
+  unprojected to world, then measured along the camera's forward direction on the floor plane, keeping only the
+  0.9 m-wide strip the user is about to walk down and only points low enough to be floor. Per quarter-metre
+  bucket it keeps the LOWEST surface, because a drop is defined by how far down it goes.
+* `ObstacleBand.assumedPhoneHeight` is now a shared constant (it was a parameter default). The obstacle band and
+  the floor check must agree about where the floor is, or one measures against a floor the other does not believe in.
+
+Guidance (`FeedbackPlanner`): the floor check sits ABOVE the obstacle branch on purpose - that branch can
+`return`, and this is the hazard nothing else can see. Announced once per edge at `.critical` with a stop
+haptic, re-armed only when the floor is good again. `.unsure` is silent AND does not re-arm, so a sensor
+flickering between "drop" and "nothing came back" cannot chant the warning. Stairs we were ROUTED to are the way
+onward: still announced, but the user is not stopped and the beacon keeps guiding.
+
+Verified: `make test` -> **382 tests, 0 failures** (363 before; 12 for `FloorAhead` covering a flat corridor, a
+flight, a single step, the vanishing floor, noise, a ramp, steps going UP, a drop beyond the look-ahead, nearest
+edge wins, and the refusals; 7 for the planner covering announce-while-clear, beacon muting, once-per-edge,
+re-arm, `.unsure` not re-arming, routed stairs, and a kerb not stopping the walk). `make typecheck` OK (64 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and this one genuinely needs a staircase. The numbers most likely to be wrong
+are `floorMinimumBelowCamera` (0.6 m) and the 0.9 m corridor width: too narrow and a stair edge at an angle is
+missed, too wide and a down-ramp at the side of a corridor reads as a drop. `floorSamples` runs every frame at
+stride 4 - the cost has not been measured on a phone.
+Handoff - the agreed plan for the rest (Anmol's design, refined together):
+ * Transition spaces: stairwells and lifts are their own "rooms", hidden from destination selection, present in
+   BOTH floors' maps and linked by NAME within a building. Entering one switches navigation into a transition
+   state.
+ * Which floor you came out on: stairs from the ARKit camera-pose height; LIFTS FROM THE BAROMETER. ARKit cannot
+   detect a lift moving at all - the interior is static relative to you, so the whole visual frame travels with
+   you and every vision/geometry method fails from first principles, not from noise. `CMAltimeter` is outside
+   that closed system. Costs `NSMotionUsageDescription` (not currently in `project.yml`); Anmol has approved it.
+ * Where you are on the new floor: request relocalization on arrival, and REQUIRE DENSE SCAN COVERAGE around
+   stairwells and lifts so that spot is the most reliable in the building rather than the least (`CoverageTracker`
+   already measures this, both directions). Pose-seeding at the linked node only as a fallback.
+ * Schema 4 would add `building` + `floor` to `BuildingMap` and stairs metadata (direction, railings, step count)
+   to `MapNode`; railings come from the VOLUNTEER at tag time, since ARKit mesh classification has no railing
+   class. NOT started, and still gated on whether the demo route changes floor at all.
+
+---
+
 ## 2026-10-18 — Claude (agent, for Anmol) — Tapping a place did nothing: the method was nested inside another one   [tags: BUG]
 Area: U3 (scanner services). Branch `map-extension`. Anmol: "pressing an option doesnt do anything."
 
