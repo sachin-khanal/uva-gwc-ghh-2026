@@ -85,9 +85,15 @@ public enum ObstacleLabelMapper {
 /// Which depth samples count as OBSTACLES, so the floor under the user's feet and the ceiling are not mistaken for something in the way.
 /// Heights are relative to the phone. `assumedPhoneHeight` is how high the phone is held above the floor (chest height).
 public enum ObstacleBand {
+    /// How high the phone is held above the floor (chest height). ONE definition, because the obstacle
+    /// band and the floor-drop check (`FloorAhead`) must agree about where the floor is - if they
+    /// disagree, one of them is measuring against a floor the other does not believe in.
+    public static let assumedPhoneHeight: Float = 1.3
+
     public static func contains(
         pointY: Float, cameraY: Float,
-        assumedPhoneHeight: Float = 1.3, minAboveFloor: Float = 0.15, maxAbovePhone: Float = 0.3
+        assumedPhoneHeight: Float = ObstacleBand.assumedPhoneHeight,
+        minAboveFloor: Float = 0.15, maxAbovePhone: Float = 0.3
     ) -> Bool {
         let floorY = cameraY - assumedPhoneHeight
         return pointY >= floorY + minAboveFloor && pointY <= cameraY + maxAbovePhone

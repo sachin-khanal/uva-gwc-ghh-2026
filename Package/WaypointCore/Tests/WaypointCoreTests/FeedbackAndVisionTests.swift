@@ -39,8 +39,26 @@ final class FeedbackAndVisionTests: XCTestCase {
         XCTAssertFalse(a.contains(.speak("Continue straight.", priority: .normal)))
     }
 
+    /// Before a position has ever been found there is nothing to have lost: the first untracked tick
+    /// says it is still looking, and queues rather than interrupting (2026-10-18 recorded walk).
+    func testFirstFixIsNotReportedAsALoss() {
+        var p = FeedbackPlanner()
+        let looking = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: false)
+        XCTAssertEqual(looking, [.speak("Finding your position. Stand still, then turn slowly.", priority: .high),
+                                 .beacon(nil)])
+    }
+
+    /// ...but once we HAVE had a position, losing it is a real safety event and interrupts.
+    func testLosingAPositionWeHadIsCritical() {
+        var p = FeedbackPlanner()
+        _ = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: true)
+        let lost = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: false)
+        XCTAssertEqual(lost, [.speak("Lost my position. Hold still.", priority: .critical), .beacon(nil)])
+    }
+
     func testLostTrackingSilencesAndRecovers() {
         var p = FeedbackPlanner()
+        _ = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: true) // had a fix first
         let lost = p.plan(instruction: instruction(.continueStraight), obstacle: .clear, trackingOK: false)
         XCTAssertEqual(lost, [.speak("Lost my position. Hold still.", priority: .critical), .beacon(nil)])
         let still = p.plan(instruction: nil, obstacle: .clear, trackingOK: false)
@@ -420,6 +438,243 @@ final class AvoidanceCueTests: XCTestCase {
         let next = spoken(planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
                                        report: wall, time: 9, isMoving: true, avoidTowards: .right))
         XCTAssertTrue(next.contains { $0.hasPrefix("Slightly right") }, "\(next)")
+    }
+
+    // MARK: "Stop. Stop. Stop." - repeated safety cues cutting each other off (2026-10-18)
+
+    /// A safety cue does NOT cut off another safety cue: the warning in progress finishes and the new
+    /// one follows, instead of the user hearing four half-spoken "Stop."s.
+    func testASafetyCueDoesNotInterruptAnotherSafetyCue() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Stop. A wall ahead.", priority: .critical,
+                                   isSpeaking: true, now: 1, speakingPriority: .critical),
+                       .enqueue)
+    }
+
+    /// ...but it still cuts off ordinary guidance, which is what `.critical` is for.
+    func testASafetyCueStillInterruptsGuidance() {
+        var gate = SpeechGate()
+        XCTAssertEqual(gate.decide(text: "Stop. A wall ahead.", priority: .critical,
+                                   isSpeaking: true, now: 1, speakingPriority: .high),
+                       .interrupt)
+    }
+
+    /// Standing still, the classifier changing its mind about what it is looking at is NOT a new
+    /// obstacle, so the warning is not re-issued.
+    func testAChangedClassificationIsNotNewsWhileStandingStill() {
+        var planner = FeedbackPlanner()
+        let first = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                        report: wall, time: 1, isMoving: false))
+        XCTAssertTrue(first.contains { $0.hasPrefix("Stop.") }, "\(first)")
+        let table = ObstacleReport(kind: .table, side: .ahead, distanceMeters: 0.8, confidence: 0.9)
+        let flicker = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                          report: table, time: 1.4, isMoving: false))
+        XCTAssertTrue(flicker.isEmpty, "same wall, same spot, user has not moved: \(flicker)")
+    }
+
+    /// Moving, it IS news - the user really is looking at something else now.
+    func testAChangedClassificationIsNewsWhileMoving() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                         report: wall, time: 1, isMoving: true)
+        let table = ObstacleReport(kind: .table, side: .ahead, distanceMeters: 0.8, confidence: 0.9)
+        let next = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                       report: table, time: 1.4, isMoving: true))
+        XCTAssertTrue(next.contains { $0.contains("table") }, "\(next)")
+    }
+
+    /// An escalation to STOP is never suppressed, even for somebody standing perfectly still - that is
+    /// the case where a person walks into their path.
+    func testAnEscalationToStopIsAlwaysAnnouncedEvenWhenStationary() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
+                         report: wall, time: 1, isMoving: false)
+        let person = ObstacleReport(kind: .person, side: .ahead, distanceMeters: 0.6, confidence: 0.9)
+        let stop = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                       report: person, time: 1.4, isMoving: false))
+        XCTAssertTrue(stop.contains { $0.hasPrefix("Stop.") }, "\(stop)")
+    }
+
+    // MARK: Stairs going down - nothing else in the app can see them
+
+    private let downStairs = FloorAhead.Verdict.drop(atMeters: 1.5, byMeters: 0.9)
+
+    /// The floor falling away is announced even though the obstacle sensor says the way is CLEAR -
+    /// which is exactly what a descending staircase looks like to everything else here.
+    func testAStaircaseGoingDownIsAnnouncedThoughNothingBlocksTheWay() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                       time: 1, isMoving: true, floorAhead: downStairs))
+        XCTAssertTrue(said.contains { $0.contains("Stairs going down") }, "\(said)")
+    }
+
+    /// ...and the beacon stops pulling the user toward it.
+    func testTheBeaconIsMutedAtAFlightOfStairsWeAreNotTaking() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                   time: 1, isMoving: true, floorAhead: downStairs)
+        XCTAssertEqual(actions.last, .beacon(nil), "\(actions)")
+    }
+
+    /// Said once, not chanted at somebody standing at the top of a staircase.
+    func testTheDropIsAnnouncedOncePerEdge() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                         time: 1, isMoving: true, floorAhead: downStairs)
+        let again = spoken(planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                        time: 1.5, isMoving: true, floorAhead: downStairs))
+        XCTAssertFalse(again.contains { $0.contains("Stairs going down") }, "\(again)")
+    }
+
+    /// Walk away, come back: it is news again.
+    func testTheDropIsReArmedOnceTheFloorIsGood() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                         time: 1, isMoving: true, floorAhead: downStairs)
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                         time: 2, isMoving: true, floorAhead: .continuous)
+        let again = spoken(planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                        time: 3, isMoving: true, floorAhead: downStairs))
+        XCTAssertTrue(again.contains { $0.contains("Stairs going down") }, "\(again)")
+    }
+
+    /// `unsure` must NOT re-arm: from the top of a staircase the treads return almost nothing, so
+    /// `unsure` is frequently the same physical situation as a drop. Re-arming there would make the
+    /// warning fire over and over as the sensor flickered between the two.
+    func testUnsureDoesNotReArmTheWarning() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                         time: 1, isMoving: true, floorAhead: downStairs)
+        _ = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                         time: 2, isMoving: true, floorAhead: .unsure)
+        let again = spoken(planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                        time: 3, isMoving: true, floorAhead: downStairs))
+        XCTAssertFalse(again.contains { $0.contains("Stairs going down") }, "\(again)")
+    }
+
+    /// Stairs we were ROUTED to are the way onward: still announced, but the user is not stopped and
+    /// the beacon keeps guiding them.
+    func testStairsOnTheRouteStillGuideYouOnward() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(instruction: walking(targetKind: .stairs, label: "Stairwell"),
+                                   obstacle: .clear, trackingOK: true,
+                                   time: 1, isMoving: true, floorAhead: downStairs)
+        XCTAssertTrue(spoken(actions).contains { $0.contains("Stairs going down") }, "\(actions)")
+        XCTAssertNotEqual(actions.last, .beacon(nil), "the stairs ARE the route: keep guiding")
+    }
+
+    /// A kerb is a caution, and does not stop the walk.
+    func testASingleStepDownDoesNotStopTheWalk() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(instruction: walking(), obstacle: .clear, trackingOK: true,
+                                   time: 1, isMoving: true,
+                                   floorAhead: .drop(atMeters: 1.0, byMeters: 0.18))
+        XCTAssertTrue(spoken(actions).contains { $0.hasPrefix("Careful.") }, "\(actions)")
+        XCTAssertNotEqual(actions.last, .beacon(nil))
+    }
+
+    // MARK: Priority contract - F-1 / F-7 (2026-10-18 recorded walk)
+
+    /// A caution QUEUES. It used to be `.critical`, which cuts off whatever is being said - including
+    /// the route instruction - so in a cluttered room no turn was ever spoken.
+    func testACautionDoesNotInterrupt() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true,
+                                   report: wall, time: 1, isMoving: true)
+        let cautions = actions.compactMap { action -> SpeechPriority? in
+            if case .speak(let text, let priority) = action, text.hasPrefix("Careful") { return priority }
+            return nil
+        }
+        XCTAssertEqual(cautions, [.high], "a caution queues; only a STOP interrupts: \(actions)")
+    }
+
+    /// ...and a STOP still does interrupt. That is the line the contract reserves `.critical` for.
+    func testAStopStillInterrupts() {
+        var planner = FeedbackPlanner()
+        let actions = planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                   report: wall, time: 1, isMoving: true)
+        let stops = actions.compactMap { action -> SpeechPriority? in
+            if case .speak(let text, let priority) = action, text.hasPrefix("Stop") { return priority }
+            return nil
+        }
+        XCTAssertEqual(stops, [.critical], "\(actions)")
+    }
+
+    // MARK: Boxed in - F-5 (2026-10-18): "Stop." with no way out was all the user heard
+
+    /// Blocked ahead, and neither side is a usable way round: the advisor says so.
+    func testBoxedInWhenNeitherSideIsUsable() {
+        var advisor = AvoidanceAdvisor()
+        let walls = AvoidanceAdvisor.Clearance(ahead: 0.8, left: 0.4, right: 0.5)
+        XCTAssertNil(advisor.advise(walls), "neither side is decisively better")
+        XCTAssertTrue(advisor.isBoxedIn(walls))
+    }
+
+    /// Two equally roomy sides is not a way round either (the advisor refuses to flip a coin), so the
+    /// user is still boxed in as far as guidance is concerned.
+    func testBoxedInWhenTheSidesAreTooSimilar() {
+        var advisor = AvoidanceAdvisor()
+        let corridor = AvoidanceAdvisor.Clearance(ahead: 0.8, left: 2.0, right: 1.9)
+        XCTAssertNil(advisor.advise(corridor))
+        XCTAssertTrue(advisor.isBoxedIn(corridor))
+    }
+
+    /// A way round stands: not boxed in, and `isBoxedIn` must agree with `advise`.
+    func testNotBoxedInWhenThereIsAWayRound() {
+        var advisor = AvoidanceAdvisor()
+        let gap = AvoidanceAdvisor.Clearance(ahead: 0.8, left: 3, right: 0.9)
+        XCTAssertEqual(advisor.advise(gap), .left)
+        XCTAssertFalse(advisor.isBoxedIn(gap))
+    }
+
+    /// The way ahead is open: nothing to be boxed in by.
+    func testNotBoxedInWhenTheWayAheadIsOpen() {
+        var advisor = AvoidanceAdvisor()
+        let open = AvoidanceAdvisor.Clearance(ahead: 6, left: 0.3, right: 0.3)
+        XCTAssertNil(advisor.advise(open))
+        XCTAssertFalse(advisor.isBoxedIn(open))
+    }
+
+    /// The planner turns that into something to DO, alongside the stop warning it never replaces.
+    func testItSaysToBackUpWhenThereIsNoWayRound() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                       report: wall, time: 1, isMoving: true,
+                                       avoidTowards: nil, backUp: true))
+        XCTAssertTrue(said.contains { $0.hasPrefix("Stop.") }, "the warning still comes first: \(said)")
+        XCTAssertTrue(said.contains("Back up slowly."), "\(said)")
+    }
+
+    /// A way round beats backing up: we never say both.
+    func testBackUpIsNotOfferedWhenThereIsAWayRound() {
+        var planner = FeedbackPlanner()
+        let said = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                       report: wall, time: 1, isMoving: true,
+                                       avoidTowards: .left, backUp: true))
+        XCTAssertTrue(said.contains("Slightly left, there is a wall ahead."), "\(said)")
+        XCTAssertFalse(said.contains("Back up slowly."), "one instruction, not two: \(said)")
+    }
+
+    /// Same rule as the way round: once per obstacle, not nagged every tick.
+    func testBackUpIsSaidOncePerObstacle() {
+        var planner = FeedbackPlanner()
+        _ = planner.plan(instruction: walking(), obstacle: .caution, trackingOK: true, report: wall,
+                         time: 1, isMoving: true, avoidTowards: nil, backUp: true)
+        let again = spoken(planner.plan(instruction: walking(), obstacle: .stop, trackingOK: true,
+                                        report: wall, time: 4, isMoving: true,
+                                        avoidTowards: nil, backUp: true))
+        XCTAssertFalse(again.contains("Back up slowly."), "said once: \(again)")
+    }
+
+    /// A door on the route is the way IN: never tell the user to back away from their destination.
+    func testNoBackUpIsOfferedForADoorOnTheRoute() {
+        var planner = FeedbackPlanner()
+        let door = ObstacleReport(kind: .door, side: .ahead, distanceMeters: 0.5, confidence: 0.9)
+        let said = spoken(planner.plan(instruction: walking(targetKind: .room, label: "Room 402"),
+                                       obstacle: .stop, trackingOK: true, report: door,
+                                       time: 1, isMoving: true, avoidTowards: nil, backUp: true))
+        XCTAssertFalse(said.contains("Back up slowly."), "open the door, do not retreat: \(said)")
+        XCTAssertTrue(said.contains { $0.contains("open it") }, "\(said)")
     }
 
     /// A door we were routed through is the way IN, not something to sidestep.

@@ -1,6 +1,12 @@
 # Work log
 
 
+## 2026-10-18 - Codex for U3 - Resolve stairs, map-extension and navigation merge
+User authorized integrating all conflicting branches. Incoming origin/stairs-multifloor includes origin/map-extension and origin/navigation-overhaul; retained its capture alignment, background local save, per-segment MAP-frame USDZ export, stair metadata and guidance fixes. Sample keeps incoming stair metadata plus existing schema-3 synthetic extents. Documentation conflict histories retained additively. U3 OBJ logic will be reconciled with the newer mesh branch next; no native release claim.
+Verified: conflict marker/whitespace checks before commit. NOT verified: native Swift/iOS/device (Windows lacks make/Swift/Xcode); mesh integration still in progress. No live SQL or remote push/main update. Files: incoming stairs branch changes plus resolved CaptureController, sample and docs ROADMAP/WORKLOG.
+
+
+
 ## 2026-10-18 - Codex for U3 - Integrate audit branch without losing viewer work
 User explicitly requested resolving every reported branch conflict on U3. Isolated integrate-all-u3 checkout from origin/U3 f63206a. Merged origin/chore/audit-2026-10-18; documentation conflicts resolved by retaining both histories with dated notes. Audit code/security changes retained. Files: incoming audit changes plus docs/{MODULES,ROADMAP,TESTING,WORKLOG}. Other branches still to integrate.
 Verified: conflict marker scan and whitespace check before commit. NOT verified: native tests/typecheck require Mac, SQL not applied/live database unchanged, phone behavior UNVERIFIED ON DEVICE. Migration 0006 numbering collision will be resolved after mesh publication integration. No push/main update in this intermediate merge.
@@ -121,6 +127,889 @@ Security/privacy scan: no keys or tokens in tracked files or in ANY commit (chec
 Verified: the scans above (commands in this session); local Postgres run of 0006; docs link/target/path checks; `make test`/typecheck/Python run after the edits (see below).
 NOT verified: 0006 on the live Supabase project; the workflow change on GitHub until pushed (YAML not parsed locally); whether an ARWorldMap contains recognisable imagery (not inspected); history rewrite impact (not done).
 Open problems / handoff: Sachin decides S-2 (history rewrite vs private repo), S-3 (Files-app exposure off for demo builds); Supabase person: apply 0006 and enable captcha/rate limits/spend alert; U3: S-5, S-6, keyframes limits; U2: keyframes validation.
+
+
+**Update 2026-10-18 (Codex, stairs/navigation integration):** Preserve incoming branch notes below.
+
+## 2026-10-18 — Claude (agent, for Anmol) — The route went STRAIGHT UP the stairwell, and extensions still missing from the 3D viewer   [tags: BUG, DEVICE]
+Area: B (routing) + A (export). Branch `stairs-multifloor`. Extending and navigating both work now; these are
+the two faults left from that walk.
+
+1. "IT TELLS ME TO GO STRAIGHT UP INSTEAD OF MAPPING THRU STAIRS."
+`RouteSimplifier.perpendicularDistance` measures HORIZONTALLY - it drops `y` entirely (`SIMD2(point.x,
+point.z)`). That is right for a corridor: you are not off-route for holding the phone higher. It is
+catastrophic for a staircase, and worst for a SWITCHBACK like Rice Hall's rear stairs, which climbs three
+metres while returning to almost the same x,z. In plan view the whole flight is one small cluster, so both
+simplifier passes (detour removal at 1.2 m, thinning at 0.6 m) deleted it, and the route became a single
+segment from the bottom step to the top - a straight line through the floor.
+Fixed: `simplify` now protects any node whose height differs from a neighbour by `verticalKeepMeters` (0.1 m -
+well above the wobble of a phone carried along a flat corridor, well below one stair tread at ~0.17 m), using
+the `keep` mechanism that already protects tagged, labelled and hazard-endpoint nodes. Flat corridors thin
+exactly as before.
+NOT fixed, and the next thing for stairs: guidance still has no idea what "up" means. `TurnSpeech` works from a
+horizontal bearing, and a vertical stretch has almost none, so the user is told "Continue straight" while they
+are meant to climb. That is Anmol's design - announce the stairs from the map, hand off, resume at the top -
+and it is still unbuilt.
+
+2. EXTENSIONS STILL MISSING FROM THE 3D VIEWER. Earlier today a hand-aligned extension was made to SKIP the
+export, because it would have overwritten the building's model with the new part alone, in the wrong frame.
+That stopped the damage but left the new area invisible. Properly fixed now:
+  * `MeshExporter.extract/export` take a `worldToMap` and bake it into the vertex transform, so the mesh is
+    written in the MAP frame that `MeshAsset.coordinateFrame` has always claimed.
+  * `MapStore.modelURL(mapId:segmentId:)` - ONE FILE PER SEGMENT. The old one-per-map name is still read, so
+    models already on phones keep working, and `modelURLs`/`hasModel(mapId:segmentIds:)` collect them all.
+  * `ModelViewerView` loads EVERY segment's file into one scene; they share the map frame, so adding them lines
+    them up. The size readout now totals all parts, and a part that fails to open is logged and skipped rather
+    than failing the whole view.
+  * The crop box is measured in the SESSION frame, so a hand-aligned export runs UNCROPPED - cropping a
+    map-frame mesh with a session-frame box would delete all of it. Bigger file, correct geometry.
+
+Verified: `make test` -> **407 tests, 0 failures** (404 before; 3 new: a switchback staircase keeps its steps,
+a flat corridor still thins, and phone-height wobble does not protect every node). `make typecheck` OK (65 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. In particular nobody has yet seen an extension appear in the viewer, and
+the 0.1 m vertical threshold has not met a real staircase.
+Open: transforming `OrientedBox` would let a hand-aligned export be cropped again (smaller files). Existing maps
+keep their old single model file; their extensions will only appear after the next save.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The ARKit extension path was unobservable, so it also could not be debugged   [tags: BUG, DEVICE]
+Area: A (capture). Branch `stairs-multifloor`.
+Anmol: "the arkit start relocalization just doesn't work, or if it does i just cant tell cuz nothing is said so
+idk." The second half is the real problem, and it invalidates the previous entry's conclusion as something he
+could act on: a diagnosis nobody can observe is not usable.
+
+FOUND: `extensionStatus` was set ONCE, in `start`, to "Find the selected scanned area. Move slowly until
+tracking recovers." Nothing updated it afterwards - it changed only when the volunteer TAPPED the button, or
+when a hand alignment produced an event. So while ARKit was relocalizing there was no difference on screen
+between "still looking", "tracking is fine but the area is not recognised", "camera not ready" and "found it,
+waiting for you to tap". The one state that mattered - recognised - was indistinguishable from failure.
+
+Fixed: `updateExtensionProgress(_:)` runs every frame while an extension is unattached and not being aligned by
+hand, and says which of those states it is in. In particular it separates TRACKING being good from the saved
+AREA being recognised, which are different problems with different remedies - "tracking is good, still
+recognising the saved area. Stand where you first started this scan" versus "hold still and pan slowly".
+It also ATTACHES AUTOMATICALLY, once, the moment ARKit recognises the area: there is no reason to make the
+volunteer tap a button for something the app can already tell has happened. If that attempt fails because they
+are standing too far from a mapped corridor, its existing message says so and the button remains for a retry.
+Deliberately silent while a hand alignment is in progress, so the two flows never fight over the banner.
+
+Verified: `make test` -> **404 tests, 0 failures** (unchanged; this is app-target code `make test` cannot reach).
+`make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Whether ARKit ever reaches `.normal` + mapped in the extension flow is
+exactly the thing that was unmeasurable before and should now be readable off the screen.
+Open / handoff: if the banner now sits on "Looking for the saved area" indefinitely, that is a REAL ARKit
+relocalization failure and the previous entry's limitation applies - one `initialWorldMap` per session, so a
+multi-segment map can only be recognised from one of its areas. If it reaches "tracking is good, still
+recognising the saved area", tracking is healthy and the problem is purely viewpoint: stand where the scan
+STARTED. Those two messages distinguish the two causes, which was the point.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Why ARKit relocalizes in Navigate but never in Extend   [tags: BUG, DEVICE]
+Area: U3 (scanner UI) + A (maps). Branch `stairs-multifloor`.
+Anmol: "the arkit localization just doesn't work, unlike navigate where it works." Same building, same world
+map, opposite result - so it was never ARKit being flaky; the two paths do different things.
+
+FOUND, by reading the maps off the phone backup rather than guessing:
+  Rice                 segment 1: 44 nodes   segment 2: 51 nodes    (both have a world map)
+  Rice Hall . Floor 4  segment 1: 32 nodes   segment 2: 22 nodes    (both have a world map)
+`Relocalizer` (Navigate) iterates `map.segmentIds` and takes the FIRST segment that has a world map - in
+practice the original scan - and ignores the rest (`break`, "TODO(A): multi-segment stitching"). The Extend
+picker instead loads the segment the VOLUNTEER CHOSE, from a list labelled only "Scan area 1 of 2" /
+"Scan area 2 of 2" with no indication of where those areas are. Pick the wrong one and ARKit is being asked to
+recognise a part of the building the volunteer is not standing in, which never succeeds however long they wait.
+Navigate "worked" because it never offers that choice.
+
+Fixed: `ExtendOption` now carries `pointCount` and `placeNames` (the labelled places recorded in that segment),
+plus `isOriginal` and a `whereItIs` summary. The picker shows "Rice . Scan area 1 of 2 / Original scan . Rear
+Stairwell, Start" instead of a bare number, and the instruction now says to pick the area you are STANDING IN
+and that choosing one you are not in will never work.
+
+Verified: `make test` -> **404 tests, 0 failures** (402 before; 2 new: an area names the places inside it and
+marks whether it is the original, and an unlabelled area falls back to its size). `make typecheck` OK (65 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. The hypothesis is strongly supported by the segment data but has not been
+confirmed by actually extending from area 1 and watching it relocalize.
+Open / handoff:
+1. This is presentation only. The deeper issue is that ARKit takes ONE `initialWorldMap`, so a multi-segment map
+   can only ever be recognised from one of its areas at a time. Navigate has the same limitation and hides it by
+   always choosing segment 1 - which means navigating a map whose user starts in area 2 would fail the same way.
+   Proper multi-segment relocalization is still the open `TODO(A)`.
+2. Both of Anmol's two-segment maps have a segment 2 created by the OLD build, whose world map is in the session
+   frame (fixed earlier today for new scans, not repaired for existing ones). Extending from area 2 on those maps
+   would be wrong even if it did relocalize.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — ARKit first, and the two extension paths stop racing each other   [tags: BUG]
+Area: A (capture). Branch `stairs-multifloor`. Closes the risk flagged when manual alignment first landed.
+
+THE HAZARD: both ways of locating yourself in a saved map were live at the same time. The world map stayed
+loaded while the volunteer confirmed places by hand, so ARKit could relocalize A MOMENT LATER - at which point
+the camera transform silently moves into the saved map's frame while `worldToMap` still describes the
+provisional one, and every node recorded after that lands somewhere else in the building. A jump BETWEEN the two
+taps is usually caught by the length check; a jump AFTER the second tap was undetectable.
+
+Fixed, and the ordering is now explicit:
+* ARKit stays the DEFAULT and the preferred answer. It is strictly better when it lands: exact pose rather than
+  a two-point estimate, session frame == map frame so nothing is converted, the new area keeps a usable scan
+  file, and the 3D model export works. The manual path gives up the last two.
+* Confirming the FIRST place commits to aligning by hand, and now calls `stopRelocalizing()`: the saved world
+  map is removed from the running configuration and the session re-run with NO options. No `.resetTracking` -
+  that would throw away the very frame the first confirmed place was measured in.
+* `beginExtension` refuses while a hand alignment is half-finished. Once the world map is dropped, a `.mapped`
+  status describes the NEW session, not the saved area, so attaching on it would use an identity transform
+  against map-frame nodes - the same frame mistake in a different place.
+* "Start over" RESTORES the world map (kept in `droppedWorldMap`) and re-runs with `.resetTracking`, so ARKit
+  gets its chance again. Without this, one tap would have silently disabled the better path for the rest of the
+  session.
+* The on-screen hint now says to give ARKit a few seconds first, because finding the area itself is more
+  accurate.
+
+Verified: `make test` -> **402 tests, 0 failures**. `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone has been unavailable for five fixes now.
+Specifically unverified: whether re-running the configuration mid-session disturbs tracking at all (it should
+not; no `.resetTracking`), and whether dropping `initialWorldMap` really does stop ARKit relocalizing rather
+than merely stopping it starting.
+Open: `restartPlaceConfirmation` holds the decoded `ARWorldMap` for the rest of the session so it can be put
+back. That is tens of megabytes kept alive; acceptable, but it is the reason to prefer leaving the extension
+screen over tapping Start over repeatedly.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Three faults from the first real Rice Hall walk, all from ONE frame mistake   [tags: BUG, DEVICE]
+Area: A (capture/maps) + B (guidance). Branch `stairs-multifloor`. First time any of this ran in the demo
+building. Anmol reported: (1) an extension does not appear in the 3D viewer, (2) pathfinding is shifted off the
+real path, (3) it says "step down ahead" on flat corridor.
+
+(2) AND (1) ARE THE SAME BUG, and it is mine: a hand-aligned extension records its NODES in the map frame (via
+`mapPoint`), but everything ARKit hands us is in the SESSION frame, and those two differ by exactly the alignment
+transform. Two things were then saved in the wrong frame:
+  * THE WORLD MAP. `Relocalizer` loads the FIRST segment that has a scan file and localizes in ITS frame
+    (`Relocalizer.swift:90`, `break` with "TODO(A): multi-segment stitching"). After an extension there are two,
+    so navigation could localize into the extension's session frame while every node around it is in map
+    coordinates - the user's marker sits beside the breadcrumb trail instead of on it, and the route collapses
+    ("route: 1 waypoints, 0.0 m" in Anmol's screenshots, against a healthy "6 waypoints, 22.3 m" before).
+    An `ARWorldMap` cannot be transformed, so the fix is not to save one for a hand-aligned segment:
+    `saveLocalScan(worldMap:)` now takes an OPTIONAL, and relocalization uses the original segment, whose frame
+    IS the map frame. Cost: the newly scanned area has no scan file of its own, so you cannot relocalize while
+    standing in it. Correctness over coverage.
+  * THE 3D MODEL. `MeshExporter` writes vertices in the session frame while `MeshAsset.coordinateFrame` claims
+    "map", AND `modelURL(mapId:)` is one file per MAP - so an extension both overwrote the whole building's model
+    and placed it wrongly. That is why the viewer showed only the new stairwell (88.5 MB, 1.2 M triangles) rather
+    than the floor. A hand-aligned extension now SKIPS the export and keeps the original model, saying so.
+    Properly fixing it means transforming the mesh by `worldToMap` and storing a model PER SEGMENT; not done.
+
+(3) FALSE "step down ahead" - and it is not a tuning problem. `FloorAhead` compares what it sees against
+`cameraY - ObstacleBand.assumedPhoneHeight`, a FIXED 1.3 m guess at how high the phone is held. Hold it at 1.5 m
+and the assumed floor sits 0.2 m above the real one, so every ordinary floor sample clears the 0.12 m threshold
+and a flat corridor announces a step down. Per Anmol's direction - "it's not there to detect stairs; it'll only
+say there's stairs if the mapper states there are stairs" - LiDAR drop detection is now OFF by default behind
+`UIPrefs.floorDropDetection`. Stairs are announced from the MAP, where the volunteer tagged them, which already
+works through `Hazard.stairs`. The `FloorAhead` code and its 12 tests stay, unused, for when the phone height is
+measured rather than assumed.
+
+Verified: `make test` -> **402 tests, 0 failures**. `make typecheck` OK (65 app files). `make check` ->
+BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE - the phone has been unavailable for the last three fixes, so none of this,
+the alignment dead-end fix, or the coverage-exemption fix has been flashed.
+Open / handoff:
+1. Anmol's design for stairs, NOT implemented: announce from the map, hand off to the user to climb or descend,
+   and resume guidance when they leave the stairs "room". Guidance currently just says "Stairs ahead." and keeps
+   steering. The stairs "room" needs `RoomExtent` on a stairs node, or the transition-space idea.
+2. The extension's area still cannot be relocalized into (no scan file). Per-segment frames would fix both that
+   and the model; that is the `segmentId`-on-everything work deferred in D-043.
+3. The map Anmol walked was saved by the OLD build, so its extension segment still has a session-frame world map
+   on disk. This fix prevents new ones; it does not repair that map. Re-record or delete that extension.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Extending a map asked the volunteer to re-walk ground it already had   [tags: BUG]
+Area: A (scan). Branch `stairs-multifloor`.
+Anmol: after calibrating by standing at labelled places, continuing the scan re-covered already-scanned corridor,
+and the walk-back rule counted it - so he was told to walk back over parts that were already in the map, instead
+of the rule focusing on what is genuinely new. His point: it already knows where it is, from the calibration.
+
+CAUSE 1: `CoverageTracker` starts empty on every scan, so during an EXTENSION every cell counts as new - including
+the corridor you must cross to reach the new wing. That makes extending a map harder the MORE of it already
+exists, which is backwards.
+CAUSE 2, found while fixing the first and worse: `coverage.observe` was fed the SESSION-frame camera position and
+yaw. After a hand alignment the session frame and the map frame differ, so the cells would never have lined up
+with anything recorded in the map - the seeding in cause 1 would have silently done nothing.
+
+Fixed:
+* `CoverageTracker.markAlreadyCovered(_:)` takes MAP-frame breadcrumbs from the map being extended and EXCLUDES
+  those cells from the score entirely - numerator and denominator both. `returnCoverage` returns 1 (not 0) when
+  everything walked was already in the map, because there is nothing left to ask for, while an empty tracker
+  still returns 0 and never claims coverage. `reset()` keeps that ground (it describes the saved map, not this
+  walk); new `resetAll()` clears everything and is what a plain scan uses.
+  The approximation, stated plainly: we do not store per-cell headings in a map, only where the volunteer walked.
+  But that earlier scan was SAVED, so whatever its coverage was, it was accepted; re-walking it adds nothing.
+* `CaptureController`: seeds from the extended map's corridor and junction nodes at `start`, and now feeds
+  `coverage.observe` through `mapPoint`/`mapDirection` so position and yaw are in the map frame.
+
+Verified: `make test` -> **402 tests, 0 failures** (396 before; 6 new: old ground not judged, new ground still
+judged, walking the new wing both ways is enough, a plain scan unaffected, an empty tracker claims nothing, and
+`reset` vs `resetAll`). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and not installed - the phone dropped off before this and the previous fix
+could be flashed. Both are committed and pushed.
+Open: the exemption is per CELL (2 m), so a new corridor that happens to pass through one old cell has that cell
+excused. That is the intended trade - it errs toward not nagging - but it means a volunteer could technically
+walk a new wing one way, cross an old cell, and see a slightly better score than the new ground deserves.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Manual alignment refused a CORRECT pair and then left the volunteer stuck   [tags: BUG]
+Area: A (capture) + U3 (scanner UI). Branch `stairs-multifloor`.
+Anmol, extending a real map: confirmed "Start", walked to "Rear Stairwell", confirmed that - and was asked for
+another labelled place. There were only two in the map, so there was nothing left to tap and no way forward.
+
+CAUSE 1, and it is a design error in my own check: `maxLengthMismatchMeters` was 1.0 m, which is TOO TIGHT BY
+CONSTRUCTION. `CaptureController.tagPOI` drops a labelled place about a metre IN FRONT of where the volunteer was
+standing, in whatever direction they happened to be facing. So the node is already ~1 m from where a person
+naturally stands to confirm it - and that offset applies at BOTH ends, in unrelated directions. Two perfectly
+correct taps can therefore disagree with the map by roughly 2 m before anybody has made a mistake, and the check
+refused them. Raised to 3.0 m, which still catches tapping the wrong door in a building whose labelled places are
+metres apart - the failure the check actually exists for. New test pins the offset case.
+
+CAUSE 2: the refusal was a DEAD END. `lengthMismatch` cleared the first confirmed place, so the screen looked as
+though nothing had happened, and with only two labelled places the volunteer had already used both. No tap did
+anything.
+Fixed: a refusal now KEEPS the first place (retry the other one immediately), every refusal names the actual
+numbers ("the map puts those places 11.4 m apart but you walked 7.2 m") and is logged, confirming the SAME place
+twice has its own message instead of a confusing "too close", the already-confirmed place is ticked and disabled
+in the list, and there is an explicit "Start over" button - there must always be a way out.
+
+Verified: `make test` -> **396 tests, 0 failures** (395 before; 1 new: a pair carrying the POI offset that
+tagging itself introduces must be accepted). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Whether 3.0 m is now right is exactly what the next attempt will say - the
+log lines added here ("alignment refused: map X m vs walked Y m") are there to calibrate it rather than guess
+again.
+Open: the underlying POI offset is still there - a labelled place is a metre from where you stand to see it, in
+an unknown direction. Tagging the place AT the volunteer's own position (not a metre ahead) would remove the
+error at the source, but it would move every existing node's meaning and is not a change to make mid-testing.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — CONTRACT CHANGE: format 4, stairs metadata and the checks that keep a stairwell usable   [tags: CONTRACT CHANGE, FEATURE]
+Area: A (maps) + U3 (scanner UI). Branch `stairs-multifloor`.
+Design agreed with Anmol first: the two ends of one staircase live in SEPARATE maps (one per floor) and are
+matched across them BY NAME, computed at routing time. There is NO link step and no scan-order constraint -
+scan floors in any order, on any phone, and a stairwell with no counterpart yet is simply a tagged staircase.
+Derived links also cannot go stale or conflict when maps are merged, which stored ones would.
+
+FIRST, A CORRECTION to the previous entry's claim that nothing tags stairs edges: `MapBuilder.addPOI:114`
+already does (`let hazard: Hazard? = (kind == .stairs) ? .stairs : nil`). My grep missed it because `Hazard?`
+and `.stairs` are written separately. The router's stairs penalty and the advance "Stairs ahead." warning were
+working all along; no fix was needed and none was made.
+
+CONTRACT CHANGE - format 3 -> 4. Adds the OPTIONAL `MapNode.stairs` (`StairsInfo`: direction up/down/both,
+railing side, step count) for `.stairs` and `.elevator`. Optional, so every older map decodes unchanged with
+none, and a map without it does not grow the key. Full checklist done per `docs/MAP_FORMAT.md`:
+`MapSchema.current` 3 -> 4 with the version documented, `migrate` already steps to current via its `default`,
+NEW fixture `docs/map-format/map-v4.json` (validated: `tools/validate_map.py` PASS), `CURRENT_SCHEMA` 3 -> 4 in
+the validator, `Samples/rice-hall-sample.json` updated (its "Stairs up" node now carries a direction), and tests.
+
+Also new:
+* `MapHealth` gains two warnings, in the same family as the existing "check before sharing" advice:
+  `stairsWithoutDirection` (tagged but never said which way it goes, so the floors can never be matched) and
+  `stairsDirectionsDisagree` (two ends under one name that cannot be opposite ends of one staircase). Caught
+  where a SIGHTED volunteer can still fix it, rather than mid-route by a blind user.
+* `Waypoint/UI/Scanner/StairsSheet.swift` - tagging stairs or a lift now opens a sheet (name, direction,
+  handrail, optional step count) instead of dropping a bare node. Names already used in this map are offered as
+  buttons, because mistyping the name on the second floor is exactly how a building fails to link up.
+  `ScanSessionModel.beginTag` routes only stairs/lifts through it; everything else tags as before.
+* `CaptureController.knownStairwellNames`, `tagPOI(..., stairs:)`, `MapBuilder.addPOI(..., stairs:)`, and
+  `ScanService.tagStairs` (no default implementation, for the reason `confirmPlace` has none).
+
+TWO THINGS WORTH KNOWING, both found by tests rather than by reading:
+1. `RailingSide` originally had a case called `none`. `railings: .none` on an optional parameter then means
+   `Optional.none` - "NOT RECORDED" - rather than "no handrail", silently and with no warning. Renamed to
+   `neither`. Any other optional enum here should avoid a `none` case for the same reason.
+2. `make test` reported 3 failures that a clean build did not: the test module saw `MapSchema.current == 4`
+   while linking a cached `WaypointCore` whose `BuildingMap.init` default argument was still 3, so one binary
+   held both answers. `rm -rf ~/Library/Caches/Waypoint/spm` fixed it. After editing a `static let` constant,
+   do not trust an incremental `make test`.
+
+Verified: `make test` -> **395 tests, 0 failures** (382 before; 13 new covering the direction pairing rule,
+both health warnings and their negatives, a JSON round trip of `StairsInfo`, the absent key, the v4 fixture, and
+every older fixture still decoding). `make typecheck` OK (65 app files). `make check` -> BUILD SUCCEEDED.
+`python3 tools/validate_map.py docs/map-format/map-v4.json` -> PASS.
+NOT verified: UNVERIFIED ON DEVICE. Nobody has tagged a staircase with this sheet, and no map has been saved in
+format 4 from a phone.
+Open / handoff: the metadata is recorded but NOTHING READS IT YET - guidance does not speak the handrail or the
+step count, and nothing matches stairwells across floors, because `BuildingMap` still has no `building`/`floor`
+field. That is the next contract change and it is still gated on whether the demo route changes floor. Also
+unchanged: `tools/validate_map.py` and `web/` do not inspect the new `stairs` object beyond accepting it.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Two timers that reported failure on work that had succeeded   [tags: BUG]
+Area: A (capture), U3 (scanner UI). Branch `stairs-multifloor`.
+Context: Anmol said the demo route "has not been used once" - everything so far has been tested in an apartment,
+and Rice Hall has never been scanned or walked. These two bugs both bite HARDER on a bigger scan, so they are the
+ones most likely to go wrong the first time anyone scans the actual venue.
+
+1. "Saving took too long. Try again." ON A SAVE THAT WORKED.
+`LiveScanService.finish` failed the save unconditionally 15 s after it started, regardless of what the save was
+doing, and `complete` takes only the FIRST outcome - so the real success that arrived moments later was thrown
+away. Anmol's 3.5 M-triangle scan was on disk the whole time it was being reported as lost.
+It was worse than a wrong number, because the save ALSO ran on the main thread: `NSKeyedArchiver.archivedData`
+on a tens-of-megabytes ARWorldMap plus the disk write, all on the main queue. While that ran the UI was frozen
+and the timer could not fire; it fired the instant the work it was timing finished, which is why it won the race
+so reliably.
+Fixed:
+* `CaptureController.save` does the archive and the write on a background queue; only the published results hop
+  back to main. `isSaving` is now `@Published private(set)` instead of `private`.
+* `LiveScanService.finish` replaces the fixed stopwatch with a DEADLINE that watches `controller.isSaving`: while
+  the controller is still saving it says nothing, and it only gives up if saving STOPPED without producing either
+  a map or an error (a genuine stall), with a 180 s backstop for a hang. The cost of waiting is a spinner; the
+  cost of giving up early is telling somebody their scan was lost when it was not.
+
+2. "No 3D model for this scan" AFTER 60 SECONDS, whatever the exporter was doing.
+`ScanReviewView.modelReady` was read ONCE in `.onAppear` and never re-checked, and `modelWaiting` was a pure
+stopwatch (`< 60 s`). So the card flipped to "No 3D model for this scan" whether the export had failed, was still
+running, or had already succeeded - and even once `model.usdz` existed it kept denying it until you left the
+screen and came back. A 3.5 M-triangle export takes minutes, so for a real scan the answer was always wrong.
+Fixed: a 1 s poll for the file while a model may still be coming, and the window widened to 600 s and used ONLY
+as the spinner's condition, never to claim the opposite. (`CaptureController.modelStatus` already carries the
+exporter's own verdict including its error text; wiring the card to that instead is the better fix and is NOT
+done here.)
+
+Both are the same mistake, and the third this session after the 2.0 s speech budget: a fixed timer presented to
+the user as a result.
+
+Verified: `make test` -> **382 tests, 0 failures** (unchanged; both fixes are in app-target code `make test`
+cannot reach). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE. Neither a large save nor a slow export has been re-run on the phone since.
+Open / handoff: the biggest risk on this project is NOT in this list - it is that Rice Hall has never been
+scanned and `Gate G2` (relocalization x5 in a real hallway, ROADMAP U1.6) has never been run. Every fix this
+session was validated in a flat, which is shorter, more cluttered and far more feature-rich than a university
+corridor. Remaining known bugs, all still open: the USDZ export is slow (per-vertex array allocation in
+`MeshExporter.writeUSDZ`), the export reads session-owned Metal buffers after `stop()` pauses the session,
+`CoverageTracker` uses an absolute 2 m grid (the 59 %-after-a-full-retrace report), and the loop-closure
+thresholds disagree (builder joins at 1.0 m in 3D, `MapHealth` flags at 1.5 m in 2D) so the "check before
+sharing" warning cannot be cleared.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Stairs going DOWN: the one hazard nothing in the app could see   [tags: FEATURE, SAFETY]
+Area: C (Vision) + B (guidance). NEW branch `stairs-multifloor` off `map-extension`. Step 1 of the stairs /
+multi-floor plan agreed with Anmol (see the handoff note at the bottom for the rest of that plan).
+
+THE HAZARD: every obstacle check in this app looks for things that stick UP. `ObstacleBand` keeps depth samples
+between roughly knee height and just above the phone, and only those count. A staircase going DOWN puts NOTHING
+in that band - the floor simply stops - so the most dangerous thing in a building read as clear corridor and a
+blind user walking toward it was told nothing at all. `ObstacleDetector`'s own header has carried
+"TODO(C): stairs-down and ledges (need a downward check)" since it was written. Ascending stairs have the mirror
+problem (treads sit inside the band and read as an obstacle) - NOT addressed here.
+
+New:
+* `Package/.../Vision/FloorAhead.swift` - pure. Takes floor samples (distance ahead + world height) and the
+  height of the floor under the user, and returns `.continuous` / `.drop(atMeters:byMeters:)` / `.unsure`.
+  Errs toward warning: a false "step down" costs a pause, a missed one costs a fall. Key decision: floor that
+  simply STOPS COMING BACK returns `.unsure`, never `.continuous` - from the top of a staircase the treads are
+  edge-on to the sensor and return almost nothing, so "no floor seen" and "a staircase" look identical. Tells a
+  kerb (>= 0.12 m) from a flight (>= 0.35 m) so one gets "Careful." and the other "Stop."
+* `Waypoint/Vision/ObstacleDetector.floorSamples(in:)` - the producer. Works in the USER's frame: every sample is
+  unprojected to world, then measured along the camera's forward direction on the floor plane, keeping only the
+  0.9 m-wide strip the user is about to walk down and only points low enough to be floor. Per quarter-metre
+  bucket it keeps the LOWEST surface, because a drop is defined by how far down it goes.
+* `ObstacleBand.assumedPhoneHeight` is now a shared constant (it was a parameter default). The obstacle band and
+  the floor check must agree about where the floor is, or one measures against a floor the other does not believe in.
+
+Guidance (`FeedbackPlanner`): the floor check sits ABOVE the obstacle branch on purpose - that branch can
+`return`, and this is the hazard nothing else can see. Announced once per edge at `.critical` with a stop
+haptic, re-armed only when the floor is good again. `.unsure` is silent AND does not re-arm, so a sensor
+flickering between "drop" and "nothing came back" cannot chant the warning. Stairs we were ROUTED to are the way
+onward: still announced, but the user is not stopped and the beacon keeps guiding.
+
+Verified: `make test` -> **382 tests, 0 failures** (363 before; 12 for `FloorAhead` covering a flat corridor, a
+flight, a single step, the vanishing floor, noise, a ramp, steps going UP, a drop beyond the look-ahead, nearest
+edge wins, and the refusals; 7 for the planner covering announce-while-clear, beacon muting, once-per-edge,
+re-arm, `.unsure` not re-arming, routed stairs, and a kerb not stopping the walk). `make typecheck` OK (64 app
+files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, and this one genuinely needs a staircase. The numbers most likely to be wrong
+are `floorMinimumBelowCamera` (0.6 m) and the 0.9 m corridor width: too narrow and a stair edge at an angle is
+missed, too wide and a down-ramp at the side of a corridor reads as a drop. `floorSamples` runs every frame at
+stride 4 - the cost has not been measured on a phone.
+Handoff - the agreed plan for the rest (Anmol's design, refined together):
+ * Transition spaces: stairwells and lifts are their own "rooms", hidden from destination selection, present in
+   BOTH floors' maps and linked by NAME within a building. Entering one switches navigation into a transition
+   state.
+ * Which floor you came out on: stairs from the ARKit camera-pose height; LIFTS FROM THE BAROMETER. ARKit cannot
+   detect a lift moving at all - the interior is static relative to you, so the whole visual frame travels with
+   you and every vision/geometry method fails from first principles, not from noise. `CMAltimeter` is outside
+   that closed system. Costs `NSMotionUsageDescription` (not currently in `project.yml`); Anmol has approved it.
+ * Where you are on the new floor: request relocalization on arrival, and REQUIRE DENSE SCAN COVERAGE around
+   stairwells and lifts so that spot is the most reliable in the building rather than the least (`CoverageTracker`
+   already measures this, both directions). Pose-seeding at the linked node only as a fallback.
+ * Schema 4 would add `building` + `floor` to `BuildingMap` and stairs metadata (direction, railings, step count)
+   to `MapNode`; railings come from the VOLUNTEER at tag time, since ARKit mesh classification has no railing
+   class. NOT started, and still gated on whether the demo route changes floor at all.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Tapping a place did nothing: the method was nested inside another one   [tags: BUG]
+Area: U3 (scanner services). Branch `map-extension`. Anmol: "pressing an option doesnt do anything."
+
+CAUSE, and it is entirely self-inflicted: in the previous block I inserted `LiveScanService.confirmPlace(id:)`
+with a Python regex whose body pattern (`\{[^}]*\}`) stopped at the FIRST closing brace - the one ending
+`guard controller.isRunning, !isPaused else { return }`. So the new method was spliced INTO the middle of
+`tag(kind:label:)` and became a NESTED (local) function. That is perfectly legal Swift, so `make typecheck` and
+`make check` both passed and nothing looked wrong. But a local function is not a protocol witness: calls through
+`ScanService` resolved to the no-op default in the protocol extension, and the tap did exactly nothing.
+`tag(...)` itself was unaffected - a local `func` declaration does not alter control flow - so tagging kept
+working and there was no other symptom to notice.
+
+Fixed:
+* `Waypoint/Services/LiveScanService.swift`: `confirmPlace(id:)` moved out to be a real method, and it now calls
+  `refresh()` like every other mutating method on this adapter (the version I wrote did not, so even once
+  dispatched it would have waited a run-loop turn for the screen to catch up).
+* `Waypoint/Services/ScanService.swift`: the no-op DEFAULT for `confirmPlace(id:)` is REMOVED. It is what turned a
+  missing implementation into silence instead of a build error. Every conformer must now say what it does.
+* `Waypoint/Services/MockScanService.swift`: explicit no-op, with the reason (it has no saved map to stand in).
+
+Verified: `make test` -> **363 tests, 0 failures**. `make typecheck` OK (64 app files). `make check` ->
+BUILD SUCCEEDED. Note that typecheck and check ALSO passed with the bug present, which is the point of the
+protocol change above - the build can no longer tell us this particular lie.
+NOT verified: UNVERIFIED ON DEVICE. Whether tapping a place now aligns and attaches has still not been seen
+working by anyone.
+Lesson for other agents: do not insert Swift methods with a brace-counting regex. `[^}]*` stops at the first
+inner brace, and the result is a nested function that compiles silently. Use an exact anchored string edit.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The "stand at a labelled place" picker was wired into the wrong screen, and was unreachable anyway   [tags: BUG]
+Area: U3 (scanner UI) + A (capture). Branch `map-extension`.
+Anmol, trying it on the phone: "when i click extend a map ... i can scan around but i dont see how to see if im at a
+saved location, it just starts mapping but the 'Find the selected scanned area. Move slowly until tracking recovers'
+and nothing really showing what room im in to sync up."
+
+TWO faults, both mine, from the previous entry:
+1. WRONG SCREEN. The picker was added to `VolunteerView` (the classic scanner). The Extend-a-map flow goes through
+   the NEW scanner, `LiveScanScreen`, which only ever showed `extensionStatus` as a banner. The feature existed and
+   was simply not reachable from where the button takes you.
+2. UNREACHABLE EVEN THERE. `CaptureController.confirmPlace` required `case .normal` tracking. When extending, the
+   saved ARWorldMap is loaded as `initialWorldMap`, so ARKit sits in `.limited(.relocalizing)` hunting for a space
+   it may never recognise - which is the exact situation this feature exists to escape. The guard made it
+   impossible to use precisely when it was needed.
+
+Fixed:
+* `Waypoint/Services/ScanService.swift`: NEW `StandPlace` (id + label only - the screen needs no positions) and
+  snapshot fields `placesToStandAt` / `confirmedPlaceCount`; NEW protocol method `confirmPlace(id:)` with a no-op
+  default so `MockScanService` is unaffected.
+* `Waypoint/Services/LiveScanService.swift`: fills those from `CaptureController` and forwards the call.
+* `Waypoint/UI/Scanner/LiveScanScreen.swift`: the picker, shown under the extension banner while `!canRecord` (i.e.
+  while the scanner has not yet found its place), with the hint line changing after the first tap.
+* `Waypoint/UI/Scanner/ScanSessionModel.swift`: `confirmPlace(_:)`, deliberately NOT gated on `canRecord` - being
+  unable to record is the whole reason the volunteer is being asked.
+* `Waypoint/Capture/CaptureController.swift`: `confirmPlace` now works while relocalizing. Only
+  `.limited(.initializing)` is refused (the camera genuinely has no pose yet).
+
+Verified: `make test` -> **363 tests, 0 failures** (unchanged - this block is wiring and UI, which `make test`
+cannot reach). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: UNVERIFIED ON DEVICE, including whether the picker now actually appears in the Extend flow.
+OPEN PROBLEM, now the biggest one in this feature: while relocalizing, ARKit tracks a PROVISIONAL frame. Both
+confirmed places are measured in it, so the alignment itself is consistent - but if ARKit later succeeds at
+relocalizing, the camera transform silently moves into the saved map's frame while `worldToMap` still describes
+the provisional one, and every node recorded after that lands in the wrong place. Partial protection exists: a
+jump BETWEEN the two taps will usually break the `lengthMismatch` check and be refused. A jump AFTER the second tap
+is currently undetected. The clean fix is to stop loading the saved world map once the volunteer commits to
+aligning by hand (re-run the session without `initialWorldMap`, capture the first place from the fresh frame), so
+ARKit has nothing to relocalize into and the frame cannot move. NOT done here - it is a real change to the session
+lifecycle and wanted testing first.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — Extend a map by standing at a place you already labelled   [tags: FEATURE]
+Area: A (AR/Maps) + U3 (scanner UI). NEW branch `map-extension` off `navigation-overhaul` d8afcf1.
+
+Context: extending a saved map was ALREADY built end to end (ExtendChoices -> ScanLibraryView ->
+`CaptureController.prepareExtension` loads the saved ARWorldMap as `initialWorldMap` -> ARKit relocalizes ->
+`beginExtension` -> `MapBuilder.attachExtension`), and it was blocked on the one thing we know is unreliable:
+ARKit recognising the space. Anmol's idea was to use geometry instead of images; the cheap version of that idea,
+and the one built here, is to let the SIGHTED volunteer do the recognising - they can see a door they labelled.
+
+WHY TWO PLACES, not one: a single confirmed place fixes TRANSLATION only. Without relocalization the session's
+yaw bears no relation to the map's, so one point would record the new corridor at an arbitrary angle - a map
+that looks plausible and is wrong. Two places a few metres apart fix position and heading together, and the
+distance between them is a free sanity check.
+
+New (pure, unit-tested):
+* `Package/.../Model/ManualAlignment.swift` - `worldToMap(mapA:worldA:mapB:worldB:)` returning
+  `Result<simd_float4x4, Failure>`. Yaw-only (ARKit has +y along gravity in both sessions, so solving for roll
+  and pitch would only fit noise). REFUSES rather than guesses: `tooClose` under 2 m apart (a short baseline
+  turns a small standing error into a large angular one), and `lengthMismatch` over 1.0 m (the map and the walk
+  describe the same physical distance; if they disagree the volunteer tapped the wrong place).
+* `Geometry.yawAboutY(of:)` and `RoomExtent.transformed(by:)` - a room measured in the live session has to be
+  carried into the map frame; with no scale only the centre and the rotation move.
+  (The pre-commit hook warned that `Model/*` changed. It is NOT a contract change: `RoomExtent.transformed(by:)`
+  is a new method, no stored field was added, renamed or removed, the JSON shape is identical and
+  `MapSchema.current` is untouched. No fixture or migration needed.)
+
+Wiring (`Waypoint/Capture/CaptureController.swift`):
+* `worldToMap` (identity when ARKit relocalized, since then the session frame IS the map frame) plus
+  `mapPoint` / `mapDirection`, applied at EVERY place a camera position becomes a map node: the breadcrumb
+  (`observe`), `tagPOI` (position AND the room extent), and `attachExtension`. Missing any one of these would
+  write nodes into the wrong part of the building.
+* `confirmPlace(_:)` collects the two places, solves, and attaches immediately; each refusal has a sentence a
+  person can act on. `placesToStandAt` lists the map's labelled nodes.
+* `beginExtension` no longer requires `worldMappingStatus == .mapped/.extending` when the volunteer has aligned
+  by hand - that check is about ARKit's own opinion of the saved map, which is exactly what we are bypassing.
+* `start(...)` resets the alignment, so one capture cannot inherit another's.
+UI (`Waypoint/UI/VolunteerView.swift`): under the existing "I'm in the saved corridor" button, a row of the
+map's labelled places with a hint line that changes after the first tap.
+
+Verified: `make test` -> **363 tests, 0 failures** (354 before; 9 new for `ManualAlignment`: identity, pure
+translation, a quarter turn, height carried through, an arbitrary rotated+translated pose round-tripped through
+a third point the solver never saw, realistic standing slop accepted, and the three refusals).
+`make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: EVERYTHING about this on a phone. UNVERIFIED ON DEVICE - not built onto the device in this block,
+and no extension has ever been recorded and saved by anyone.
+Open problems (all real, none fixed here):
+1. `attachExtension` still requires standing within 2 m of a CORRIDOR or JUNCTION node (rooms and doors are not
+   eligible anchors) and within 0.75 m in height. After a hand alignment the volunteer is standing at a labelled
+   POI, whose nearest corridor breadcrumb is roughly 1 m away (`tagPOI` drops the POI ~1 m ahead of where the
+   volunteer stood), so it should pass - but it is the most likely thing to fail first on device.
+2. MESH EXPORT IS WRONG FOR A HAND-ALIGNED EXTENSION. `MeshExporter` writes vertices in the SESSION frame and
+   `MeshAsset.coordinateFrame` claims "map"; `worldToMap` is not applied. Pre-existing for extensions in another
+   way too: `save()` writes `store.modelURL(mapId:)`, which OVERWRITES the whole map's model with only the new
+   segment's mesh. Navigation does not read either, so this is a 3D-viewer problem, not a guidance one.
+3. The scan box, `CoverageTracker` and `CoverageGrid` all still work in session coordinates. Harmless for the
+   saved graph (they are about the live scan) but worth knowing before anyone reads those numbers as map-frame.
+4. Nothing stops the volunteer confirming the SAME place twice; `tooClose` catches it, but the message then
+   blames the distance rather than saying "that is the one you already picked".
+Handoff: install and try it. Pick the scan from tonight, stand at one labelled place, tap it, walk to another at
+least 2 m away, tap that. Expect either "Extending this building..." (works) or the 2 m corridor-anchor message
+(open problem 1).
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The way-round advisor was reading a sensor window too narrow to see sideways   [tags: BUG]
+Area: B (navigation/feedback) / C (vision wiring). Branch `navigation-overhaul`.
+Anmol, after the F-5 fix shipped: "when facing a wall / very close to a chair, it just says stop rather than how
+to get around it". The F-5 fix was therefore INCOMPLETE - the advice was reaching the speaker fine, but the
+advisor almost never had a side to suggest.
+
+FOUND: there are TWO independent measurements of how much room is on each side, and the advisor was wired to the
+wrong one.
+  * `DepthHit.clearance`, built in `ObstacleDetector.centerHit`, only samples the middle 28 % of the frame
+    (`corridorRowFractions = 0.36...0.64`) and splits left/right at +/-0.35 m lateral. That band is barely wider
+    than the "ahead" corridor itself, so `left`/`right` came back nil or near-identical.
+  * `SceneContext`, built in `ObstacleDetector.sideClearances`, scans the FULL width (rows 0.05...0.95) and
+    records how far the nearest thing on each side is from the centre line.
+`AvoidanceAdvisor` was fed the first. With both sides equal, `betterDistance - otherDistance` was ~0, never
+reaching `decisiveMargin` (0.6), so `advise` returned nil nearly every time and the user got "Stop." (and, since
+the earlier fix, "Back up slowly.") but never "Slightly left".
+Fixed: `Waypoint/Navigation/NavigationController.swift` now builds the advisor's `Clearance` from `sceneContext`
+(wide scan) with `ahead` still from the centre hit. `AvoidanceAdvisor` itself is unchanged - its thresholds
+(`minimumUsable` 1.2 m, `decisiveMargin` 0.6 m) only ever made sense against a real sideways measurement, which
+is what they now get.
+
+Also checked this block, at Anmol's request (F-4, relocalization coaching): the good spoken coaching line
+("Starting guidance to X. Finding your position. Slowly turn left and right.") exists at
+`NavigatorModel.swift:103` - but that is the NEW Navigator UI flow. The recorded walk's "Navigating." at 0:05
+comes from `NavigationController.swift:264`, a DIFFERENT flow, so `NavigatorModel`'s line never played. On the
+flow actually in use the spoken coaching is the planner's new "Finding your position. Stand still, then turn
+slowly.", which had not been installed at the time of Anmol's report. It is said ONCE; if relocalization drags
+there is then silence. Not changed.
+
+Verified: `make test` -> **354 tests, 0 failures**. `make typecheck` OK (64 app files). `make check` ->
+BUILD SUCCEEDED. Built, signed and installed on Anmol's iPhone 15 Pro (the first install to carry the
+"Stop. Stop. Stop." fixes, which had failed to install earlier when the phone dropped off).
+NOT verified: UNVERIFIED ON DEVICE. Whether the wide scan actually produces a decisive side in a real hallway is
+exactly the open question - `minimumUsable = 1.2 m` of sideways room is a lot in a narrow corridor, so the
+likely remaining failure is still falling through to "Back up slowly." where a human would step aside.
+Open / handoff: F-3 (the on-route tolerance) is UNDECIDED and needs Anmol's observation: are the label offsets
+mostly at doors/rooms (widen `ArrivalRadius` only - no regression risk) or systematic along the route (must
+loosen `rerouteMeters`, which re-opens the "did not recalculate until I was very far off" complaint that caused
+it to be tightened 5 -> 3). `maxOffRouteMeters` (8) is NOT that knob: it only guards the progress projection and
+is near-dead because the 3 m re-route fires first.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — "Stop. Stop. Stop. Stop." then the sentence: classifier flicker + safety cues cutting each other off   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`. Device report by Anmol after the F-1/F-7 fixes
+landed ("amazing fix, but sometimes it'll say Stop Stop Stop Stop then finish the sentence").
+
+CAUSE 1 - the warning was re-issued every tick. `FeedbackPlanner` re-announces an obstacle when the LEVEL or the
+KIND changes. Standing in front of one wall, the classifier flickers (wall -> unknown -> table -> wall) and each
+flip read as a brand new obstacle. `lastObstacleKind` is updated every tick, so an A/B/A/B flicker produces a
+"change" every single tick.
+CAUSE 2 - each re-issue cut off the one before it. A STOP is `.critical`, which means interrupt, so warning n+1
+silenced warning n after the word "Stop" - hence four stubs and only the last one reaching the part that says
+what the hazard actually is.
+
+Fixed (Anmol's own diagnosis: if the person has not moved, a new obstacle cannot have appeared):
+* `Package/.../Guidance/FeedbackPlanner.swift`: a change of KIND now only counts as news while `isMoving`.
+  Standing still, a different answer from the classifier is noise. A change of LEVEL is deliberately NOT gated -
+  an escalation to STOP must still be announced to a stationary user, which is the "somebody walks into your
+  path" case (covered by a test).
+* `Waypoint/Navigation/NavigationController.swift`: `isMoving` was TRANSLATION ONLY, so a user pivoting on the
+  spot counted as still - and they are not, because the camera then sees a genuinely different scene and a new
+  obstacle really can appear. `updateMovement` now samples camera YAW as well and treats >= 25 deg/s as moving
+  (shortest way round the circle, so crossing +/-pi is not read as a spin). Anmol asked for "gyroscope for
+  left/right turn"; the ARKit camera yaw gives exactly that with no CoreMotion and no `NSMotionUsageDescription`,
+  which the existing comment on this function explicitly set out to avoid.
+* `Package/.../Guidance/SpeechGate.swift` + `Waypoint/Guidance/Speaker.swift`: safety interrupts GUIDANCE, never
+  another safety line. `decide` takes a new `speakingPriority:` (defaulted, so existing callers are unaffected)
+  and a `.critical` arriving while another `.critical` is mid-sentence now ENQUEUES instead of interrupting.
+  `Speaker` tracks the priority of the line it is currently speaking. This is the backstop: even if some other
+  path re-issues a warning, the user can no longer be given a half-spoken one.
+
+Verified: `make test` -> **354 tests, 0 failures** (349 before; 5 new: safety does not interrupt safety, safety
+still interrupts guidance, flicker is ignored while stationary, a real change IS news while moving, escalation to
+STOP is never suppressed). `make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: ANYTHING on the phone. UNVERIFIED ON DEVICE. In particular the 25 deg/s turn threshold is a guess -
+too low and a stationary user's hand-shake reads as turning (so flicker is announced again), too high and a slow
+deliberate pivot reads as standing still (so a real new obstacle is suppressed). It needs a walk, and it is the
+one number here most likely to be wrong.
+Open / handoff: Anmol to re-walk and listen for (1) whether "Stop ..." now completes its sentence, (2) whether
+standing in front of a door still produces repeats, (3) whether turning on the spot toward something new is
+still announced promptly - that is the case the yaw threshold protects and the one that would break first.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — The recorded walk: no turn was EVER spoken. Two causes, both fixed   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`. Evidence: Anmol's 45 s screen recording
+(`ScreenRecording_10-18-2026_01-48-29_1.mov`) with an auto-transcript checked against the on-screen captions.
+
+THE FINDING: across the whole route the screen showed "Turn around" (0:13), "Turn right 140 degrees" (0:14) and
+"Turn right" (0:19), and the voice track contains **no turn instruction at any point**. A blind user walking
+that route would have received zero route guidance; everything they heard was obstacle chatter. This is F-1 and
+F-7 together, and it is worse than either report suggested.
+
+Two independent causes, both required:
+1. `FeedbackPlanner` spoke a CAUTION at `.critical`, contradicting the contract stated a few lines above it
+   ("Only an obstacle at STOP range, or losing position, earns this"). `.critical` means interrupt. In a
+   cluttered apartment cautions fire every second or two.
+2. `Speaker.say`'s `.interrupt` branch did `pending = nil`: every interrupt destroyed the queued line. Since the
+   planner latches `lastKey` when it GENERATES a cue, a destroyed turn is never re-emitted.
+Together these guarantee that while obstacles are present no turn can ever be spoken. The same interrupt chain
+also chopped the cautions themselves into fragments - the transcript's "Careful. An obstacle. Careful. Careful.
+An obstacle ahead. Careful." at 0:14 is one sentence being cut by the next, repeatedly (that is F-6's
+"talks over itself").
+
+Fixed:
+* `Package/.../Guidance/FeedbackPlanner.swift`: caution is now `.high` (queues) - a STOP is still `.critical`.
+  The file header's priority paragraph was itself out of date ("`.high` interrupts") and now states the real
+  contract.
+* `Waypoint/Guidance/Speaker.swift`: `.interrupt` KEEPS what is waiting, so the obstacle is spoken first and the
+  turn follows. `didCancel` no longer clears `pending` either - it would have undone this; `stop()` already
+  clears it explicitly. Staleness is still enforced by `maxQueuedAge` (4.5 s, raised earlier today).
+* `Package/.../Guidance/FeedbackPlanner.swift`: NEW `hasBeenTracking`. "Lost my position." was announced on the
+  FIRST untracked tick of every walk (heard at 0:06) because `lastTrackingOK` starts true - there was nothing to
+  lose yet, and the screen correctly read "Finding your position" at the same moment. A first fix now says
+  "Finding your position. Stand still, then turn slowly." at `.high`; a genuine loss keeps "Lost my position.
+  Hold still." at `.critical`.
+
+A test was WRONG, not just missing: `testCautionIsHighPriorityAndNamesTheObject` asserted `.critical` while its
+own name said high. The name recorded the original intent and the value had drifted, so the regression was
+pinned in place by its own test. Assertion corrected to match the name and the contract.
+
+Verified: `make test` -> **349 tests, 0 failures** (345 before; 4 new: caution queues, stop still interrupts,
+first fix is not reported as a loss, losing a real fix is critical; plus 2 corrected assertions).
+`make typecheck` OK (64 app files). `make check` -> BUILD SUCCEEDED.
+NOT verified: ANYTHING on the phone. UNVERIFIED ON DEVICE - the whole point is how it sounds while walking, and
+no walk has been done with these changes.
+Open / handoff:
+1. Anmol to re-walk the SAME route and compare against the recording. Success = the turns are actually spoken.
+   Another recording + transcript would be the best possible evidence; this one found more than the last three
+   device reports combined.
+2. Still unreconciled (F-1's other half): at 0:20 the voice said "Slightly left" (round the table) while the
+   screen said "Turn right" (the route). Both are correct and nothing relates them. Wording that joins the two
+   ("Slightly left round a table, then right toward Other Bathroom") is NOT implemented.
+3. `Speaker` keeps ONE pending line and, at EQUAL priority, the newer one wins - so a caution can still displace
+   a queued turn, just without destroying it outright. The existing comment says it wants "the most important
+   one offered - not simply the last", which equal-priority last-wins contradicts. Left alone deliberately:
+   deciding whether a turn should outrank a caution needs a walk, not a guess.
+4. Also seen in the transcript and NOT investigated: the opening briefing never played, and "You have arrived"
+   does not appear in the voice track although the screen shows it at 0:44. Both are consistent with being
+   interrupted away, so both may already be fixed by this change - check on the re-walk.
+
+---
+
+## 2026-10-18 — Claude (agent, for Anmol) — F-5 and F-7 were ONE bug: a queued line died because the line ahead of it took too long to say   [tags: BUG]
+Area: B (navigation/feedback). Branch `navigation-overhaul`.
+
+FOUND: F-5 ("an obstacle said only Stop, with no way through") and F-7 ("sometimes it never says which
+direction to go, mostly while other announcements are happening") have the same single cause.
+The planner already emits the way round as its own `.high` line right after the `.critical` stop
+(`FeedbackPlanner.swift:233`), and `NavigationController.perform` sorts critical first - so "Stop. You are
+heading toward a wall." starts speaking and the advice goes into `Speaker.pending`. That sentence takes about
+2.4 s at the default rate plus `postUtteranceDelay`. `Speaker.maxQueuedAge` was **2.0 s**, so by the time
+`didFinish` offered the pending line its turn it was ALWAYS already stale, and it was discarded with
+"dropped stale line after 2.4s". A line only ever waits because the speaker is busy, so the budget was
+shorter than the wait it is meant to tolerate: every `.high` cue queued behind any sentence longer than two
+seconds was guaranteed to be thrown away. That is the way round never being heard (F-5) and a direction
+going unsaid under other traffic (F-7).
+
+Fixed:
+* `Waypoint/Guidance/Speaker.swift`: `maxQueuedAge` 2.0 -> **4.5 s**, with the reasoning in the comment. Long
+  enough to clear any single cue we speak, short enough to still drop a line that genuinely sat too long. The
+  opening briefing's separate 15 s budget (`openingMaxQueuedAge`) is unchanged.
+* `Package/.../Vision/AvoidanceAdvisor.swift`: NEW `isBoxedIn(_:)` - the way ahead is blocked and neither side
+  is a usable way round. The side-choosing logic moved into a private pure `bestSide(...)` used by both
+  `advise` and `isBoxedIn`, so the two can never disagree. `advise`'s behaviour and signature are unchanged.
+* `Package/.../Guidance/SpokenPhrases.swift`: NEW `TurnSpeech.backUp` = "Back up slowly."
+* `Package/.../Guidance/FeedbackPlanner.swift`: NEW `backUp: Bool = false` parameter. When the user is boxed
+  in, the stop warning is followed by "Back up slowly." instead of nothing at all. Uses the SAME
+  `announcedAvoidance` latch as the way round, so it is offered once per obstacle, and a way round always
+  wins over backing up - the two are never both spoken. A door on the route is still the way IN and never
+  earns a back-up cue.
+* `Waypoint/Navigation/NavigationController.swift`: computes `isBoxedIn` AFTER `advise` (which is what knows
+  whether a side was found) and passes it through `tick` to the planner.
+
+Deliberately NOT changed: `testTheWayRoundIsSaidOncePerObstacle` pins "said once, not nagged" as a design
+decision, so the latch stays and the new cue follows the same rule. The `.interrupt` path still discards a
+pending line (`Speaker.say`); whether a turn should survive a safety interrupt needs a walk to decide, not a
+guess. The planner still latches "announced" when it GENERATES a line, not when the speaker actually says it -
+with a 4.5 s budget that is far less likely to lose anything, but it is the remaining structural weakness
+behind F-7 and is the thing to fix properly if it recurs.
+
+Verified: `make test` -> **345 tests, 0 failures** (337 before; 8 new covering boxed-in detection, the
+advisor/planner agreeing, back-up wording, way-round-beats-back-up, once-per-obstacle, and the door-on-route
+exception). `make typecheck` OK (64 app files). `make check` -> **BUILD SUCCEEDED**.
+NOT verified: ANYTHING on the phone. No walk has been done with these changes - the 4.5 s figure is reasoned
+from the default speech rate, not measured on device, and whether 4.5 s is the right trade-off between "heard
+it at all" and "heard it too late" can only be judged by walking. UNVERIFIED ON DEVICE.
+Open / handoff: Anmol to walk a corridor and (1) reach a wall with a clear way round - expect "Stop ..." then
+"Slightly left, there is a wall ahead."; (2) reach a dead end / corner with no usable side - expect "Stop ..."
+then "Back up slowly."; (3) watch whether directions still go missing under heavy traffic. If a cue still
+disappears, grep the console for "dropped stale line after" - that log line names the exact text that was lost.
+F-1 (contradicting directions) is untouched and still needs its own walk.
+
+---
+
+## 2026-10-18 — Anmol (device walk, logged by Claude) — Field test of the merged branch: overall good, 8 findings for tomorrow   [tags: DEVICE, BUG]
+Area: B (navigation/feedback) mostly, A (relocalization), plus one routing question.
+Build: `navigation-overhaul` @ `fecc146` (= `origin/main` content + one WORKLOG commit), installed on Anmol's iPhone 15 Pro.
+Anmol's verdict: "works really good, I like it overall." Everything below is what to fix, not a reason to revert.
+NOT diagnosed on the machine: these are device observations. Where a cause is named it is a LEAD, not a verified fact,
+and is marked so. Several need another walk tomorrow before anyone changes code.
+
+**1. (CRITICAL) Contradicting directions.** Says "left" when the correct way is right; says "left" while the on-screen
+arrow points right. Not common, and sometimes the cues arrive in a different ORDER than the queue should produce.
+Lead (UNVERIFIED): speech and the arrow are produced from different places - `NavigationController.perform` sorts the
+spoken lines by priority separately from the visual heading, so a reordered or delayed line can be spoken against a
+heading that has since changed. Anmol will test this specifically tomorrow to pin down when it happens.
+
+**2. Routing prefers the volunteer's breadcrumb path over a shorter mapped way.** If the volunteer never physically
+walked a shortcut, the router will not use it, even when the map shows the space is open.
+Cause (known, by design today): routing is A* over the BREADCRUMB GRAPH; `MapBuilder.closeLoop` only ever joins nodes the
+volunteer actually stood at, so an unwalked shortcut has no edge and cannot be routed. This is the same issue as the
+earlier "why is it using the path I've gone rather than the built mesh" report. The intended fix is floor-grid routing
+over the LiDAR mesh (designed, approved in principle, NOT started) - see the movable/immovable obstacle discussion.
+Anmol considers this preference, not a blocker.
+
+**3. The active-path / arrival radius is too tight.** A labelled point can sit a little away from where it is drawn - a
+door point ended up further INTO the shut door than where it was labelled - so the user is judged off-route or
+not-arrived when they are in the right place.
+Relevant knobs: `ArrivalRadius` (room 2.5 m, door 1.2 m, stairs/elevator 1.5 m, else 1.0 m) and
+`RouteFollower.maxOffRouteMeters` (8 m). The door case is the tightest radius and the one that bit.
+
+**4. Relocalization needs very specific viewpoints, and the user is never told what to do.** It sometimes insists on
+seeing a particular spot before it recognises the space, with no instruction to pan slowly or walk around.
+This is the viewpoint-dependence of ARKit's world-map relocalization (the reason `CoverageTracker` exists). The coaching
+is already a known gap: `Relocalizer.swift` header, "TODO(A): surface 'move slowly / look around' coaching while
+.searching". Probably not fully fixable, but saying so out loud to the user costs little.
+
+**5. (MAJOR, REGRESSION) An obstacle says only "Stop", with no way through.** Reaching a wall produced a bare stop and no
+suggestion. This behaviour existed before and has been lost: `AvoidanceAdvisor`, `ObstacleSpeech.wayThrough` and
+`TurnSpeech.avoidance(side:obstacle:)` are all still present. Wanted back: "back up slightly", "turn slightly left",
+and the reasoned form "Slightly left, there is a wall ahead."
+Lead (UNVERIFIED, worth checking FIRST): the merge of 2026-10-18 06:20 added "my hint stays quiet whenever U2's advisor
+has a suggestion" as fix (4) of that entry. If that suppression is wider than intended, or if both paths suppress each
+other in some states, the result is exactly a bare "Stop". Start there.
+
+**6. One-shot lines get missed; priority and freshness fight each other.** Something said once can simply be misheard.
+Wanted: a little repetition WITHOUT spamming. Worst while the user is moving among several obstacles / turn options,
+where the priority rules and the `staysFresh` / `maxQueuedAge` rules interact badly and the app talks over itself.
+Knobs involved: `Speaker` (ONE pending slot, `maxQueuedAge = 2.0`, `staysFresh:`), `SpeechGate` (`.normal` is DROPPED
+while speaking), `FeedbackPlanner.directionCooldownSeconds = 1.5`. Needs more testing tomorrow before changing.
+
+**7. (BIG) Sometimes it never says which way to go at all.** Most often when other, higher-priority announcements are
+happening - an important instruction is simply never delivered. Connected to item 6.
+Anmol's proposed fix: when a higher-priority line pre-empts the queue, do not just drop what it displaced - append the
+next CORRECT instruction to be spoken after it, re-deriving it if a re-route or another priority event has changed the
+situation in the meantime. (Re-derive rather than replay: by the time the speaker is free the user has moved.)
+Mechanism that makes this happen today: `Speaker` keeps only one pending line and keeps the most IMPORTANT one, so a
+displaced normal-priority direction is gone for good, and `SpeechGate` drops `.normal` outright while speaking.
+To discuss properly tomorrow.
+
+**8. (QoL) Starting instructions for the blind user.** There is no orientation at the start of a walk explaining what is
+about to happen or how to hold the phone.
+
+Verified in this block: nothing was changed, so nothing to verify. The build itself is `fecc146`, whose `make test`
+(337 pass), `make typecheck` and `make check` results are recorded in the merge entry below.
+NOT verified: every lead marked UNVERIFIED above; none of items 1-8 has been reproduced on the machine or fixed.
+Open / handoff (tomorrow, Anmol): items 1, 5 and 7 are the ones that change whether a blind user can finish a route -
+do those first. Items 1, 6 and 7 all need another walk before code changes. Item 5 has the most concrete lead.
+Still unfixed from earlier tonight (diagnosed, file:line in the entry below): the 15 s save timeout reported as a
+failure, the 60 s "no 3D model" stopwatch, the slow USDZ export, the export reading paused-session Metal buffers,
+`CoverageTracker`'s absolute 2 m grid (the 59% after a full retrace), and the 1.0 m/3D vs 1.5 m/2D loop-closure
+threshold mismatch that makes the "check before sharing" warning impossible to clear.
+
+---
+
+## 2026-10-17 — Claude (agent, for Anmol) — Map backup read the wrong app container, so it backed up nothing   [tags: BUG, BUILD]
+Area: D (build system). Found while installing the merged branch on Anmol's phone.
+FOUND: `make install` and `make uitest` both depend on `backup-maps` (Makefile `:101`, `:130`) specifically so a reinstall
+cannot lose scans that can only be recreated by walking the building again. But `Makefile` called
+`sh scripts/phone-maps.sh backup` WITHOUT passing `BUNDLE_ID`, and the script defaults to
+`BUNDLE="${BUNDLE_ID:-io.github.sachin-khanal.waypoint.sachin}"` (`phone-maps.sh:11`) — U1's dev suffix. The Makefile
+already computes the right value (`BUNDLE_ID := $(BUNDLE_PREFIX).$(SUFFIX)`, `:34`, from `WAYPOINT_DEV_SUFFIX` in
+`Config/Local.xcconfig`) and uses it for every `devicectl process launch`, but not here. On any machine whose suffix is
+not `sachin` the backup queried a container that does not exist, got zero files, and printed
+"backup: no maps on the phone (or the app is not installed)" — which reads like "you have no scans", not "I looked in
+the wrong place". Silent no-op: the protection every install claimed to apply was never applied.
+Fixed: `Makefile` `backup-maps` and `restore-maps` now pass `BUNDLE_ID=$(BUNDLE_ID)` through to the script. The script
+needed no change — it already honours the env var. `restore-maps` had the same defect and would have restored into the
+wrong container.
+Verified: `DEVICE=<anmol's phone> make backup-maps` -> "backup: 5 file(s) -> ~/Library/Caches/Waypoint/map-backups/20261017-235526",
+42 MB: 2 real recordings (`map.json` + `worldmap-seg_*.arworldmap` each) plus the Rice Hall sample's `map.json`. The
+same command before the fix reported no maps on the same phone with the same 3 maps present. Restore precondition
+re-checked by hand (`ls Maps/*/worldmap-*.arworldmap` matches), so `restore-maps` would now accept this backup.
+Also verified in this block: the merged branch (`fecc146`) builds, signs, installs and launches on Anmol's iPhone 15 Pro
+(`make run` -> BUILD SUCCEEDED, "Launched application with io.github.sachin-khanal.waypoint.anmol bundle identifier",
+console "[app] INFO loaded 3 map(s)"). The reinstall preserved the existing maps.
+NOT verified: `restore-maps` end to end (not run — it would overwrite the phone's live maps); the backup against U1's
+own phone (where the old default happened to be correct, so nothing changes for U1); anything about scanning,
+navigation, the 3D viewer, Pause or the unscanned-areas overlay — none of the merged features were exercised, only
+install and launch.
+Open / handoff:
+1. Neither existing recording has a `model-*.usdz`, because mesh export arrived in `3c666b0` (main) after both scans
+   were made. `ScanReviewView:206` gates "View 3D model" on `store.hasModel(mapId:)`, so for those two maps the button
+   is simply absent — no error, nothing to see. Testing the 3D viewer needs a NEW scan on this build.
+2. Same for the return-walk coverage: it is a property of how the volunteer walked, not of the file, so the two old
+   one-direction maps will still struggle on the walk back whatever code runs against them.
+3. Worth a look by U1/U3: other scripts under `scripts/` may carry the same hardcoded `.sachin` default. Only
+   `phone-maps.sh` was checked.
+
+## 2026-10-17 — Claude (agent, for Anmol) — Merge `main` into `navigation-overhaul` (27 commits)   [tags: BUILD]
+Area: shared.
+Brings in `main`'s mesh pipeline and cloud/web work: `MeshExporter` (LiDAR mesh -> cropped -> decimated -> USDZ beside
+the map), `MeshDecimator`/`MeshCrop`/`IndexedMesh` in core, `MeshAsset` in the map format, the unscanned-areas
+overlay, the 3D model viewer, the standalone web viewer, Supabase storage policies and the `supabase_check` tool.
+**The format collision I expected was not there.** `main` had already aligned format 3 to include BOTH their
+`meshAssets`/`heightMeters` AND our `keyframes` (see the comment at `BuildingMap.swift:17` and the `CodingKeys` at
+`:85`), so the two meanings of "3" had already been reconciled on their side. Zero textual conflicts, and the merged
+decoder carries every optional field.
+Verified AFTER the merge: `make test` -> **337 tests, 0 failures** (253 ours + main's); `make typecheck` OK (64 app
+files, 1 UI test file); `make check` -> BUILD SUCCEEDED. `make gen` run first, since the branch adds files.
+NOT verified: nothing was run on a phone in this block. Everything already marked UNVERIFIED ON DEVICE stays so.
+Open / handoff:
+1. Zero conflicts is not the same as semantically correct. The areas where both sides moved and git merged silently -
+   `BuildingMap`, `MapStore`, `FeedbackPlanner`, `NavigationController` - deserve a read by their owners.
+2. This unblocks floor-grid routing: `IndexedMesh` and the mesh pipeline are now on the same branch as the guidance
+   work, and the mesh is written in the MAP frame, the same frame as the nodes.
+3. Not merged to `main`; under ROADMAP Revision 3 that is U1's call.
+
+---
 
 ## 2026-10-18 06:20 — Claude (agent, for Sachin) — Integrated U2's navigation-overhaul (12 commits) with main; conflicts resolved; two fixes   [tags: CONTRACT CHANGE, BUILD]
 Area: shared integration (U1 merge captain). Branch `integrate/navigation-overhaul` = main f912ef5 + origin/navigation-overhaul a107f85 (Anmol, 12 commits: keyframe relocalization with visual fingerprints OFF by default, "one move at a time" speech, sooner re-routing, route continuously, scan both directions (`CoverageTracker`), suggest a way round a blockage (`AvoidanceAdvisor`)). Cross-referenced first: main = origin/main; U3 and app-ui-workflows unchanged; Anmol pushed 3 more commits while this was being prepared (latest a107f85, minutes old).

@@ -67,7 +67,7 @@ def segment(value, path):
 
 
 # Map format versions this tool understands (mirror of Swift `MapSchema`; specs in docs/MAP_FORMAT.md).
-CURRENT_SCHEMA = 3
+CURRENT_SCHEMA = 4
 OLDEST_SCHEMA = 1
 
 

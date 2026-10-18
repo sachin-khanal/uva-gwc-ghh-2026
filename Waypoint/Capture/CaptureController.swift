@@ -86,7 +86,31 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     private var segmentId = "seg1"
     private var isExtension = false
     private var extensionAttached = false
-    private var isSaving = false
+    /// Session (ARKit world) -> MAP. IDENTITY when ARKit relocalized into the saved world map, because
+    /// then the session's world frame IS the map frame. When the volunteer locates themselves by hand
+    /// instead (`confirmPlace`), this carries their alignment, and EVERY position that becomes a map
+    /// node must go through `mapPoint` / `mapDirection` - a node written in session coordinates would
+    /// land in the wrong part of the building.
+    private var worldToMap = matrix_identity_float4x4
+    /// Places the volunteer has confirmed standing at. Two are needed: one fixes position only, and
+    /// without ARKit's relocalization the session's yaw bears no relation to the map's.
+    private var confirmedPlaces: [(map: SIMD3<Float>, world: SIMD3<Float>)] = []
+    /// How many places have been confirmed so far (0, 1), for the UI.
+    @Published private(set) var confirmedPlaceCount = 0
+    /// The volunteer located themselves by hand, so ARKit does not have to recognise the space.
+    private var alignedByHand = false
+    /// Id of the place already confirmed, so the screen can tick it and refuse a second tap on it.
+    @Published private(set) var confirmedPlaceId: UUID?
+    /// The configuration the session is running, kept so it can be re-run without the saved world map
+    /// once the volunteer commits to aligning by hand (see `confirmPlace`).
+    private var activeConfig: ARWorldTrackingConfiguration?
+    /// The world map taken out of the configuration by `stopRelocalizing`, so starting over restores it.
+    private var droppedWorldMap: ARWorldMap?
+    /// ARKit has recognised the saved area, so the automatic attach has already been tried once.
+    private var sawRecognised = false
+    /// A save is in flight. Published and readable so `LiveScanService` can tell "still working" from
+    /// "stalled" instead of failing the save on a fixed timer.
+    @Published private(set) var isSaving = false
     private var exportProbeDone = false
     private var latestCameraTransform: simd_float4x4?
 
@@ -189,12 +213,30 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         keyframes = []
         isMakingKeyframe = false
         lastKeyframeAttempt = -.greatestFiniteMagnitude
-        coverage.reset()
+        coverage.resetAll()
+        // Extending: the ground this map already holds is not the volunteer's problem. Only genuinely
+        // new territory is judged for the walk-back rule, so crossing an existing corridor to reach the
+        // new wing does not drag the score down (device report 2026-10-18).
+        if let map {
+            coverage.markAlreadyCovered(map.nodes
+                .filter { $0.kind == .corridor || $0.kind == .junction }
+                .map(\.position))
+        }
         returnCoverage = 0
         shouldWalkBack = false
         lastCoverageSample = -.greatestFiniteMagnitude
         isSaving = false
         extensionAttached = false
+        // A new capture starts unaligned: the session frame is the map frame only once ARKit has
+        // relocalized, or once the volunteer has confirmed two places.
+        worldToMap = matrix_identity_float4x4
+        confirmedPlaces = []
+        confirmedPlaceCount = 0
+        confirmedPlaceId = nil
+        alignedByHand = false
+        droppedWorldMap = nil
+        activeConfig = nil
+        sawRecognised = false
         segmentId = "seg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         builder = MapBuilder(map: map ?? BuildingMap(name: mapName), segmentId: segmentId, deviceName: deviceName)
         nodeCount = map?.nodes.count ?? 0
@@ -224,6 +266,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         }
         config.planeDetection = []
         config.environmentTexturing = .none // saves memory/power; we never render reflections
+        activeConfig = config
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
         Log.capture.info("capture started: \(mapName) | surfaceLabels=\(config.sceneReconstruction == .meshWithClassification)")
@@ -239,8 +282,11 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         lastCoverageSample = frame.timestamp
 
         let transform = frame.camera.transform
-        let forward = Geometry.cameraForward(of: transform)
-        coverage.observe(position: Geometry.translation(of: transform),
+        // MAP frame, not the session's. The ground an earlier scan already covered is recorded in map
+        // coordinates, and after a hand alignment the two frames differ - fed in session coordinates the
+        // cells would never line up and every re-walked corridor would look new.
+        let forward = mapDirection(Geometry.cameraForward(of: transform))
+        coverage.observe(position: mapPoint(Geometry.translation(of: transform)),
                          yaw: atan2(forward.x, -forward.z))
         // Same rule as the HUD values below: only publish real changes, this runs several times a second.
         let fraction = coverage.returnCoverage
@@ -323,17 +369,148 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         latestCameraTransform = nil
     }
 
+    /// A point from the live session, in MAP coordinates.
+    private func mapPoint(_ world: SIMD3<Float>) -> SIMD3<Float> { Geometry.transformPoint(worldToMap, world) }
+    /// A direction from the live session, in MAP coordinates (rotation only, no translation).
+    private func mapDirection(_ world: SIMD3<Float>) -> SIMD3<Float> { Geometry.transformDirection(worldToMap, world) }
+
+    /// Stairwell / lift names already used in this map, offered when tagging another one. The two ends
+    /// of a staircase live in SEPARATE maps (one per floor) and are matched by NAME, so picking from a
+    /// list instead of typing is what stops "North Stairs" and "Stairwell A" never linking up.
+    var knownStairwellNames: [String] {
+        guard let builder else { return [] }
+        let names = builder.map.nodes
+            .filter { $0.kind == .stairs || $0.kind == .elevator }
+            .compactMap { $0.label?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
+    /// The labelled places in the map being extended, for the volunteer to pick from. Empty when this
+    /// is not an extension.
+    var placesToStandAt: [MapNode] {
+        guard isExtension, let builder else { return [] }
+        return builder.map.nodes
+            .filter { ($0.label?.trimmingCharacters(in: .whitespaces).isEmpty == false) }
+            .sorted { ($0.label ?? "") < ($1.label ?? "") }
+    }
+
+    /// "I am standing at this place." Needs TWO, a few metres apart: the first fixes where the session
+    /// sits in the map, the second fixes which way it is turned. When the second arrives the alignment
+    /// is solved and the extension attaches straight away, so ARKit never has to recognise the space.
+    ///
+    /// Refuses rather than guesses: see `ManualAlignment`. A wrong alignment writes every new node into
+    /// the wrong part of the building, which is much worse than asking the volunteer to try again.
+    func confirmPlace(_ node: MapNode) {
+        // Deliberately NOT gated on `.normal` tracking. While extending, the saved world map is loaded, so
+        // ARKit sits in `.limited(.relocalizing)` hunting for a space it may never recognise - which is the
+        // exact situation this feature exists to escape. Requiring `.normal` made it unreachable. ARKit is
+        // still tracking its own provisional frame meanwhile, and that frame is all the alignment needs,
+        // because both confirmed places are measured in it.
+        guard isExtension, !extensionAttached, isRunning, !isSaving,
+              let frame = session.currentFrame else {
+            extensionStatus = "Hold the phone up so the camera can see, then confirm the place again."
+            return
+        }
+        if case .limited(.initializing) = frame.camera.trackingState {
+            extensionStatus = "Still starting the camera. Give it a second, then confirm the place again."
+            return
+        }
+        let world = Geometry.translation(of: frame.camera.transform)
+        if let first = confirmedPlaces.first, first.map == node.position {
+            extensionStatus = "That is the place you already confirmed. Walk to a DIFFERENT one and tap that."
+            return
+        }
+        guard let first = confirmedPlaces.first else {
+            confirmedPlaces = [(map: node.position, world: world)]
+            confirmedPlaceCount = 1
+            confirmedPlaceId = node.id
+            stopRelocalizing()
+            extensionStatus = "Got it. Now walk to another labelled place at least \(Int(ManualAlignment.minSeparationMeters)) meters away and confirm that one."
+            Log.capture.info("alignment: first place \(node.label ?? "-")")
+            return
+        }
+        switch ManualAlignment.worldToMap(mapA: first.map, worldA: first.world,
+                                          mapB: node.position, worldB: world) {
+        case .failure(.tooClose(let apart)):
+            extensionStatus = String(format: "Those two places are only %.1f m apart - too close to tell which way you are facing. Pick one further away, or tap Start over.", apart)
+            Log.capture.info(String(format: "alignment refused: only %.2f m apart", apart))
+        case .failure(.lengthMismatch(let mapMeters, let walked)):
+            // Do NOT clear the first place here. Clearing it looked like nothing had happened, and with
+            // only two labelled places in the map the volunteer was left with nowhere to go at all
+            // (device report 2026-10-18). They keep their first place and can retry or start over.
+            extensionStatus = String(format: "That does not add up: the map puts those places %.1f m apart but you walked %.1f m. Try the other place, or tap Start over.", mapMeters, walked)
+            Log.capture.info(String(format: "alignment refused: map %.2f m vs walked %.2f m", mapMeters, walked))
+        case .failure(.notFinite):
+            extensionStatus = "Lost track of where you walked. Tap Start over and confirm the first place again."
+            confirmedPlaces = []
+            confirmedPlaceCount = 0
+        case .success(let transform):
+            worldToMap = transform
+            alignedByHand = true
+            confirmedPlaceCount = 2
+            Log.capture.info("alignment: solved from two places, yaw \(Geometry.yawAboutY(of: transform) * 180 / .pi) deg")
+            beginExtension()
+        }
+    }
+
+    /// Give up on ARKit recognising the space, because the volunteer has started locating themselves by
+    /// hand instead. The saved world map is dropped from the running configuration.
+    ///
+    /// This is not tidying up - it removes a real hazard. Both paths were live at once: having confirmed
+    /// a place by hand, ARKit could still relocalize A MOMENT LATER, at which point the camera transform
+    /// silently moves into the saved map's frame while `worldToMap` still describes the provisional one,
+    /// and every node recorded after that lands somewhere else in the building. A jump BETWEEN the two
+    /// taps is usually caught by the length check; a jump AFTER the second tap was undetectable.
+    ///
+    /// Re-run with NO options: `.resetTracking` would throw away the frame the first confirmed place was
+    /// measured in, which is the one thing that must survive.
+    private func stopRelocalizing() {
+        guard let config = activeConfig, let saved = config.initialWorldMap else { return }
+        droppedWorldMap = saved // so "Start over" can put ARKit back in play
+        config.initialWorldMap = nil
+        session.run(config)
+        Log.capture.info("aligning by hand: dropped the saved world map so ARKit cannot move the frame")
+    }
+
+    /// Forget the places confirmed so far. There must always be a way out of a refused alignment: with
+    /// only two labelled places in the map, a volunteer who has used both and been refused would
+    /// otherwise be stuck with no tap that does anything (device report 2026-10-18).
+    func restartPlaceConfirmation() {
+        confirmedPlaces = []
+        confirmedPlaceCount = 0
+        confirmedPlaceId = nil
+        // Put the saved world map back: starting over means ARKit gets its chance again, and its answer
+        // is the better one whenever it arrives (exact pose, and the new area keeps a usable scan file).
+        if let saved = droppedWorldMap, let config = activeConfig {
+            config.initialWorldMap = saved
+            droppedWorldMap = nil
+            session.run(config, options: [.resetTracking, .removeExistingAnchors])
+            Log.capture.info("start over: saved world map restored, ARKit may relocalize again")
+        }
+        extensionStatus = "Starting over. Stand at a labelled place and tap it."
+    }
+
     /// Volunteer confirms they are in the mapped corridor after ARKit has relocalized.
     /// Starting a new segment never changes the world origin or any existing node.
     func beginExtension() {
-        guard isExtension, !extensionAttached, isRunning, !isSaving,
-              let frame = session.currentFrame, case .normal = frame.camera.trackingState,
-              frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending,
-              let builder else {
-            extensionStatus = "Still finding the saved area. Look around slowly; recording is paused."
+        // Once a place has been confirmed by hand, the saved world map has been dropped, so a `.mapped`
+        // status describes the NEW session - not the saved area. Attaching on it would use an identity
+        // transform against map-frame nodes, which is the frame mistake all over again.
+        guard !(confirmedPlaceCount > 0 && !alignedByHand) else {
+            extensionStatus = "Finish locating yourself: confirm a second labelled place, or tap Start over."
             return
         }
-        guard builder.attachExtension(at: Geometry.translation(of: frame.camera.transform)) else {
+        guard isExtension, !extensionAttached, isRunning, !isSaving,
+              let frame = session.currentFrame, case .normal = frame.camera.trackingState,
+              // A hand alignment IS the fix, so ARKit's own opinion of the saved map is irrelevant;
+              // without one we still wait for it to have matched the space.
+              alignedByHand || frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending,
+              let builder else {
+            extensionStatus = "Still finding the saved area. Look around slowly, or confirm a labelled place you are standing at."
+            return
+        }
+        guard builder.attachExtension(at: mapPoint(Geometry.translation(of: frame.camera.transform))) else {
             extensionStatus = "Move within 2 meters of a previously scanned corridor point on the same floor, then try again."
             return
         }
@@ -345,14 +522,17 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     /// Drops a tagged node ~1 m in front of the camera (on the floor plane of the camera height).
-    func tagPOI(kind: NodeKind, label: String?) {
+    func tagPOI(kind: NodeKind, label: String?, stairs: StairsInfo? = nil) {
         guard canRecord, let builder, let t = latestCameraTransform else { return }
         let pos = Geometry.translation(of: t)
         var fwd = Geometry.cameraForward(of: t)
         fwd.y = 0
         let ahead = simd_length(fwd) > 1e-3 ? simd_normalize(fwd) : SIMD3<Float>(0, 0, -1)
-        let node = builder.addPOI(kind: kind, label: label, position: pos + ahead,
-                                  extent: kind == .room ? roomExtent(standingAt: pos) : nil)
+        // `roomExtent` samples the LIVE mesh, so it must be seeded with the session position and its
+        // result carried into the map frame afterwards; everything stored on the node is map frame.
+        let extent = kind == .room ? roomExtent(standingAt: pos)?.transformed(by: worldToMap) : nil
+        let node = builder.addPOI(kind: kind, label: label, position: mapPoint(pos + ahead),
+                                  extent: extent, stairs: stairs?.isEmpty == true ? nil : stairs)
         nodeCount = builder.map.nodes.count
         let area = node.extent.map { String(format: " (%.0f m2)", $0.areaSquareMeters) } ?? ""
         Log.capture.info("tagged \(node.kind.rawValue) \(node.label ?? "-")\(area)")
@@ -374,7 +554,7 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             Log.capture.info("room extent: no classified wall faces nearby (classification off?)")
             return nil
         }
-        guard let result = RoomExtractor.extract(seed: position, wallPoints: points, floorY: MeshExporter.floorHeight(anchors, near: position) ?? (position.y - eyeHeight)) else {
+        guard let result = RoomExtractor.extract(seed: position, wallPoints: points, floorY: position.y - eyeHeight) else {
             Log.capture.info("room extent: no enclosing walls found; falling back to a radius")
             return nil
         }
@@ -407,66 +587,85 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         isSaving = true
         // Snapshot the mesh now (before stop() pauses the session) for the 3D model export that follows the save.
         let meshAnchors = session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
-        let objSnapshot: MeshExporter.Snapshot?
-        do { objSnapshot = try MeshExporter.snapshot(meshAnchors) }
-        catch { objSnapshot = nil; Log.capture.error("OBJ snapshot failed: \(error.localizedDescription)") }
         let exportBox = scanBox
         session.getCurrentWorldMap { [weak self] worldMap, error in
             guard let self else { return }
-            DispatchQueue.main.async {
-                defer { self.isSaving = false }
-                guard self.isRunning else { return }
+            // The heavy part runs OFF the main thread. Archiving a tens-of-megabytes ARWorldMap and
+            // writing it to disk took many seconds on a big scan, and doing it on the main queue froze
+            // the whole UI meanwhile - which is also why the old fixed save deadline kept expiring: the
+            // timer could not even fire until the work it was timing had finished (device report
+            // 2026-10-18). Only the published results go back to the main queue.
+            DispatchQueue.global(qos: .userInitiated).async {
                 guard let worldMap else {
-                    self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.errorMessage = "Could not capture world map: \(error?.localizedDescription ?? "unknown")"
+                    }
                     return
                 }
                 do {
-                    let data = try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    // A hand-aligned extension records its nodes in the MAP frame but ARKit captured this
+                    // world map in the SESSION frame, and an ARWorldMap cannot be transformed. Saving it
+                    // would give `Relocalizer` a scan file whose frame disagrees with the nodes beside it,
+                    // and it takes the first segment that has one - so navigation would start offset from
+                    // the route (device report 2026-10-18). The new area therefore has no scan file of its
+                    // own; relocalization uses the original segment, whose frame IS the map frame.
+                    let data = self.alignedByHand
+                        ? nil
+                        : try NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true)
+                    if data == nil { Log.capture.info("hand-aligned extension: no world map saved for \(savedSegment)") }
                     // Merge against the latest local copy so a download arriving during capture
                     // cannot be erased by saving this older starting snapshot.
                     // saveLocalScan, not importBundle: a long scan's ARWorldMap can exceed the 50 MB SHARING limit and must still be saved on the phone.
                     let saved = try self.store.saveLocalScan(map: map, worldMap: data, segmentId: savedSegment)
-                    self.savedMap = saved
-                    if let snapshot = objSnapshot, !snapshot.triangles.isEmpty {
-                        self.exportWebMesh(snapshot, mapId: saved.id, segment: savedSegment)
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.savedMap = saved
+                        // Only a scan whose session frame IS the map frame may write the model: the
+                        // exporter writes vertices in the SESSION frame while `MeshAsset.coordinateFrame`
+                        // claims "map", and `modelURL(mapId:)` is ONE file per map - so a hand-aligned
+                        // extension both overwrote the whole building's model and put it in the wrong
+                        // place (device report 2026-10-18: the viewer showed only the new stairwell).
+                        // Keeping the existing model is the lesser wrong until the mesh is transformed
+                        // and stored per segment.
+                        self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id,
+                                         segmentId: savedSegment, worldToMap: self.worldToMap)
+                        self.stop()
+                        Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data?.count ?? 0) bytes")
                     }
-                    self.exportModel(anchors: meshAnchors, box: exportBox, mapId: saved.id)
-                    self.stop()
-                    Log.capture.info("saved map \(map.name) nodes=\(map.nodes.count) worldmap=\(data.count) bytes")
                 } catch {
-                    self.errorMessage = "Save failed: \(error.localizedDescription)"
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        guard self.isRunning else { return }
+                        self.errorMessage = "Save failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }
     }
 
-    /// A failed OBJ export never discards the local scan or its independent USDZ export.
-    private func exportWebMesh(_ snapshot: MeshExporter.Snapshot, mapId: UUID, segment: String) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            do {
-                let (asset, bytes) = try OBJEncoder.encode(vertices: snapshot.vertices, triangles: snapshot.triangles, segmentId: segment)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    do {
-                        var latest = try self.store.load(id: mapId)
-                        latest.meshAssets = (latest.meshAssets ?? []) + [asset]
-                        self.savedMap = try self.store.importBundle(MapBundle(map: latest, meshFiles: [asset.id.uuidString: bytes]))
-                        Log.capture.info("OBJ saved for web viewer: \(bytes.count) bytes")
-                    } catch { Log.capture.error("OBJ attachment failed: \(error.localizedDescription)") }
-                }
-            } catch { Log.capture.error("OBJ encoding failed: \(error.localizedDescription)") }
-        }
-    }
-
     /// Builds the 3D model (USDZ) next to the saved map on a background queue. A failure never affects the saved map.
-    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID) {
+    private func exportModel(anchors: [ARMeshAnchor], box: OrientedBox?, mapId: UUID,
+                            segmentId: String, worldToMap: simd_float4x4) {
         guard !anchors.isEmpty else { modelStatus = nil; return }
         modelStatus = "Building 3D model…"
-        let url = store.modelURL(mapId: mapId)
+        // This segment's OWN file, in the MAP frame. Writing one file per map meant an extension
+        // replaced the whole building with just the new part, and writing session-frame vertices put
+        // that part in the wrong place (device report 2026-10-18).
+        let url = store.modelURL(mapId: mapId, segmentId: segmentId)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let message: String
             do {
-                let report = try MeshExporter.export(anchors: anchors, box: box, to: url)
+                // The crop box is measured in the SESSION frame. Once the mesh is carried into the map
+                // frame the two no longer agree, and cropping with it would delete the whole mesh. A
+                // hand-aligned extension therefore exports UNCROPPED - a bigger file, but the geometry
+                // is there and in the right place. (Transforming the box is the better fix; it needs
+                // `OrientedBox` to gain a transform and is not worth doing mid-testing.)
+                let aligned = worldToMap != matrix_identity_float4x4
+                let report = try MeshExporter.export(anchors: anchors, box: aligned ? nil : box,
+                                                     to: url, worldToMap: worldToMap)
                 let size = ByteCountFormatter.string(fromByteCount: Int64(report.fileBytes), countStyle: .file)
                 message = "3D model saved (\(size), \(report.triangles.formatted()) triangles)"
                 Log.capture.info("model exported: \(report.fileBytes) bytes, \(report.triangles) triangles, cell=\(report.clusterCellSize.map { String($0) } ?? "none"), fits=\(report.fitsBudget)")
@@ -524,6 +723,12 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
             Log.capture.info("scan: \(trackingSummary) | mapping=\(mappingStatus.rawValue) | nodes=\(nodeCount) | meshAnchors=\(meshAnchorCount) | triangles=\(triangleCount) | box=\(box) | posture pitch=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).pitchDegrees)) roll=\(Int(PostureMonitor.reading(cameraTransform: frame.camera.transform).rollDegrees)) | fps=\(String(format: "%.0f", fps)) | fitMs=\(String(format: "%.1f", lastFitMs)) | overlay=\(showMeshOverlay) | gaps=\(gaps.map { String(format: "%.0f%% (%d open tiles, %d outline dashes)", $0.percent * 100, $0.tiles.count, $0.outline.count) } ?? "off") | paused=\(isPaused)")
         }
 
+        // Say, every frame, whether the saved area has been recognised yet. The banner used to be set
+        // ONCE when the extension started and never updated, so there was no way to tell "still looking"
+        // from "found it" - Anmol: "or if it does i just cant tell cuz nothing is said so idk"
+        // (2026-10-18). Without this the whole ARKit path is unobservable.
+        updateExtensionProgress(frame)
+
         // Only record while tracking is good, otherwise breadcrumbs would be placed wrongly.
         guard isRunning, savedMap == nil, !isSaving else { return }
         guard !isPaused else { if canRecord { canRecord = false }; return }
@@ -534,9 +739,48 @@ final class CaptureController: NSObject, ObservableObject, ARSessionDelegate {
         let ready = !isExtension || extensionAttached
         if canRecord != ready { canRecord = ready }
         guard canRecord, let builder else { return }
-        if builder.observe(position: Geometry.translation(of: frame.camera.transform)) != nil {
+        if builder.observe(position: mapPoint(Geometry.translation(of: frame.camera.transform))) != nil {
             nodeCount = builder.map.nodes.count
         }
+    }
+
+    /// Live progress while an extension is still looking for its place, and ONE automatic attempt to
+    /// attach the moment ARKit recognises the area - there is no reason to make the volunteer tap a
+    /// button for something the app can already tell has happened. If that attempt fails (they are
+    /// standing too far from a mapped corridor) its message says so and the button is there to retry.
+    private func updateExtensionProgress(_ frame: ARFrame) {
+        guard isExtension, !extensionAttached, isRunning, !isSaving, !alignedByHand,
+              confirmedPlaceCount == 0 else { return } // aligning by hand: that flow owns the message
+        let tracking = frame.camera.trackingState
+        let mapped = frame.worldMappingStatus == .mapped || frame.worldMappingStatus == .extending
+        let recognised: Bool = { if case .normal = tracking { return mapped } else { return false } }()
+
+        if recognised {
+            if !sawRecognised {
+                sawRecognised = true
+                Log.capture.info("extension: saved area recognised, attaching automatically")
+                beginExtension() // sets its own status, success or failure
+            }
+            return
+        }
+        sawRecognised = false
+        let text: String
+        switch tracking {
+        case .normal:
+            // Tracking is fine, so the hold-up is recognising the SAVED area, not the camera.
+            text = "Tracking is good, still recognising the saved area. Stand where you first started this scan and look around slowly."
+        case .limited(.relocalizing):
+            text = "Looking for the saved area. Hold still and pan slowly across what you scanned before."
+        case .limited(.initializing):
+            text = "Starting the camera..."
+        case .limited:
+            text = "Move slowly - the camera needs more detail to track."
+        case .notAvailable:
+            text = "Camera not ready yet."
+        @unknown default:
+            text = "Looking for the saved area."
+        }
+        if extensionStatus != text { extensionStatus = text }
     }
 
     /// Measures the mesh and refits the bounding box OFF the main thread. If the previous fit is still running this tick is skipped

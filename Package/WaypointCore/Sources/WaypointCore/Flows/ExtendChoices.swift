@@ -18,7 +18,22 @@ public struct ExtendOption: Equatable, Identifiable, Sendable {
     public var areaCount: Int
     public var id: String { "\(mapId.uuidString)/\(segmentId)" }
 
+    /// Breadcrumbs recorded in this area. A bigger area is easier for ARKit to recognise.
+    public var pointCount: Int = 0
+    /// Labelled places inside this area, so the volunteer can tell WHERE it is. "Scan area 2 of 2" told
+    /// them nothing, and picking the wrong one asks ARKit to recognise a part of the building they are
+    /// not standing in - which never succeeds, however long they wait (device report 2026-10-18).
+    public var placeNames: [String] = []
+
     public var areaTitle: String { areaCount > 1 ? "Scan area \(areaNumber) of \(areaCount)" : "Scanned area" }
+
+    /// What the area actually contains: the places in it, or failing that its size.
+    public var whereItIs: String {
+        placeNames.isEmpty ? "\(pointCount) points, nothing labelled" : placeNames.joined(separator: ", ")
+    }
+
+    /// The first area is the original scan; later ones were added by extending it.
+    public var isOriginal: Bool { areaNumber == 1 }
 }
 
 public enum ExtendChoices {
@@ -26,10 +41,17 @@ public enum ExtendChoices {
     public static func options(maps: [BuildingMap], hasWorldMap: (UUID, String) -> Bool) -> [ExtendOption] {
         maps.sorted { $0.name < $1.name }.flatMap { map -> [ExtendOption] in
             let segments = map.segmentIds
-            return segments.enumerated().compactMap { index, segment in
-                SegmentID.isValid(segment) && hasWorldMap(map.id, segment)
-                    ? ExtendOption(mapId: map.id, mapName: map.name, segmentId: segment, areaNumber: index + 1, areaCount: segments.count)
-                    : nil
+            return segments.enumerated().compactMap { index, segment -> ExtendOption? in
+                guard SegmentID.isValid(segment), hasWorldMap(map.id, segment) else { return nil }
+                let inSegment = map.nodes.filter { $0.segmentId == segment }
+                return ExtendOption(
+                    mapId: map.id, mapName: map.name, segmentId: segment,
+                    areaNumber: index + 1, areaCount: segments.count,
+                    pointCount: inSegment.count,
+                    placeNames: inSegment
+                        .compactMap { $0.label?.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                        .sorted())
             }
         }
     }

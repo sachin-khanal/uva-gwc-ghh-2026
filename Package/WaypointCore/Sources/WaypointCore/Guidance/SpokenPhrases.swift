@@ -157,6 +157,11 @@ public enum TurnSpeech {
         }
     }
 
+    /// Nothing ahead, and neither side is a usable way round (`AvoidanceAdvisor.isBoxedIn`). Backing up
+    /// retraces ground the user has just walked, which is the only direction we have evidence about.
+    /// Before this existed the user heard "Stop." and was given no way out at all (F-5, 2026-10-18).
+    public static let backUp = "Back up slowly."
+
     /// A suggestion to step aside, with the reason: "Slightly left, there is a wall ahead."
     /// A suggestion, never a command - see the safety note on `AvoidanceAdvisor`.
     public static func avoidance(side: Side, obstacle: ObstacleKind?) -> String? {

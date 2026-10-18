@@ -14,6 +14,13 @@
 import SwiftUI
 import WaypointCore
 
+/// `.sheet(item:)` needs something Identifiable; `NodeKind` is a plain enum used all over the model,
+/// so the conformance is kept local to this screen rather than bolted onto the shared type.
+private struct TaggingKind: Identifiable {
+    let kind: NodeKind
+    var id: String { kind.rawValue }
+}
+
 struct LiveScanScreen: View {
     @ObservedObject var model: ScanSessionModel
     let onSaved: (BuildingMap) -> Void
@@ -50,6 +57,17 @@ struct LiveScanScreen: View {
         .sensoryFeedback(.success, trigger: model.tagEvents)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.toast)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: panelExpanded)
+        // Stairs and lifts open a sheet instead of tagging straight away: which way they go and where
+        // the handrail is cannot be measured, and nothing else will ever supply them.
+        .sheet(item: Binding(get: { model.taggingStairs.map { TaggingKind(kind: $0) } },
+                             set: { if $0 == nil { model.taggingStairs = nil } })) { pending in
+            StairsSheet(kind: pending.kind,
+                        knownNames: model.snapshot.knownStairwellNames,
+                        onCancel: { model.taggingStairs = nil },
+                        onSave: { name, info in
+                            model.finishStairsTag(kind: pending.kind, name: name, info: info)
+                        })
+        }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .confirmationDialog("Discard this scan?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -145,6 +163,37 @@ struct LiveScanScreen: View {
                 // Extending a saved map: tell the volunteer what the scanner is waiting for. Recording and tagging are paused until it has found its place.
                 Banner(text: status, kind: s.canRecord ? .info : .warning)
             }
+            // Locating yourself BY HAND. ARKit often will not recognise a space from a new direction, and
+            // waiting for it is what blocked extending a map at all. A sighted volunteer can just look at a
+            // door they labelled. TWO places are needed: the first says where you are, the second which way
+            // you are turned (see ManualAlignment).
+            if !s.placesToStandAt.isEmpty, !s.canRecord {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text(s.confirmedPlaceCount == 0
+                         ? "Give it a few seconds first - finding the area itself is more accurate. Not working? Stand at a labelled place and tap it."
+                         : "Now walk to a different labelled place, at least \(Int(ManualAlignment.minSeparationMeters)) m away, and tap that one.")
+                        .font(.subheadline.weight(.medium))
+                        .accessibilityIdentifier("scan.extension.manualHint")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Theme.Space.s) {
+                            ForEach(s.placesToStandAt) { place in
+                                Button(place.id == s.confirmedPlaceId ? "\(place.label) ✓" : place.label) {
+                                    model.confirmPlace(place.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(place.id == s.confirmedPlaceId)
+                            }
+                        }
+                    }
+                    if s.confirmedPlaceCount > 0 {
+                        Button("Start over") { model.restartPlaceConfirmation() }
+                            .font(.footnote)
+                            .accessibilityIdentifier("scan.extension.startOver")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("scan.extension.places")
+            }
             if case .limited(let reason) = s.tracking {
                 Banner(text: "\(reason). Slow down and point at walls with detail.")
             }
@@ -228,7 +277,7 @@ struct LiveScanScreen: View {
 
         TagPalette(isEnabled: s.isRunning && !model.isPaused) { kind in
             labelFocused = false
-            model.tag(kind)
+            model.beginTag(kind)
         }
 
         if !s.tags.isEmpty {

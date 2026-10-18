@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "5A3E0000-0000-4000-8000-000000000001",
   "name": "SAMPLE - Fake Rice Hall corridor (hand-written, no real scan)",
   "version": 1,
@@ -129,7 +129,11 @@
         -15
       ],
       "segmentId": "seg1",
-      "createdBy": "sample"
+      "createdBy": "sample",
+      "stairs": {
+        "direction": "up",
+        "railings": "right"
+      }
     },
     {
       "id": "5A3E0000-0000-4000-8000-0000000000B4",
@@ -187,7 +191,5 @@
       "distance": 1.5,
       "hazard": "doorThreshold"
     }
-  ],
-  "schemaVersion": 3,
-  "meshAssets": []
+  ]
 }

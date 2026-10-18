@@ -771,4 +771,40 @@ final class LoopRoutingTests: XCTestCase {
         let map = BuildingMap(name: "straight", nodes: nodes, edges: edges)
         XCTAssertEqual(MapHealth.unclosedRevisits(map), 0)
     }
+
+    // MARK: Staircases must survive simplification (2026-10-18, Rice Hall rear stairs)
+
+    /// A switchback staircase rises while returning to almost the same x,z. Both simplifier passes
+    /// measure horizontally, so the whole flight used to collapse into one segment and the route jumped
+    /// from the bottom step to the top in a straight line - "straight up" through the floor.
+    func testASwitchbackStaircaseKeepsItsShape() {
+        var nodes: [MapNode] = [MapNode(kind: .corridor, position: [0, 0, 0])]
+        // Up the first flight: +y, small +x.
+        for i in 1...8 { nodes.append(MapNode(kind: .corridor, position: [Float(i) * 0.3, Float(i) * 0.17, 0])) }
+        // Landing, turn back on itself: same x,z region, still climbing.
+        for i in 1...8 { nodes.append(MapNode(kind: .corridor, position: [2.4 - Float(i) * 0.3, 1.36 + Float(i) * 0.17, 0.8])) }
+        nodes.append(MapNode(kind: .room, label: "Floor 2", position: [0, 2.9, 1.6]))
+
+        let simplified = RouteSimplifier.simplify(nodes)
+        let climbed = simplified.filter { $0.position.y > 0.05 && $0.position.y < 2.8 }
+        XCTAssertGreaterThan(climbed.count, 8, "the flight must keep its steps, not become one jump: \(simplified.count) of \(nodes.count)")
+        // ...and the route still ends where it should.
+        XCTAssertEqual(simplified.last?.label, "Floor 2")
+    }
+
+    /// A flat corridor is simplified exactly as before: the height rule must not stop ordinary thinning.
+    func testAFlatCorridorIsStillThinned() {
+        let nodes = (0...20).map { MapNode(kind: .corridor, position: [Float($0) * 0.5, 0, 0]) }
+        let simplified = RouteSimplifier.simplify(nodes)
+        XCTAssertLessThan(simplified.count, nodes.count / 2, "a straight corridor should collapse: \(simplified.count)")
+    }
+
+    /// Carrying the phone a little higher or lower along a flat corridor is not a climb.
+    func testPhoneHeightWobbleIsNotTreatedAsAClimb() {
+        let nodes = (0...20).map { i in
+            MapNode(kind: .corridor, position: [Float(i) * 0.5, (i % 2 == 0) ? 0.03 : -0.03, 0])
+        }
+        let simplified = RouteSimplifier.simplify(nodes)
+        XCTAssertLessThan(simplified.count, nodes.count / 2, "wobble must not protect every node: \(simplified.count)")
+    }
 }

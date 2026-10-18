@@ -37,6 +37,11 @@ public enum RouteSimplifier {
     /// How far the simplified path may sit from the original. Must stay well under a corridor width.
     public static let defaultTolerance: Float = 0.6
 
+    /// A step of this much between neighbouring breadcrumbs means the route is changing level, and
+    /// every node involved is kept. Well above the height wobble of a phone carried along a flat
+    /// corridor, well below a single stair tread (~0.17 m), so a staircase keeps all of its shape.
+    public static let verticalKeepMeters: Float = 0.1
+
     /// - Parameter protected: extra node ids that must survive, whatever their shape contributes.
     ///   `Router` passes the endpoints of every hazard edge so a stairs warning can never be thinned away.
     public static func simplify(
@@ -46,8 +51,24 @@ public enum RouteSimplifier {
         tolerance: Float = defaultTolerance
     ) -> [MapNode] {
         guard route.count > 2 else { return route }
+        // A node that CLIMBS or DESCENDS must survive, whatever its shape contributes in plan view.
+        // Both passes measure horizontally (`perpendicularDistance` drops y, which is right for a
+        // corridor: you are not off-route for holding the phone higher). A staircase is the case where
+        // that is catastrophic - a switchback rises three metres while returning to almost the same
+        // x,z, so the whole flight looked like one cluster, was thinned away, and the route jumped from
+        // the bottom step to the top in a straight line: "straight up" through the floor
+        // (device report 2026-10-18, Rice Hall rear stairs).
+        var climbs: Set<UUID> = []
+        for (i, node) in route.enumerated() {
+            let before = i > 0 ? route[i - 1] : nil
+            let after = i + 1 < route.count ? route[i + 1] : nil
+            let rise = max(before.map { abs(node.position.y - $0.position.y) } ?? 0,
+                           after.map { abs(node.position.y - $0.position.y) } ?? 0)
+            if rise >= verticalKeepMeters { climbs.insert(node.id) }
+        }
         let keep: (MapNode) -> Bool = { node in
-            node.kind != .corridor || node.label != nil || protected.contains(node.id)
+            node.kind != .corridor || node.label != nil
+                || protected.contains(node.id) || climbs.contains(node.id)
         }
         return thin(removeDetours(route, shortcutRadius: shortcutRadius, keep: keep),
                     tolerance: tolerance, keep: keep)

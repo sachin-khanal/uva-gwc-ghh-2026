@@ -14,7 +14,8 @@ import WaypointCore
 
 struct ModelViewerView: View {
     let map: BuildingMap
-    let url: URL
+    /// One file per scan SEGMENT: an extension adds to the building rather than replacing it.
+    let urls: [URL]
     let onClose: () -> Void
 
     @State private var showPins = true
@@ -37,7 +38,7 @@ struct ModelViewerView: View {
                 Text(loadError).foregroundStyle(.red).padding()
                 Spacer()
             } else {
-                SceneKitModelView(url: url, map: map, showPins: showPins, onLoaded: { triangleCount = $0 }, onError: { loadError = $0 })
+                SceneKitModelView(urls: urls, map: map, showPins: showPins, onLoaded: { triangleCount = $0 }, onError: { loadError = $0 })
                     .accessibilityHidden(true)
                     .accessibilityIdentifier("model.view")
                 Toggle("Show places", isOn: $showPins)
@@ -53,15 +54,19 @@ struct ModelViewerView: View {
     private var subtitle: String {
         var parts = [map.name]
         if let n = triangleCount { parts.append("\(n.formatted()) triangles") }
-        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int {
-            parts.append(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+        // Every part of the building together, not just the first file.
+        let bytes = urls.reduce(0) { total, u in
+            total + (((try? FileManager.default.attributesOfItem(atPath: u.path)[.size]) as? Int) ?? 0)
+        }
+        if bytes > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
         }
         return parts.joined(separator: " · ")
     }
 }
 
 private struct SceneKitModelView: UIViewRepresentable {
-    let url: URL
+    let urls: [URL]
     let map: BuildingMap
     let showPins: Bool
     let onLoaded: (Int) -> Void
@@ -78,9 +83,21 @@ private struct SceneKitModelView: UIViewRepresentable {
         view.autoenablesDefaultLighting = true
         view.antialiasingMode = .multisampling4X
 
-        let scene: SCNScene
-        do { scene = try SCNScene(url: url, options: nil) } catch {
-            DispatchQueue.main.async { onError("Could not open the 3D model: \(error.localizedDescription)") }
+        // Every segment's model in one scene. A building scanned in several passes has one file per
+        // pass, and they share the MAP frame, so simply adding them lines them up (2026-10-18).
+        let scene = SCNScene()
+        var loaded = 0
+        for modelURL in urls {
+            do {
+                let part = try SCNScene(url: modelURL, options: nil)
+                for child in part.rootNode.childNodes { scene.rootNode.addChildNode(child) }
+                loaded += 1
+            } catch {
+                Log.app.error("3D model part failed to open: \(modelURL.lastPathComponent) \(error.localizedDescription)")
+            }
+        }
+        guard loaded > 0 else {
+            DispatchQueue.main.async { onError("Could not open the 3D model.") }
             return view
         }
         view.scene = scene

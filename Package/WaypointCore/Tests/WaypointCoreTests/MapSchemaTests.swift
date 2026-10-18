@@ -31,7 +31,9 @@ final class MapSchemaTests: XCTestCase {
 
     func testFormat3FixtureCarriesRoomExtent() throws {
         let map = try BuildingMap.from(jsonData: try fixture("map-v3.json"))
-        XCTAssertEqual(map.schemaVersion, 3)
+        // Migrated on the way in, like every older fixture: the v3 SHAPE is still readable, and what
+        // comes out is the current format. Asserting a frozen 3 here just pinned the old version.
+        XCTAssertEqual(map.schemaVersion, MapSchema.current)
         XCTAssertEqual(map.nodes.compactMap(\.extent).count, 1)
         XCTAssertEqual(try BuildingMap.from(jsonData: map.jsonData()), map) // extent round-trips
     }

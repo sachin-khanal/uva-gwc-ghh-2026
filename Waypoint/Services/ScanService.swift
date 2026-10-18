@@ -19,6 +19,13 @@ struct ScanTag: Identifiable, Equatable {
     var hasLabel: Bool { !(label ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
+/// A place already labelled in the map being EXTENDED, that the volunteer can say they are standing at.
+/// Carries no position: the screen only needs to show a name and send the id back.
+struct StandPlace: Identifiable, Equatable {
+    let id: UUID
+    var label: String
+}
+
 /// Everything the scanning screen shows, as one value.
 struct ScanSnapshot: Equatable {
     var isRunning = false
@@ -46,6 +53,16 @@ struct ScanSnapshot: Equatable {
     var extensionStatus: String?
     /// False while an extension is still finding its place in the saved area (recording and tagging are paused).
     var canRecord = true
+    /// Stairwell / lift names already used in this map, offered when tagging another one so the two ends
+    /// of one staircase end up with the SAME name (that is how floors are matched).
+    var knownStairwellNames: [String] = []
+    /// Extending a saved map: the labelled places the volunteer can confirm standing at, so they can locate
+    /// themselves BY HAND instead of waiting for ARKit to recognise the space. Empty for a new scan.
+    var placesToStandAt: [StandPlace] = []
+    /// How many of those have been confirmed (0 or 1). Two solves the alignment and attaches.
+    var confirmedPlaceCount = 0
+    /// The place already confirmed, so the screen can tick it and stop it being tapped twice.
+    var confirmedPlaceId: UUID?
 
     var labelledTagCount: Int { tags.filter(\.hasLabel).count }
     var finishGate: FinishGate { FinishGate.evaluate(quality: quality, labelledTagCount: labelledTagCount,
@@ -74,6 +91,22 @@ protocol ScanService: AnyObject {
     var coverageOverlay: CoverageSnapshot? { get }
     func setShowCoverage(_ on: Bool)
     func tag(kind: NodeKind, label: String?)
+    /// Tag a staircase or lift, with what the volunteer could see: which way it goes, where the handrail
+    /// is, roughly how many steps. ARKit's mesh classification has no railing class, so this is the only
+    /// source for any of it. No default implementation on purpose - see `confirmPlace`.
+    func tagStairs(kind: NodeKind, label: String?, info: StairsInfo)
+    /// "I am standing at this labelled place" while extending a map. Two of them, a few metres apart, locate
+    /// the phone in the saved map without ARKit having to recognise the space. Only the live engine can act
+    /// on it; the mock implements it as a no-op EXPLICITLY.
+    ///
+    /// Deliberately has NO default implementation in the extension below. A no-op default here silently
+    /// swallowed a real bug: `LiveScanService`'s version was accidentally nested inside another method, so
+    /// it was not the protocol witness, the default ran instead, and tapping a place did nothing at all -
+    /// with no compiler complaint (device report 2026-10-18). Requiring every conformer to say what it does
+    /// turns that class of mistake back into a build error.
+    func confirmPlace(id: UUID)
+    /// Forget the places confirmed so far. There is always a way out of a refused alignment.
+    func restartPlaceConfirmation()
     func dismissSuggestion()
     func adjustBox(by delta: Float)
     /// Saves the map; completion on the main thread.

@@ -219,12 +219,37 @@ public final class MapStore {
     // MARK: 3D model (derived from the scan mesh)
 
     /// The exported 3D model of a scan (USDZ), written next to the map when a scan is saved. Not part of bundles or sync yet.
+    /// One model file PER SEGMENT. It used to be one per map, so extending a building overwrote the
+    /// whole thing with just the new part - the viewer showed a lone stairwell instead of the floor
+    /// (device report 2026-10-18). The original scan keeps the unsuffixed name so existing files on
+    /// phones still load.
+    public func modelURL(mapId: UUID, segmentId: String) -> URL {
+        directory(for: mapId).appendingPathComponent("model-\(segmentId).usdz")
+    }
+
+    /// Every model file this map has, oldest segment first. Empty when none has been exported.
+    public func modelURLs(mapId: UUID, segmentIds: [String]) -> [URL] {
+        var urls: [URL] = []
+        let legacy = modelURL(mapId: mapId)
+        if fm.fileExists(atPath: legacy.path) { urls.append(legacy) }
+        for segment in segmentIds where SegmentID.isValid(segment) {
+            let url = modelURL(mapId: mapId, segmentId: segment)
+            if fm.fileExists(atPath: url.path) { urls.append(url) }
+        }
+        return urls
+    }
+
     public func modelURL(mapId: UUID) -> URL {
         directory(for: mapId).appendingPathComponent("model.usdz")
     }
 
     public func hasModel(mapId: UUID) -> Bool {
         fm.fileExists(atPath: modelURL(mapId: mapId).path)
+    }
+
+    /// Any model file at all, including per-segment ones from an extension.
+    public func hasModel(mapId: UUID, segmentIds: [String]) -> Bool {
+        !modelURLs(mapId: mapId, segmentIds: segmentIds).isEmpty
     }
 
     // MARK: Route memory (derived cache, never shared)
