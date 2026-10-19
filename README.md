@@ -1,6 +1,7 @@
 # uva-gwc-ghh-2026
 
-Girls Hoo Hack 2026
+Girls Who Code @ UVA 
+Girls Hoo Hack 2026 (Won Best Overall)
 
 # Waypoint — indoor navigation for blind users
 
